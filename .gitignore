@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Don't ship anyone's actual sprint data with the template
+docs/sprints/0-backlog/*
+docs/sprints/1-todo/*
+docs/sprints/2-in-progress/*
+docs/sprints/3-done/*
+docs/sprints/4-blocked/*
+docs/sprints/5-abandoned/*
+docs/sprints/state/*
+!docs/sprints/*/.gitkeep
