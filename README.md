@@ -1,5 +1,7 @@
 # Fully Completely
 
+[![Scan and smoke test](https://github.com/chrishobbsrocks/fully-completely/actions/workflows/scan.yml/badge.svg)](https://github.com/chrishobbsrocks/fully-completely/actions/workflows/scan.yml)
+
 Your six-role sprint workflow (Master Controller, Dev Team 1, Dev Team 2,
 QA1, Pipeman, GroundTruth), with the enforcement mechanics borrowed from
 Maestro: a state file per sprint, slash commands as the only way to move
@@ -96,6 +98,14 @@ Claude substitute free text into a bash command string and run it. If
 that free text (a sprint title, QA notes, an abort reason) contains a
 `"` or `;` or a backtick, it can break out of the intended argument and
 run something else entirely, this was verified, not theoretical.
+
+All of this now runs automatically on every push and pull request via
+`.github/workflows/scan.yml`: bandit, pyflakes, and
+`scripts/smoke_test.sh`, a full lifecycle run including both fail-loops,
+the two-gate close refusal, and a regression check that the exact
+injection payload above stays inert. It runs on Python 3.9 and 3.12
+both, so a future change that reintroduces a 3.10-only type hint gets
+caught too.
 
 The fix: every command that takes free text supports a `--*-file`
 variant (`--title-file`, `--epic-file`, `--notes-file`,

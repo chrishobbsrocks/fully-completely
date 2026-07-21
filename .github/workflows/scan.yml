@@ -1,0 +1,34 @@
+name: Scan and smoke test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  scan-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install analysis tools
+        run: pip install bandit pyflakes
+
+      - name: pyflakes (static bugs, unused imports, etc.)
+        run: python3 -m pyflakes scripts/sprint_lifecycle.py
+
+      - name: bandit (security scan)
+        run: python3 -m bandit -r scripts/
+
+      - name: Sprint lifecycle smoke test
+        run: bash scripts/smoke_test.sh
