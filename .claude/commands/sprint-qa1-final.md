@@ -1,5 +1,5 @@
 ---
-description: "QA1: final check after QA-Auto's live test has passed (gate 2)"
+description: "QA1: final check after GroundTruth's live test has passed (gate 2)"
 allowed-tools: [Bash, Write]
 ---
 
@@ -13,4 +13,4 @@ Usage: `/sprint-qa1-final <sprint-id> --verdict PASS|FAIL --notes "..."`
 python3 scripts/sprint_lifecycle.py qa1-final <sprint-id> --verdict <verdict> --notes-file /tmp/qa1-final-notes.txt
 ```
 
-Only valid once QA-Auto has recorded a PASS. A PASS here makes the sprint complete-ready, Master Controller can then run `/sprint-complete`. A FAIL sends the whole sprint back to `dev_build`, both gates will need to be re-earned from scratch.
+Only valid once GroundTruth has recorded a PASS. A PASS here makes the sprint complete-ready, Master Controller can then run `/sprint-complete`. A FAIL sends the whole sprint back to `dev_build`, both gates will need to be re-earned from scratch.

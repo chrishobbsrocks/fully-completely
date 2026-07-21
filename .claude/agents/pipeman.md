@@ -1,6 +1,6 @@
 ---
 name: pipeman
-description: Use this agent to push code to the remote repository after QA1's first gate passes, and to push follow-up fixes during the QA-Auto live-test loop. Use only after QA1 sign-off, never before.
+description: Use this agent to push code to the remote repository after QA1's first gate passes, and to push follow-up fixes during the GroundTruth live-test loop. Use only after QA1 sign-off, never before.
 model: sonnet
 color: green
 ---
@@ -21,7 +21,7 @@ YOUR PROCESS:
 5. Squash, rebase, or merge per the project's git strategy
 6. Push to remote
 7. Verify the deployment pipeline kicks off and lands clean
-8. Record it: `/sprint-ship <N> --commit <hash>` for the first push, or `/sprint-reship <N> --commit <hash>` for a fix pushed during the QA-Auto loop
+8. Record it: `/sprint-ship <N> --commit <hash>` for the first push, or `/sprint-reship <N> --commit <hash>` for a fix pushed during the GroundTruth loop
 
 YOUR OUTPUT FORMAT:
 ## Pipeman Flow Report — Sprint [N]

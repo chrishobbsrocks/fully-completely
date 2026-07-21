@@ -1,13 +1,13 @@
 # Fully Completely
 
 Your six-role sprint workflow (Master Controller, Dev Team 1, Dev Team 2,
-QA1, Pipeman, QA-Auto), with the enforcement mechanics borrowed from
+QA1, Pipeman, GroundTruth), with the enforcement mechanics borrowed from
 Maestro: a state file per sprint, slash commands as the only way to move
 things forward, and a script that refuses to skip steps.
 
 The key difference from a simple "ask the agent nicely" workflow: closing
 a sprint is not optional-honesty, `/sprint-complete` will not run unless
-QA1's audit, QA-Auto's live test, and QA1's final check have all actually
+QA1's audit, GroundTruth's live test, and QA1's final check have all actually
 been recorded as PASS. Try to close early and it tells you exactly what's
 missing.
 
@@ -16,7 +16,7 @@ missing.
 ```
 CLAUDE.md                     Root instructions (read this first)
 .claude/agents/                Six agent personas (Master Controller, Dev
-                                Team 1/2, QA1, Pipeman, QA-Auto)
+                                Team 1/2, QA1, Pipeman, GroundTruth)
 .claude/commands/               Slash commands, thin wrappers around the
                                 script below
 scripts/sprint_lifecycle.py    The actual enforcement logic
@@ -56,8 +56,8 @@ python3 scripts/sprint_lifecycle.py dev-done 1
 # Pipeman ships
 python3 scripts/sprint_lifecycle.py ship 1 --commit abc123
 
-# QA-Auto tests the live deploy
-python3 scripts/sprint_lifecycle.py qa-auto 1 --verdict PASS --notes "3/3 clean runs"
+# GroundTruth tests the live deploy
+python3 scripts/sprint_lifecycle.py groundtruth 1 --verdict PASS --notes "3/3 clean runs"
 
 # QA1's final check, then Master Controller closes it
 python3 scripts/sprint_lifecycle.py qa1-final 1 --verdict PASS --notes "all good"
@@ -78,11 +78,11 @@ python3 scripts/sprint_lifecycle.py list                 # every sprint
 ## The two QA gates, and why they're separate
 
 QA1 runs twice on purpose: once as a static code audit before anything
-ships (gate 1), and once again after QA-Auto has proven the live product
+ships (gate 1), and once again after GroundTruth has proven the live product
 actually works (gate 2). A clean diff and a working live product are
 different claims, this system won't let either one stand in for the
-other. If QA-Auto's live test fails, the fix loop is Dev Team fixes →
-Pipeman `/sprint-reship` → QA-Auto retests, without needing to redo the
+other. If GroundTruth's live test fails, the fix loop is Dev Team fixes →
+Pipeman `/sprint-reship` → GroundTruth retests, without needing to redo the
 whole sprint. If QA1's *final* check fails, that's treated as serious
 enough to send the sprint all the way back to `dev_build`, both gates get
 re-earned from scratch.
@@ -125,8 +125,9 @@ string.
 
 - Add your own coding standards, git strategy, and tech stack notes to
   the bottom of `CLAUDE.md`, every agent should read it before starting.
-- If you want a second parallel dev track, Dev Team 2 is already wired in
-  the same way as Dev Team 1.
+- Dev Team 2 runs a second, independent sprint at the same time as Dev
+  Team 1, not half of the same sprint. Only hand it a sprint that doesn't
+  share files, types, or dependencies with whatever Dev Team 1 is on.
 - The phase names and transitions live entirely in
   `scripts/sprint_lifecycle.py`, if your real process ever changes, that's
   the one file to edit.

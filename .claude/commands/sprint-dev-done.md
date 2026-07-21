@@ -9,4 +9,4 @@ allowed-tools: [Bash]
 python3 scripts/sprint_lifecycle.py dev-done $ARGUMENTS
 ```
 
-This only succeeds if QA1's first audit already returned PASS. It marks the coding as agreed done and hands off to Pipeman for `/sprint-ship`, it does not close the sprint. The sprint is only complete once QA-Auto and QA1's final check both pass, see `/sprint-complete`.
+This only succeeds if QA1's first audit already returned PASS. It marks the coding as agreed done and hands off to Pipeman for `/sprint-ship`, it does not close the sprint. The sprint is only complete once GroundTruth and QA1's final check both pass, see `/sprint-complete`.

@@ -15,10 +15,10 @@ Phases (in order, with the two loops):
   dev_agreed_done  -> Dev Team has told Master Controller the coding
                        side is done. NOT the same as sprint complete.
   shipped          -> Pipeman has pushed to remote.
-  qa_auto_live     -> QA-Auto is live-testing. FAIL/CONDITIONAL means
-                       fixes + a reship, then QA-Auto tests again.
+  groundtruth_live     -> GroundTruth is live-testing. FAIL/CONDITIONAL means
+                       fixes + a reship, then GroundTruth tests again.
   qa1_final        -> QA1's final check (gate 2), only reachable once
-                       qa_auto_live has a recorded PASS.
+                       groundtruth_live has a recorded PASS.
   complete_ready   -> Both gates have passed. Waiting on Master
                        Controller to actually close the sprint.
   complete         -> Closed. Sprint file moved to 3-done/.
@@ -217,7 +217,7 @@ def cmd_start(args) -> None:
         "title": entry["title"],
         "phase": "dev_build",
         "qa1_audit_result": None,
-        "qa_auto_live_result": None,
+        "groundtruth_result": None,
         "qa1_final_result": None,
         "audit_rounds": 0,
         "live_test_rounds": 0,
@@ -245,7 +245,7 @@ def cmd_status(args) -> None:
     print(f"Sprint {state['id']}: {state['title']}")
     print(f"Phase: {state['phase']}")
     print(f"QA1 audit result: {state['qa1_audit_result']} (rounds: {state['audit_rounds']})")
-    print(f"QA-Auto live result: {state['qa_auto_live_result']} (rounds: {state['live_test_rounds']})")
+    print(f"GroundTruth live result: {state['groundtruth_result']} (rounds: {state['live_test_rounds']})")
     print(f"QA1 final result: {state['qa1_final_result']}")
     if args.verbose:
         print("\nHistory:")
@@ -296,42 +296,42 @@ def cmd_ship(args) -> None:
     if state["phase"] != "dev_agreed_done":
         die(f"Sprint {args.id} is in phase '{state['phase']}', Pipeman can't ship yet, "
             "dev work must be agreed done first.")
-    state["phase"] = "qa_auto_live"
+    state["phase"] = "groundtruth_live"
     log_event(state, "pipeman", "shipped", f"commit={args.commit or ''}")
     save_state(args.id, state)
-    print(f"Sprint {args.id}: shipped (commit {args.commit or '?'}). Phase: qa_auto_live.")
-    print("QA-Auto: run /sprint-qa-auto once you've live-tested the deploy.")
+    print(f"Sprint {args.id}: shipped (commit {args.commit or '?'}). Phase: groundtruth_live.")
+    print("GroundTruth: run /sprint-groundtruth once you've live-tested the deploy.")
 
 
 def cmd_reship(args) -> None:
     state = load_state(args.id)
-    if state["phase"] != "qa_auto_live":
+    if state["phase"] != "groundtruth_live":
         die(f"Sprint {args.id} is in phase '{state['phase']}', reship only applies during "
-            "the QA-Auto live-test fix loop.")
+            "the GroundTruth live-test fix loop.")
     log_event(state, "pipeman", "reshipped", f"commit={args.commit or ''}")
     save_state(args.id, state)
     print(f"Sprint {args.id}: fix reshipped (commit {args.commit or '?'}). "
-          "QA-Auto: re-test and run /sprint-qa-auto again.")
+          "GroundTruth: re-test and run /sprint-groundtruth again.")
 
 
-def cmd_qa_auto(args) -> None:
+def cmd_groundtruth(args) -> None:
     state = load_state(args.id)
-    if state["phase"] != "qa_auto_live":
-        die(f"Sprint {args.id} is in phase '{state['phase']}', not ready for a QA-Auto live test.")
+    if state["phase"] != "groundtruth_live":
+        die(f"Sprint {args.id} is in phase '{state['phase']}', not ready for a GroundTruth live test.")
     verdict = args.verdict.upper()
     if verdict not in VALID_VERDICTS:
         die(f"Verdict must be one of {sorted(VALID_VERDICTS)}.")
 
     notes = resolve_text(args.notes, args.notes_file)
-    state["qa_auto_live_result"] = verdict
+    state["groundtruth_result"] = verdict
     state["live_test_rounds"] += 1
-    log_event(state, "qa-auto", "live_test", f"{verdict}: {notes}")
+    log_event(state, "groundtruth", "live_test", f"{verdict}: {notes}")
 
     if verdict == "PASS":
-        print(f"QA-Auto live test PASSED (round {state['live_test_rounds']}).")
+        print(f"GroundTruth live test PASSED (round {state['live_test_rounds']}).")
         print("QA1: run /sprint-qa1-final for the second gate.")
     else:
-        print(f"QA-Auto live test {verdict} (round {state['live_test_rounds']}). "
+        print(f"GroundTruth live test {verdict} (round {state['live_test_rounds']}). "
               "Dev Team: fix, then Pipeman: /sprint-reship.")
 
     save_state(args.id, state)
@@ -339,9 +339,9 @@ def cmd_qa_auto(args) -> None:
 
 def cmd_qa1_final(args) -> None:
     state = load_state(args.id)
-    if state["phase"] != "qa_auto_live" or state["qa_auto_live_result"] != "PASS":
-        die(f"Sprint {args.id} needs a QA-Auto PASS before QA1's final check. "
-            f"Current phase: {state['phase']}, QA-Auto result: {state['qa_auto_live_result']}.")
+    if state["phase"] != "groundtruth_live" or state["groundtruth_result"] != "PASS":
+        die(f"Sprint {args.id} needs a GroundTruth PASS before QA1's final check. "
+            f"Current phase: {state['phase']}, GroundTruth result: {state['groundtruth_result']}.")
     verdict = args.verdict.upper()
     if verdict not in {"PASS", "FAIL"}:
         die("Final verdict must be PASS or FAIL.")
@@ -357,7 +357,7 @@ def cmd_qa1_final(args) -> None:
     else:
         state["phase"] = "dev_build"
         state["qa1_audit_result"] = None
-        state["qa_auto_live_result"] = None
+        state["groundtruth_result"] = None
         print(f"QA1 final check FAILED. Sprint {args.id} sent back to dev_build, "
               "both gates will need to be re-earned.")
 
@@ -369,8 +369,8 @@ def cmd_complete(args) -> None:
     missing = []
     if state["qa1_audit_result"] != "PASS":
         missing.append("QA1 first audit has not passed")
-    if state["qa_auto_live_result"] != "PASS":
-        missing.append("QA-Auto live test has not passed")
+    if state["groundtruth_result"] != "PASS":
+        missing.append("GroundTruth live test has not passed")
     if state["qa1_final_result"] != "PASS":
         missing.append("QA1 final check has not passed")
     if state["phase"] != "complete_ready" or missing:
@@ -393,7 +393,7 @@ def cmd_complete(args) -> None:
     state["completed"] = now()
     log_event(state, "master-controller", "sprint_closed")
     save_state(args.id, state)
-    print(f"Sprint {args.id} closed. Both gates confirmed: QA1 audit, QA-Auto live test, QA1 final.")
+    print(f"Sprint {args.id} closed. Both gates confirmed: QA1 audit, GroundTruth live test, QA1 final.")
 
 
 def cmd_abort(args) -> None:
@@ -456,11 +456,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("reship"); s.add_argument("id", type=int); s.add_argument("--commit", default=""); s.set_defaults(func=cmd_reship)
 
-    s = sub.add_parser("qa-auto")
+    s = sub.add_parser("groundtruth")
     s.add_argument("id", type=int); s.add_argument("--verdict", required=True)
     s.add_argument("--notes", default="")
     s.add_argument("--notes-file", help="Read notes from this file instead of the command line.")
-    s.set_defaults(func=cmd_qa_auto)
+    s.set_defaults(func=cmd_groundtruth)
 
     s = sub.add_parser("qa1-final")
     s.add_argument("id", type=int); s.add_argument("--verdict", required=True)

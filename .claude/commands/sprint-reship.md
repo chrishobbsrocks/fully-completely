@@ -1,5 +1,5 @@
 ---
-description: "Pipeman: push a fix during the QA-Auto live-test loop"
+description: "Pipeman: push a fix during the GroundTruth live-test loop"
 allowed-tools: [Bash]
 ---
 
@@ -11,4 +11,4 @@ Usage: `/sprint-reship <sprint-id> --commit <hash>`
 python3 scripts/sprint_lifecycle.py reship $ARGUMENTS
 ```
 
-Use this when QA-Auto found a live issue and Dev Team has fixed it. This does not change the sprint's phase, it just logs the new commit, QA-Auto should re-test and run `/sprint-qa-auto` again.
+Use this when GroundTruth found a live issue and Dev Team has fixed it. This does not change the sprint's phase, it just logs the new commit, GroundTruth should re-test and run `/sprint-groundtruth` again.
