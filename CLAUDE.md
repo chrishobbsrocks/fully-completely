@@ -6,6 +6,15 @@ sprint forward. Never edit `docs/sprints/registry.json` or anything in
 `docs/sprints/state/` by hand, and never move sprint files between folders
 yourself, the script owns that.
 
+**Only Pipeman ever runs `git push`, no exceptions, ever.** This holds
+regardless of which command you're running or which role's session is
+active. In particular, running `/sprint-complete` never involves a push,
+it only updates bookkeeping, if you're in Dev Team 1 or Dev Team 2's
+session when a sprint wraps up (the common case), do not push as a
+"finishing touch" just because you're the one closing it out. Commit
+locally if needed, then hand off to Pipeman via `/sprint-ship` or
+`/sprint-reship`.
+
 ## The team
 
 | Role | Agent file | Model | Job |
