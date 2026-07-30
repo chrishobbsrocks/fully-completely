@@ -17,14 +17,16 @@ locally if needed, then hand off to Pipeman via `/sprint-ship` or
 
 ## The team
 
-| Role | Agent file | Model | Job |
-|---|---|---|---|
-| Master Controller | `.claude/agents/master-controller.md` | opus | Plans sprints, closes them once both gates pass |
-| Dev Team 1 | `.claude/agents/dev-team-1.md` | sonnet | Builds, tests, fixes |
-| Dev Team 2 | `.claude/agents/dev-team-2.md` | sonnet | Runs a separate, independent sprint in parallel |
-| QA1 | `.claude/agents/qa1.md` | opus | Static code audit (gate 1) AND final check (gate 2) |
-| Pipeman | `.claude/agents/pipeman.md` | sonnet | Only one who pushes to remote |
-| GroundTruth | `.claude/agents/groundtruth.md` | opus | Live browser testing after every push |
+| Role | Shorthand | Agent file | Model | Job |
+|---|---|---|---|---|
+| Master Controller | MC | `.claude/agents/master-controller.md` | opus | Plans sprints, closes them once both gates pass |
+| Dev Team 1 | Dev1 | `.claude/agents/dev-team-1.md` | sonnet | Builds, tests, fixes |
+| Dev Team 2 | Dev2 | `.claude/agents/dev-team-2.md` | sonnet | Runs a separate, independent sprint in parallel |
+| QA1 | QA1 | `.claude/agents/qa1.md` | opus | Static code audit (gate 1) AND final check (gate 2) |
+| Pipeman | PM | `.claude/agents/pipeman.md` | sonnet | Only one who pushes to remote |
+| GroundTruth | GT | `.claude/agents/groundtruth.md` | opus | Live browser testing after every push |
+
+Shorthand is for conversation only, never for file names or commands.
 
 Run each role as its own Claude Code session (a separate terminal tab is the
 simplest setup), pasting the relevant agent file as the system prompt, or

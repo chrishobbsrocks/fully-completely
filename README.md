@@ -3,8 +3,8 @@
 [![Scan and smoke test](https://github.com/chrishobbsrocks/fully-completely/actions/workflows/scan.yml/badge.svg)](https://github.com/chrishobbsrocks/fully-completely/actions/workflows/scan.yml)
 
 Your six-role sprint workflow (Master Controller, Dev Team 1, Dev Team 2,
-QA1, Pipeman, GroundTruth), with the enforcement mechanics borrowed from
-Maestro: a state file per sprint, slash commands as the only way to move
+QA1, Pipeman, GroundTruth), with enforcement mechanics built to make it
+stick: a state file per sprint, slash commands as the only way to move
 things forward, and a script that refuses to skip steps.
 
 The key difference from a simple "ask the agent nicely" workflow: closing
