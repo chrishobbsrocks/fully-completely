@@ -2,23 +2,35 @@
 # Smoke test for the sprint lifecycle script: exercises the full happy path,
 # both fail-loops, the two-gate refusal, and the standard edge cases (bad
 # verdict, skipping a phase, closing early, empty title). Exits non-zero on
-# the first unexpected result. Safe to run repeatedly, cleans up after
-# itself.
+# the first unexpected result.
+#
+# Runs entirely inside a throwaway sandbox directory (mktemp -d), never
+# against this repo's own docs/sprints/. Note that just `cd`-ing elsewhere
+# before invoking the real script would NOT be enough: sprint_lifecycle.py
+# resolves ROOT from Path(__file__).resolve().parent.parent, i.e. from
+# where the *script file* lives, not the caller's working directory. So
+# this test copies the script (and the sprint template) into the sandbox
+# and runs that copy, which makes ROOT resolve inside the sandbox instead.
+# This is not a style preference: a version of this file that rm -rf'd
+# docs/sprints/ directly against the invoking repo has already destroyed a
+# real downstream project's sprint history twice. Do not "simplify" this
+# back to operating on whatever repo you happen to be standing in.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-SCRIPT="python3 scripts/sprint_lifecycle.py"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-cleanup() {
-  rm -rf docs/sprints/1-todo/* docs/sprints/2-in-progress/* docs/sprints/3-done/* \
-         docs/sprints/4-blocked/* docs/sprints/5-abandoned/* docs/sprints/state/* \
-         docs/sprints/registry.json
-  for d in 0-backlog 1-todo 2-in-progress 3-done 4-blocked 5-abandoned state; do
-    touch "docs/sprints/$d/.gitkeep"
-  done
-}
+SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/fully-completely-smoke.XXXXXX")"
+cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
-cleanup
+
+mkdir -p "$SANDBOX/scripts" "$SANDBOX/templates"
+cp "$REPO_ROOT/scripts/sprint_lifecycle.py" "$SANDBOX/scripts/sprint_lifecycle.py"
+if [ -f "$REPO_ROOT/templates/sprint-template.md" ]; then
+  cp "$REPO_ROOT/templates/sprint-template.md" "$SANDBOX/templates/sprint-template.md"
+fi
+
+cd "$SANDBOX"
+SCRIPT="python3 scripts/sprint_lifecycle.py"
 
 fail() { echo "SMOKE TEST FAILED: $1" >&2; exit 1; }
 
