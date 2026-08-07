@@ -13,4 +13,4 @@ Usage: `/sprint-qa1 <sprint-id> --verdict PASS|FAIL|CONDITIONAL --notes "..."`
 python3 scripts/sprint_lifecycle.py qa1 <sprint-id> --verdict <verdict> --notes-file /tmp/qa1-notes.txt
 ```
 
-A PASS moves the sprint to the point where Dev Team can run `/sprint-dev-done`. A FAIL or CONDITIONAL sends it back to `dev_build` for fixes, run this command again once they're addressed.
+A PASS moves the sprint to the point where Dev Team can run `/sprint-dev-done`, and records a hash of the sprint file as audited. If the sprint file changes after this (a mid-build requirements amendment), `/sprint-dev-done` will refuse until you run this again against the current file, no override exists for that. A FAIL or CONDITIONAL sends it back to `dev_build` for fixes, run this command again once they're addressed.

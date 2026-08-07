@@ -13,4 +13,4 @@ Usage: `/sprint-groundtruth <sprint-id> --verdict PASS|FAIL|CONDITIONAL --notes 
 python3 scripts/sprint_lifecycle.py groundtruth <sprint-id> --verdict <verdict> --notes-file /tmp/groundtruth-notes.txt
 ```
 
-Only valid once Pipeman has shipped. A PASS clears the way for QA1's final check. A FAIL or CONDITIONAL means Dev Team fixes it and Pipeman reships (`/sprint-reship`) before you test again.
+Only valid once Pipeman has shipped. A PASS makes the sprint complete-ready — Dev Team can then run `/sprint-complete`. A FAIL or CONDITIONAL means Dev Team fixes it and Pipeman reships (`/sprint-reship`) before you test again.

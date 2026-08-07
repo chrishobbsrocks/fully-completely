@@ -9,9 +9,8 @@ things forward, and a script that refuses to skip steps.
 
 The key difference from a simple "ask the agent nicely" workflow: closing
 a sprint is not optional-honesty, `/sprint-complete` will not run unless
-QA1's audit, GroundTruth's live test, and QA1's final check have all actually
-been recorded as PASS. Try to close early and it tells you exactly what's
-missing.
+QA1's audit and GroundTruth's live test have both actually been recorded
+as PASS. Try to close early and it tells you exactly what's missing.
 
 ## What's here
 
@@ -22,6 +21,7 @@ CLAUDE.md                     Root instructions (read this first)
 .claude/commands/               Slash commands, thin wrappers around the
                                 script below
 scripts/sprint_lifecycle.py    The actual enforcement logic
+scripts/dev2_worktree.sh       Creates Dev Team 2's isolated git worktree
 templates/sprint-template.md   Template used by /sprint-new
 docs/sprints/                  Where sprint files and state live
   0-backlog/  1-todo/  2-in-progress/  3-done/  4-blocked/  5-abandoned/
@@ -41,6 +41,13 @@ docs/sprints/                  Where sprint files and state live
    still use this by hand: open a terminal tab per role, start a session
    with the model noted in `CLAUDE.md`, and paste the matching file from
    `.claude/agents/` as your first message.
+4. **Open `.gitignore` and delete the block marked `TEMPLATE-ONLY`.** It
+   keeps this template repo from shipping its own example sprint data, but
+   left in place in your project it means every real sprint you create and
+   all QA/GroundTruth gate history in `docs/sprints/state/` is untracked,
+   so a wiped working tree loses it for good with nothing to recover from
+   git. `docs/sprints/registry.json` is already tracked by default and
+   needs no change.
 
 ## Using it
 
@@ -61,8 +68,7 @@ python3 scripts/sprint_lifecycle.py ship 1 --commit abc123
 # GroundTruth tests the live deploy
 python3 scripts/sprint_lifecycle.py groundtruth 1 --verdict PASS --notes "3/3 clean runs"
 
-# QA1's final check, then Master Controller closes it
-python3 scripts/sprint_lifecycle.py qa1-final 1 --verdict PASS --notes "all good"
+# Dev Team closes it out (same session that ran `start`, not Master Controller)
 python3 scripts/sprint_lifecycle.py complete 1
 ```
 
@@ -77,17 +83,34 @@ python3 scripts/sprint_lifecycle.py status 1 --verbose   # one sprint, full hist
 python3 scripts/sprint_lifecycle.py list                 # every sprint
 ```
 
-## The two QA gates, and why they're separate
+## The two gates a sprint has to clear
 
-QA1 runs twice on purpose: once as a static code audit before anything
-ships (gate 1), and once again after GroundTruth has proven the live product
-actually works (gate 2). A clean diff and a working live product are
-different claims, this system won't let either one stand in for the
-other. If GroundTruth's live test fails, the fix loop is Dev Team fixes →
-Pipeman `/sprint-reship` → GroundTruth retests, without needing to redo the
-whole sprint. If QA1's *final* check fails, that's treated as serious
-enough to send the sprint all the way back to `dev_build`, both gates get
-re-earned from scratch.
+A sprint only closes once two independent claims have both been verified:
+QA1's static audit (does the diff actually match the requirements) and
+GroundTruth's live test (does the deployed product actually work). A clean
+diff and a working live product are different claims, `/sprint-complete`
+won't let either one stand in for the other, and refuses to close a sprint
+missing either. If GroundTruth's live test fails, the fix loop is Dev Team
+fixes → Pipeman `/sprint-reship` → GroundTruth retests, without needing to
+redo the whole sprint.
+
+Earlier versions of this template ran QA1 twice, a static audit before
+shipping and a second "final check" after GroundTruth passed. Across ~13
+real sprints that second check never once caught anything the first audit
+and the live test hadn't already caught, so it was cut, GroundTruth's PASS
+now sends the sprint straight to complete-ready. The one thing the second
+check occasionally caught, a sprint file amended mid-build after QA1's
+first read, is now covered two ways: QA1 re-reads the sprint file fresh
+before recording its (single) verdict rather than relying on whatever it
+read earlier in a long session (see `.claude/agents/qa1.md`), and
+`/sprint-dev-done` mechanically enforces the same thing, a QA1 PASS
+records a hash of the sprint file, and dev-done refuses, no override, if
+the file changed after that audit. Deliberately no escape hatch: an
+override just relocates the judgment call from "did I re-read" to "was
+this change worth re-checking," which is exactly as skippable under
+deadline pressure as the thing it replaced. If a re-audit of a trivial
+one-line change feels too slow to be worth doing, that's a signal to make
+re-audits faster, not to add a bypass.
 
 ## Security notes
 
@@ -131,13 +154,38 @@ If you extend this with new commands that take free text, follow the
 same `--*-file` pattern rather than embedding raw arguments in a bash
 string.
 
+## Troubleshooting
+
+**"The output looks plausible but the numbers/state are wrong."** Every
+`sprint_lifecycle.py` invocation prints `[sprint_lifecycle] repo=...
+script=...` to stderr. Confirm `script=` points at *this* repo's
+`scripts/sprint_lifecycle.py` before trusting anything it printed. This
+has actually happened twice on a downstream project: once by shelling out
+to a different, same-named script, and once because a slash command
+resolved to a stale global command definition instead of this repo's
+`.claude/commands/`. Both times the output looked plausible enough to
+almost act on.
+
+**"QA1 / GroundTruth wrote a full verdict report but the state file is
+still empty."** Writing the report is not the same as recording it, the
+verdict only exists once `/sprint-qa1` or `/sprint-groundtruth` actually
+runs. Both agents' instructions end with an explicit step to re-run
+`/sprint-status` and confirm the verdict shows up before considering the
+work done, if you're seeing this, that step got skipped.
+
 ## Customizing
 
 - Add your own coding standards, git strategy, and tech stack notes to
   the bottom of `CLAUDE.md`, every agent should read it before starting.
 - Dev Team 2 runs a second, independent sprint at the same time as Dev
-  Team 1, not half of the same sprint. Only hand it a sprint that doesn't
-  share files, types, or dependencies with whatever Dev Team 1 is on.
+  Team 1, not half of the same sprint, and always in its own git worktree
+  (`/sprint-worktree <N>`, see `CLAUDE.md`), not the same checkout Dev Team
+  1 is using. "Independent" sprints on a small app still routinely touch
+  the same shared files (routing, layout, config) even when their features
+  don't overlap, checking the Dependencies section alone isn't enough.
+- `/sprint-start` and `/sprint-complete` are run directly by whichever Dev
+  Team owns the sprint. Master Controller plans and reads status, it
+  doesn't issue lifecycle commands once a sprint is handed off.
 - The phase names and transitions live entirely in
   `scripts/sprint_lifecycle.py`, if your real process ever changes, that's
   the one file to edit.

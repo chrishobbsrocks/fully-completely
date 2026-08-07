@@ -24,6 +24,7 @@ YOUR TEST PROCESS:
 5. Capture evidence. Screenshot every key state. A claim without a screenshot or exact quote is not a finding
 6. Actively try to break it: click during loading, double-click submits, navigate out of order, leave fields blank
 7. Produce a verdict with evidence, then record it: `/sprint-groundtruth <N> --verdict PASS|FAIL|CONDITIONAL --notes "..."`
+8. **Before you consider this done, re-run `/sprint-status <N>` and confirm the verdict you just recorded actually shows up.** A verdict that only exists as text in your report, never recorded via the command above, is indistinguishable from never having tested at all. This has happened before, a full evidenced report written but the record step skipped, don't let it be the last thing you drop after a long test session.
 
 HUNT SPECIFICALLY FOR what a code diff cannot catch:
 - Runtime errors, failed generations, blank states

@@ -32,12 +32,17 @@ $SCRIPT ship 1 --commit smoke1 > /dev/null
 $SCRIPT groundtruth 1 --verdict FAIL --notes "expected fail" > /dev/null
 $SCRIPT reship 1 --commit smoke2 > /dev/null
 $SCRIPT groundtruth 1 --verdict PASS --notes "ok" > /dev/null
-$SCRIPT qa1-final 1 --verdict PASS --notes "ok" > /dev/null
 $SCRIPT complete 1 > /dev/null
 STATUS=$($SCRIPT status 1)
 echo "$STATUS" | grep -q "Phase: complete" || fail "sprint 1 did not reach complete"
 echo "$STATUS" | grep -q "QA1 audit result: PASS" || fail "qa1 result not recorded"
 echo "$STATUS" | grep -q "GroundTruth live result: PASS" || fail "groundtruth result not recorded"
+
+echo "== completion actually relocates the file and updates its frontmatter, not just the phase =="
+DONE_FILE=$(find docs/sprints/3-done -name 'sprint-1_*.md' 2>/dev/null)
+[ -n "$DONE_FILE" ] || fail "sprint 1's file was not moved to docs/sprints/3-done/"
+[ ! -e docs/sprints/2-in-progress/sprint-1_smoke-test-sprint.md ] || fail "sprint 1's file is still in 2-in-progress/"
+grep -q '^status: done$' "$DONE_FILE" || fail "sprint 1's file frontmatter status was not updated to done"
 
 echo "== refusal paths =="
 $SCRIPT new "Edge case sprint" > /dev/null
@@ -73,5 +78,20 @@ $SCRIPT new "Parallel sprint B" > /dev/null   # sprint 4
 $SCRIPT start 4 > /dev/null
 $SCRIPT qa1 3 --verdict PASS --notes ok > /dev/null
 $SCRIPT status 4 | grep -q "Phase: dev_build" || fail "sprint 4 state was affected by sprint 3's transition"
+
+echo "== dev-done refuses (no override) if the sprint file changed since QA1's PASS =="
+$SCRIPT new "Stale audit sprint" > /dev/null   # sprint 5
+$SCRIPT start 5 > /dev/null
+$SCRIPT qa1 5 --verdict PASS --notes "looked good" > /dev/null
+STALE_FILE=$(find docs/sprints/2-in-progress -name 'sprint-5_*.md')
+echo "### Requirements amended after audit" >> "$STALE_FILE"
+
+$SCRIPT dev-done 5 > /tmp/out.txt 2>&1 && fail "dev-done succeeded despite sprint file changing after QA1's PASS" || true
+grep -q "has changed since QA1's PASS" /tmp/out.txt || fail "stale-audit refusal message missing"
+grep -q "\-\-override" /tmp/out.txt && fail "refusal message must not offer an override"
+
+$SCRIPT qa1 5 --verdict PASS --notes "re-audited the amendment" > /dev/null
+$SCRIPT dev-done 5 > /dev/null || fail "dev-done still refused after a fresh QA1 PASS on the current file"
+rm -f /tmp/out.txt
 
 echo "ALL SMOKE TESTS PASSED"

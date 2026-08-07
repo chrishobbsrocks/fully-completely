@@ -19,10 +19,10 @@ locally if needed, then hand off to Pipeman via `/sprint-ship` or
 
 | Role | Shorthand | Agent file | Model | Job |
 |---|---|---|---|---|
-| Master Controller | MC | `.claude/agents/master-controller.md` | opus | Plans sprints, closes them once both gates pass |
-| Dev Team 1 | Dev1 | `.claude/agents/dev-team-1.md` | sonnet | Builds, tests, fixes |
-| Dev Team 2 | Dev2 | `.claude/agents/dev-team-2.md` | sonnet | Runs a separate, independent sprint in parallel |
-| QA1 | QA1 | `.claude/agents/qa1.md` | opus | Static code audit (gate 1) AND final check (gate 2) |
+| Master Controller | MC | `.claude/agents/master-controller.md` | opus | Plans sprints, checks status read-only |
+| Dev Team 1 | Dev1 | `.claude/agents/dev-team-1.md` | sonnet | Starts, builds, tests, fixes, closes its own sprint |
+| Dev Team 2 | Dev2 | `.claude/agents/dev-team-2.md` | sonnet | Runs a separate, independent sprint in parallel, in its own git worktree |
+| QA1 | QA1 | `.claude/agents/qa1.md` | opus | Static code audit (the only gate) |
 | Pipeman | PM | `.claude/agents/pipeman.md` | sonnet | Only one who pushes to remote |
 | GroundTruth | GT | `.claude/agents/groundtruth.md` | opus | Live browser testing after every push |
 
@@ -39,7 +39,7 @@ above, e.g. `claude --model opus` for Master Controller, QA1, or GroundTruth.
 ```
 /sprint-new "Title" --epic "Epic name"      Master Controller
         │  (fills in requirements/acceptance criteria in the file)
-/sprint-start <N>                            Master Controller
+/sprint-start <N>                            Dev Team 1/2
         │
    dev_build  ─────────────────────────────  Dev Team 1/2 builds
         │
@@ -55,34 +55,71 @@ above, e.g. `claude --model opus` for Master Controller, QA1, or GroundTruth.
 /sprint-groundtruth <N> --verdict ...            GroundTruth
         │  FAIL/CONDITIONAL → Dev Team fixes, Pipeman /sprint-reship, loop
         │  PASS ↓
-/sprint-qa1-final <N> --verdict ...          QA1 (gate 2)
-        │  FAIL → back to dev_build, both gates must be re-earned
-        │  PASS ↓
-/sprint-complete <N>                         Master Controller closes it
+/sprint-complete <N>                         Dev Team 1/2 closes it
 ```
 
-A sprint is never complete just because Dev Team said so. It's only complete
-once QA1's first audit, GroundTruth's live test, AND QA1's final check have all
+A sprint is never complete just because Dev Team said so mid-build. It's only
+complete once QA1's static audit AND GroundTruth's live test have both
 independently passed. `/sprint-complete` enforces this and will refuse to
-close a sprint that's missing any of the three, telling you exactly which
-one.
+close a sprint that's missing either one, telling you exactly which.
+
+There used to be a second QA1 gate here, a "final check" run after
+GroundTruth passed. Across ~13 real sprints it never once caught anything
+gate 1 + the live test hadn't already caught, so it was removed — the one
+thing it occasionally caught (a sprint file amended mid-build, after QA1's
+first read) is now handled two ways: QA1 re-reads the sprint file fresh
+immediately before recording its gate-1 verdict (see `.claude/agents/qa1.md`),
+and `/sprint-dev-done` mechanically enforces it — a QA1 PASS records a hash
+of the sprint file as audited, and dev-done refuses outright, no override,
+if the file has changed since. The instruction covers understanding; the
+hash check covers the case where the instruction gets skipped under load.
+
+**Command ownership**: `/sprint-start` and `/sprint-complete` are run by
+whichever Dev Team (1 or 2) owns the sprint, not by Master Controller. Master
+Controller plans sprints and reads status (`/sprint-status`), it does not
+issue lifecycle transition commands once a sprint is handed off. Running
+those from both a Master Controller session and a Dev Team session at the
+same time is what has actually caused duplicate-attempt races and stale
+"already complete" errors, keep it to one issuer per sprint.
+
+**Wrong-script safety net**: every `sprint_lifecycle.py` invocation prints a
+`[sprint_lifecycle] repo=... script=...` line to stderr. If that path doesn't
+point into *this* repo's `scripts/sprint_lifecycle.py`, stop, you're looking
+at output from a different tool (a stale global command, a same-named script
+elsewhere on disk), not this project's lifecycle state.
 
 ## Running two sprints at once
 
 Each sprint has its own ID and its own state file, so two sprints can be
 in-flight at the same time, each moving through the lifecycle above
 independently. Dev Team 2 exists for exactly this: Master Controller
-assigns it a separate sprint from whatever Dev Team 1 is building. This
-only works when the two sprints are genuinely independent, no shared
-files, shared types, or one blocking the other. Check the Dependencies
-section of both sprint definitions before running them in parallel, if
-they overlap, run them one after the other instead.
+assigns it a separate sprint from whatever Dev Team 1 is building. Checking
+the Dependencies section of both sprint definitions for file/type overlap is
+necessary but **not sufficient**, "independent" sprints on a small app
+routinely both end up touching shared files (routing, a shared layout,
+a shared config) even when their features don't conceptually overlap.
+
+Because of that, Dev Team 2 always works in its own git worktree, a
+separate working directory on its own branch, not the same checkout Dev
+Team 1 is using. This is the default, not an opt-in:
+
+```bash
+/sprint-worktree <N>
+```
+
+run once, before Dev Team 2 starts building. It creates (or reuses) a
+worktree at `../<repo>-devteam2-sprint-<N>` on branch `devteam2/sprint-<N>`
+and prints the path. Dev Team 2's session should `cd` there before touching
+any files, and stay there for the whole sprint. This is what actually
+prevents the uncommitted-work collisions that "check for overlap first"
+alone did not.
 
 ## Quick reference
 
 ```bash
 /sprint-new "Title" [--epic "Epic name"]
 /sprint-start <N>
+/sprint-worktree <N>            # Dev Team 2 only, before building
 /sprint-status [<N>]
 /sprint-list
 /sprint-qa1 <N> --verdict PASS|FAIL|CONDITIONAL --notes "..."
@@ -90,10 +127,22 @@ they overlap, run them one after the other instead.
 /sprint-ship <N> --commit <hash>
 /sprint-reship <N> --commit <hash>
 /sprint-groundtruth <N> --verdict PASS|FAIL|CONDITIONAL --notes "..."
-/sprint-qa1-final <N> --verdict PASS|FAIL --notes "..."
 /sprint-complete <N>
 /sprint-abort <N> --reason "..."
 ```
+
+## Sprint data persistence
+
+This template's own `.gitignore` keeps `docs/sprints/` content (sprint files
+and `state/`) untracked, so the template repo doesn't ship its own example
+sprint data. If you installed this workflow into a real project, that
+ignore block gets inherited wholesale and left in place, which means your
+project's *actual* sprint definitions and state history are never
+committed anywhere, a wipe of the working tree (bad `clean`, disk failure,
+anything) loses them for good with no git history to recover from. See the
+`## Install` section of `README.md` for the one-time fix: delete the
+sprint-data block from your project's `.gitignore` so it rides along with
+your commits like everything else.
 
 ## Project standards
 

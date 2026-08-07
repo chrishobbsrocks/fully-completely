@@ -7,25 +7,40 @@ state. Slash commands in .claude/commands/ call this script; they do
 not touch files directly. See CLAUDE.md at the project root for the
 full command reference.
 
-Phases (in order, with the two loops):
+Phases (in order, with the loops):
 
   dev_build        -> Dev Team 1/2 is building
   qa1_audit        -> QA1 static audit (gate 1). FAIL/CONDITIONAL sends
-                       it back to dev_build.
+                       it back to dev_build. QA1 re-reads the sprint file
+                       fresh immediately before recording this verdict, so
+                       a mid-build requirements amendment doesn't slip
+                       through on a stale read. A PASS also records a hash
+                       of the sprint file as audited; dev-done mechanically
+                       refuses (no override) if the file has changed since,
+                       rather than relying only on QA1 remembering to
+                       re-read. See dev_agreed_done below.
   dev_agreed_done  -> Dev Team has told Master Controller the coding
                        side is done. NOT the same as sprint complete.
   shipped          -> Pipeman has pushed to remote.
-  groundtruth_live     -> GroundTruth is live-testing. FAIL/CONDITIONAL means
+  groundtruth_live -> GroundTruth is live-testing. FAIL/CONDITIONAL means
                        fixes + a reship, then GroundTruth tests again.
-  qa1_final        -> QA1's final check (gate 2), only reachable once
-                       groundtruth_live has a recorded PASS.
-  complete_ready   -> Both gates have passed. Waiting on Master
-                       Controller to actually close the sprint.
+                       A recorded PASS here moves straight to
+                       complete_ready — there used to be a QA1 "final
+                       check" gate here (gate 2), but across ~13 real
+                       sprints it never once caught anything gate 1 +
+                       GroundTruth's live test hadn't already caught, so
+                       it was removed. The one real value it had — a
+                       fresh look after mid-build requirement changes —
+                       is now QA1's responsibility at gate 1 (see above).
+  complete_ready   -> Both gates (QA1 audit + GroundTruth live test) have
+                       passed. Waiting for /sprint-complete to actually
+                       close the sprint.
   complete         -> Closed. Sprint file moved to 3-done/.
   aborted          -> Abandoned. Sprint file moved to 5-abandoned/.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -136,6 +151,20 @@ def log_event(state: dict, actor: str, event: str, detail: str = "") -> None:
     )
 
 
+def file_hash(path: Path) -> Optional[str]:
+    if not path.exists():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def registry_sprint_file(sprint_id: int) -> Optional[Path]:
+    reg = load_registry()
+    entry = reg["sprints"].get(str(sprint_id))
+    if not entry:
+        return None
+    return ROOT / entry["file"]
+
+
 def find_sprint_file(sprint_id: int) -> Optional[Path]:
     for folder in STATUS_FOLDERS.values():
         d = SPRINTS_DIR / folder
@@ -144,6 +173,22 @@ def find_sprint_file(sprint_id: int) -> Optional[Path]:
         for f in d.glob(f"sprint-{sprint_id}_*.md"):
             return f
     return None
+
+
+def update_frontmatter_status(path: Path, new_status: str) -> None:
+    """Rewrite the `status:` line in a sprint file's YAML frontmatter so the
+    file itself agrees with registry.json instead of only the registry
+    being updated. Every command that moves a sprint file between status
+    folders must call this on the file's new path."""
+    if not path.exists():
+        return
+    text = path.read_text()
+    updated, count = re.subn(
+        r"(?m)^status:\s*\S+\s*$", f"status: {new_status}", text, count=1
+    )
+    if count == 0:
+        return
+    atomic_write(path, updated)
 
 
 # --------------------------------------------------------------------------
@@ -208,6 +253,7 @@ def cmd_start(args) -> None:
     if src.exists() and src != dest:
         shutil.move(str(src), str(dest))
         entry["file"] = str(dest.relative_to(ROOT))
+    update_frontmatter_status(dest, "in_progress")
 
     entry["status"] = "in_progress"
     save_registry(reg)
@@ -217,8 +263,8 @@ def cmd_start(args) -> None:
         "title": entry["title"],
         "phase": "dev_build",
         "qa1_audit_result": None,
+        "qa1_audit_file_hash": None,
         "groundtruth_result": None,
-        "qa1_final_result": None,
         "audit_rounds": 0,
         "live_test_rounds": 0,
         "started": now(),
@@ -246,7 +292,6 @@ def cmd_status(args) -> None:
     print(f"Phase: {state['phase']}")
     print(f"QA1 audit result: {state['qa1_audit_result']} (rounds: {state['audit_rounds']})")
     print(f"GroundTruth live result: {state['groundtruth_result']} (rounds: {state['live_test_rounds']})")
-    print(f"QA1 final result: {state['qa1_final_result']}")
     if args.verbose:
         print("\nHistory:")
         for h in state["history"]:
@@ -268,11 +313,13 @@ def cmd_qa1(args) -> None:
 
     if verdict == "PASS":
         state["phase"] = "qa1_audit"
+        state["qa1_audit_file_hash"] = file_hash(registry_sprint_file(args.id))
         print(f"QA1 audit PASSED (round {state['audit_rounds']}).")
         print("Dev Team: run /sprint-dev-done when ready to tell Master Controller "
               "the coding side is agreed done. This does NOT mark the sprint complete.")
     else:
         state["phase"] = "dev_build"
+        state["qa1_audit_file_hash"] = None
         print(f"QA1 audit {verdict} (round {state['audit_rounds']}). Back to Dev Team for fixes.")
 
     save_state(args.id, state)
@@ -284,6 +331,14 @@ def cmd_dev_done(args) -> None:
         die(f"Sprint {args.id} needs a QA1 PASS on the first audit before dev work can be "
             f"marked agreed-done. Current phase: {state['phase']}, "
             f"QA1 result: {state['qa1_audit_result']}.")
+
+    current_hash = file_hash(registry_sprint_file(args.id))
+    if current_hash != state.get("qa1_audit_file_hash"):
+        die(f"Sprint {args.id}'s sprint file has changed since QA1's PASS "
+            f"(round {state['audit_rounds']}), requirements may have been amended after "
+            "the audit. Run /sprint-qa1 again against the current file before marking dev "
+            "work done. No override, re-audit is the only path past this.")
+
     state["phase"] = "dev_agreed_done"
     log_event(state, "dev-team", "dev_agreed_done")
     save_state(args.id, state)
@@ -328,38 +383,13 @@ def cmd_groundtruth(args) -> None:
     log_event(state, "groundtruth", "live_test", f"{verdict}: {notes}")
 
     if verdict == "PASS":
-        print(f"GroundTruth live test PASSED (round {state['live_test_rounds']}).")
-        print("QA1: run /sprint-qa1-final for the second gate.")
+        state["phase"] = "complete_ready"
+        print(f"GroundTruth live test PASSED (round {state['live_test_rounds']}). "
+              f"Sprint {args.id} is complete-ready.")
+        print("Dev Team: run /sprint-complete to close it out.")
     else:
         print(f"GroundTruth live test {verdict} (round {state['live_test_rounds']}). "
               "Dev Team: fix, then Pipeman: /sprint-reship.")
-
-    save_state(args.id, state)
-
-
-def cmd_qa1_final(args) -> None:
-    state = load_state(args.id)
-    if state["phase"] != "groundtruth_live" or state["groundtruth_result"] != "PASS":
-        die(f"Sprint {args.id} needs a GroundTruth PASS before QA1's final check. "
-            f"Current phase: {state['phase']}, GroundTruth result: {state['groundtruth_result']}.")
-    verdict = args.verdict.upper()
-    if verdict not in {"PASS", "FAIL"}:
-        die("Final verdict must be PASS or FAIL.")
-
-    notes = resolve_text(args.notes, args.notes_file)
-    state["qa1_final_result"] = verdict
-    log_event(state, "qa1", "final_check", f"{verdict}: {notes}")
-
-    if verdict == "PASS":
-        state["phase"] = "complete_ready"
-        print(f"QA1 final check PASSED. Sprint {args.id} is complete-ready.")
-        print("Master Controller: run /sprint-complete to close it out.")
-    else:
-        state["phase"] = "dev_build"
-        state["qa1_audit_result"] = None
-        state["groundtruth_result"] = None
-        print(f"QA1 final check FAILED. Sprint {args.id} sent back to dev_build, "
-              "both gates will need to be re-earned.")
 
     save_state(args.id, state)
 
@@ -371,8 +401,6 @@ def cmd_complete(args) -> None:
         missing.append("QA1 first audit has not passed")
     if state["groundtruth_result"] != "PASS":
         missing.append("GroundTruth live test has not passed")
-    if state["qa1_final_result"] != "PASS":
-        missing.append("QA1 final check has not passed")
     if state["phase"] != "complete_ready" or missing:
         die("Sprint is not ready to close:\n  - " + "\n  - ".join(missing or [f"phase is '{state['phase']}'"]))
 
@@ -386,14 +414,15 @@ def cmd_complete(args) -> None:
         dest = dest_dir / new_name
         shutil.move(str(src), str(dest))
         entry["file"] = str(dest.relative_to(ROOT))
+        update_frontmatter_status(dest, "done")
     entry["status"] = "done"
     save_registry(reg)
 
     state["phase"] = "complete"
     state["completed"] = now()
-    log_event(state, "master-controller", "sprint_closed")
+    log_event(state, "dev-team", "sprint_closed")
     save_state(args.id, state)
-    print(f"Sprint {args.id} closed. Both gates confirmed: QA1 audit, GroundTruth live test, QA1 final.")
+    print(f"Sprint {args.id} closed. Both gates confirmed: QA1 audit, GroundTruth live test.")
 
 
 def cmd_abort(args) -> None:
@@ -407,6 +436,7 @@ def cmd_abort(args) -> None:
             dest = dest_dir / src.name
             shutil.move(str(src), str(dest))
             entry["file"] = str(dest.relative_to(ROOT))
+            update_frontmatter_status(dest, "abandoned")
         entry["status"] = "abandoned"
         save_registry(reg)
 
@@ -462,12 +492,6 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--notes-file", help="Read notes from this file instead of the command line.")
     s.set_defaults(func=cmd_groundtruth)
 
-    s = sub.add_parser("qa1-final")
-    s.add_argument("id", type=int); s.add_argument("--verdict", required=True)
-    s.add_argument("--notes", default="")
-    s.add_argument("--notes-file", help="Read notes from this file instead of the command line.")
-    s.set_defaults(func=cmd_qa1_final)
-
     s = sub.add_parser("complete"); s.add_argument("id", type=int); s.set_defaults(func=cmd_complete)
 
     s = sub.add_parser("abort")
@@ -482,6 +506,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    # Printed on every invocation so a wrong-script situation (a stale
+    # global command, a same-named script earlier on PATH, a different
+    # repo's copy of this tool) is obvious immediately instead of
+    # discovered after acting on plausible-looking but wrong output.
+    print(f"[sprint_lifecycle] repo={ROOT} script={Path(__file__).resolve()}", file=sys.stderr)
     parser = build_parser()
     args = parser.parse_args()
     args.func(args)
