@@ -32,3 +32,6 @@ jobs:
 
       - name: Sprint lifecycle smoke test
         run: bash scripts/smoke_test.sh
+
+      - name: Dev Team 2 worktree test
+        run: bash scripts/worktree_test.sh

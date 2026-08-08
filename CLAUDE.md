@@ -4,10 +4,12 @@ This project uses a sprint workflow enforced by `scripts/sprint_lifecycle.py`.
 Slash commands in `.claude/commands/` are the only supported way to move a
 sprint forward. Never edit `docs/sprints/registry.json` or anything in
 `docs/sprints/state/` by hand, and never move sprint files between folders
-yourself, the script owns that. The one deliberate exception to all of this
-is the trivial fix fast lane, see `## Trivial fix fast lane` below, a
-narrow category of change, judged against an objective checklist rather
-than a size or risk feeling, that skips the sprint file and the state
+yourself, the script owns that. There are two deliberate exceptions: the
+trivial fix fast lane (`## Trivial fix fast lane` below), and changes to
+this repository's own tooling (`## Changes to this repo's own tooling`
+below). The former is a narrow category of change, judged against an
+objective checklist rather than a size or risk feeling, that skips the
+sprint file and the state
 machine entirely.
 
 **Only Pipeman ever runs `git push`, no exceptions, ever.** This holds
@@ -91,6 +93,21 @@ same time is what has actually caused duplicate-attempt races and stale
 point into *this* repo's `scripts/sprint_lifecycle.py`, stop, you're looking
 at output from a different tool (a stale global command, a same-named script
 elsewhere on disk), not this project's lifecycle state.
+
+**QA1 audits code, not just the sprint file**: the same PASS that records
+the sprint-file hash also records the audited commit's tree hash, the
+content of the files at that commit, not its SHA. `/sprint-ship` resolves
+whatever `--commit` Pipeman passes and refuses outright, no override, if
+its content doesn't match what QA1 audited. Using tree content instead of
+the raw commit SHA is deliberate: Pipeman's own process legitimately
+squashes or rebases before pushing, which changes the SHA without changing
+any file, and that must keep working. What must NOT keep working is a
+new, unaudited change landing between QA1's PASS and the push, so a
+content mismatch always means a fresh `/sprint-qa1` audit is required
+before that commit can ship. If you already ran `/sprint-dev-done` once
+and need a fresh audit (a new commit landed after the fact), re-running
+`/sprint-qa1` is expected to work and resets the phase, run
+`/sprint-dev-done` again afterward before shipping.
 
 ## Trivial fix fast lane
 
@@ -189,6 +206,42 @@ anything) loses them for good with no git history to recover from. See the
 `## Install` section of `README.md` for the one-time fix: delete the
 sprint-data block from your project's `.gitignore` so it rides along with
 your commits like everything else.
+
+## Changes to this repo's own tooling
+
+Everything above describes the lifecycle a *downstream project* runs its
+own sprints through, after installing this workflow. It does not describe
+how changes to this repository itself (`scripts/`, `.claude/`,
+`templates/`, this file) get made. Those are development on the tool, not
+a sprint that runs through the tool's own state machine, and that's a
+deliberate call, not an oversight:
+
+- **QA1's gate still has a real referent here** (does a diff of
+  `sprint_lifecycle.py` or an agent file actually do what it claims), so a
+  real independent review before anything non-trivial merges is still
+  expected, just not mechanized through `/sprint-qa1` and a sprint file
+  for this repo's own commits.
+- **GroundTruth's gate does not.** GroundTruth live-tests a deployed
+  product in a browser. This repository has no deployed product, it *is*
+  the workflow definition a downstream project deploys against. Forcing a
+  browser-testable live-test step onto a change to a Python script or a
+  markdown agent file would be fitting the process to itself rather than
+  to what actually needs verifying, the same reasoning that produced the
+  trivial fix fast lane, applied to the opposite end of the size scale.
+- **Every change here should still be a real, committed diff before
+  anyone reviews it**, for the same reason `qa1.md` tells QA1 to hold a
+  verdict on uncommitted work: a review of a working-tree diff is a claim
+  about code that might not exist by the time anyone acts on the review.
+  This matters more here than usual, `/sprint-ship`'s commit-content check
+  (see `## The lifecycle` above) depends on `git rev-parse HEAD` actually
+  being the reviewed commit, not whatever was last pushed before the
+  review started.
+
+If a change to this repo's own tooling ever turns out to need something
+sprint-shaped (recorded requirements, a documented audit trail across
+multiple rounds), that's a case for `/sprint-new` with GroundTruth's step
+explicitly skipped and noted why, not a case for forcing a live-test step
+that doesn't apply.
 
 ## Project standards
 

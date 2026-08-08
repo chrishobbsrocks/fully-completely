@@ -22,6 +22,8 @@ CLAUDE.md                     Root instructions (read this first)
                                 script below
 scripts/sprint_lifecycle.py    The actual enforcement logic
 scripts/dev2_worktree.sh       Creates Dev Team 2's isolated git worktree
+scripts/smoke_test.sh          Full lifecycle test, runs in a sandbox
+scripts/worktree_test.sh       Tests dev2_worktree.sh, also sandboxed
 templates/sprint-template.md   Template used by /sprint-new
 docs/sprints/                  Where sprint files and state live
   0-backlog/  1-todo/  2-in-progress/  3-done/  4-blocked/  5-abandoned/
@@ -36,7 +38,7 @@ docs/sprints/                  Where sprint files and state live
 1. Copy this whole folder into your project (or copy just `.claude/`,
    `scripts/`, `templates/`, `docs/sprints/`, and `CLAUDE.md` into an
    existing project root).
-2. Requires only Python 3, no dependencies to install.
+2. Requires only Python 3, no dependencies to install. Runs on macOS, Linux, and Windows. The shell scripts (`smoke_test.sh`, `worktree_test.sh`, `dev2_worktree.sh`) need a POSIX-style shell, which Windows users typically already have via Git Bash or WSL; they aren't required to use `sprint_lifecycle.py` itself.
 3. If you're not using Claude Code's native sub-agent feature, you can
    still use this by hand: open a terminal tab per role, start a session
    with the model noted in `CLAUDE.md`, and paste the matching file from
@@ -112,6 +114,14 @@ deadline pressure as the thing it replaced. If a re-audit of a trivial
 one-line change feels too slow to be worth doing, that's a signal to make
 re-audits faster, not to add a bypass.
 
+The same PASS also records the audited commit's tree hash, the content
+of its files, not its SHA. `/sprint-ship` refuses, no override, if the
+commit Pipeman is pushing doesn't match it. Tree hash rather than commit
+SHA is deliberate: Pipeman's own process legitimately squashes or
+rebases before pushing, which changes the SHA without changing any file,
+and that has to keep working, only a real, unaudited content change
+should block a ship.
+
 ## Security notes
 
 This was scanned with bandit and pyflakes (both clean) before being made
@@ -149,6 +159,26 @@ Also fixed:
 - Titles and epic names are escaped before being written into a
   sprint file's YAML frontmatter, a stray `"` in a title no longer
   breaks the file.
+- Every read-modify-write span (a sprint's state, the registry's
+  `next_id` counter) now holds an OS file lock for its duration, so two
+  invocations racing against the same sprint can't interleave and
+  silently lose one side's update, exercised by a smoke test that runs
+  two `qa1` verdicts concurrently and asserts both landed. This uses
+  `fcntl` on macOS/Linux and falls back to `msvcrt` on Windows (stdlib
+  both ways, no new dependency), a first version imported `fcntl`
+  unconditionally, which would have broken every command on Windows,
+  not just locking.
+- `/sprint-new`'s template substitution no longer uses `str.format()`,
+  which would raise on a custom template containing literal `{ }` (a
+  JSON or CSS example block); it now does targeted `{id}`/`{epic}`
+  replacement instead, leaving any other braces alone.
+- `smoke_test.sh` itself used to `rm -rf` `docs/sprints/` directly
+  against whatever repo it was invoked from, both on start and via a
+  `trap ... EXIT`. It has actually destroyed a real downstream
+  project's sprint history twice. It now copies the script into a
+  throwaway `mktemp -d` sandbox and runs that copy, verified by
+  planting a canary sprint in this repo and hash-diffing it before and
+  after a full test run.
 
 If you extend this with new commands that take free text, follow the
 same `--*-file` pattern rather than embedding raw arguments in a bash

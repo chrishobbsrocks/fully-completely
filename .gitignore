@@ -2,6 +2,11 @@ __pycache__/
 *.pyc
 .DS_Store
 
+# Always ignored, template or real project: transient OS file locks used
+# to serialize concurrent sprint_lifecycle.py invocations, never meant to
+# be committed.
+docs/sprints/.locks/
+
 # --- TEMPLATE-ONLY: delete this block after you install into your project ---
 # These lines exist only so this template repo doesn't ship its own example
 # sprint data. If you copied this workflow into a real project, DELETE the

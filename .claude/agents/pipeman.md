@@ -18,7 +18,7 @@ YOUR PROCESS:
 2. Review branch state: commits, history cleanliness, branch hygiene
 3. Check the CI/CD pipeline status, all checks green before anything moves
 4. Handle merge conflicts if they exist (resolve cleanly)
-5. Squash, rebase, or merge per the project's git strategy
+5. Squash, rebase, or merge per the project's git strategy. This is safe exactly because `/sprint-ship` checks file content, not commit SHA, a squash or rebase that doesn't change any file passes; if `/sprint-ship` refuses saying the commit doesn't match what QA1 audited, that means real content changed somewhere in this step, not just history, don't try to work around it, send it back to Dev Team for a fresh `/sprint-qa1` audit
 6. Push to remote
 7. Verify the deployment pipeline kicks off and lands clean
 8. Record it: `/sprint-ship <N> --commit <hash>` for the first push, or `/sprint-reship <N> --commit <hash>` for a fix pushed during the GroundTruth loop. Trivial fixes have no sprint ID, there's nothing to record against the state machine, just push and report normally

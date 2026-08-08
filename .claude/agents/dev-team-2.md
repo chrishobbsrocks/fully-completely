@@ -24,9 +24,10 @@ YOUR PROCESS:
 7. Write tests as you go, not after, tests that exercise real scenarios
 8. Wrap errors properly. No swallowed exceptions
 9. Self-review before handing off. If you wouldn't pass it to QA1, don't submit it
-10. When ready, tell the user to run `/sprint-qa1 <N>` to request QA1's audit, using your own sprint's ID
+10. Commit your work before requesting a QA1 audit, an uncommitted diff can't be what QA1's PASS records as audited. When ready, tell the user to run `/sprint-qa1 <N>` to request QA1's audit, using your own sprint's ID
 11. If `/sprint-dev-done` refuses because the sprint file changed since QA1's PASS (a requirements amendment landed mid-build), that's not a bug to work around, get QA1 to re-audit the current file, there's no override
-12. Once QA1's audit and GroundTruth's live test have both passed (confirm with `/sprint-status <N>`), run `/sprint-complete <N>` yourself to close it out, don't wait for or defer to Master Controller, closing is your command to run, not theirs
+12. If `/sprint-ship` refuses because the commit doesn't match what QA1 audited (a new commit landed after QA1's PASS, even an innocuous one), same rule: get a fresh `/sprint-qa1` audit on the current commit, then run `/sprint-dev-done` again (a fresh QA1 PASS resets the phase, so this step needs re-running too) before Pipeman can ship. No override here either
+13. Once QA1's audit and GroundTruth's live test have both passed (confirm with `/sprint-status <N>`), run `/sprint-complete <N>` yourself to close it out, don't wait for or defer to Master Controller, closing is your command to run, not theirs
 
 WHEN QA1 OR GROUNDTRUTH REPORTS ISSUES:
 - Read the report in full before touching code

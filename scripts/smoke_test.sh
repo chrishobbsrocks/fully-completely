@@ -34,13 +34,23 @@ SCRIPT="python3 scripts/sprint_lifecycle.py"
 
 fail() { echo "SMOKE TEST FAILED: $1" >&2; exit 1; }
 
+# ship's tree-hash check needs a real git repo to resolve commits against,
+# entirely local to the sandbox, never the invoking repo.
+git init -q
+git config user.email "smoke-test@example.com"
+git config user.name "Smoke Test"
+git add -A
+git commit -q -m "sandbox baseline"
+
 echo "== happy path with both fail-loops =="
 $SCRIPT new "Smoke test sprint" --epic "CI" > /dev/null
 $SCRIPT start 1 > /dev/null
 $SCRIPT qa1 1 --verdict FAIL --notes "expected fail" > /dev/null
+git commit -q --allow-empty -m "address QA1 feedback for sprint 1"
 $SCRIPT qa1 1 --verdict PASS --notes "ok" > /dev/null
 $SCRIPT dev-done 1 > /dev/null
-$SCRIPT ship 1 --commit smoke1 > /dev/null
+AUDITED_COMMIT_1=$(git rev-parse HEAD)
+$SCRIPT ship 1 --commit "$AUDITED_COMMIT_1" > /dev/null
 $SCRIPT groundtruth 1 --verdict FAIL --notes "expected fail" > /dev/null
 $SCRIPT reship 1 --commit smoke2 > /dev/null
 $SCRIPT groundtruth 1 --verdict PASS --notes "ok" > /dev/null
@@ -105,5 +115,85 @@ grep -q "\-\-override" /tmp/out.txt && fail "refusal message must not offer an o
 $SCRIPT qa1 5 --verdict PASS --notes "re-audited the amendment" > /dev/null
 $SCRIPT dev-done 5 > /dev/null || fail "dev-done still refused after a fresh QA1 PASS on the current file"
 rm -f /tmp/out.txt
+
+echo "== ship refuses (no override) if the commit's content differs from what QA1 audited =="
+$SCRIPT new "Commit drift sprint" > /dev/null   # sprint 6
+$SCRIPT start 6 > /dev/null
+git commit -q --allow-empty -m "sprint 6 initial work"
+$SCRIPT qa1 6 --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done 6 > /dev/null
+# a real content change lands after QA1's PASS, unaudited
+echo "sneaky change" > sneaky.txt
+git add sneaky.txt
+git commit -q -m "unaudited change after QA1 PASS"
+DRIFTED_COMMIT=$(git rev-parse HEAD)
+
+$SCRIPT ship 6 --commit "$DRIFTED_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded on a commit QA1 never audited" || true
+grep -q "doesn't match what QA1 audited" /tmp/out.txt || fail "commit-drift refusal message missing"
+grep -q "\-\-override" /tmp/out.txt && fail "commit-drift refusal message must not offer an override"
+
+echo "== ship tolerates a content-preserving amend/rebase after a fresh QA1 PASS (tree hash, not commit SHA) =="
+$SCRIPT qa1 6 --verdict PASS --notes "re-audited the sneaky change" > /dev/null
+$SCRIPT dev-done 6 > /dev/null   # a fresh qa1 PASS resets phase, dev-done must be re-run before ship
+# simulate Pipeman's documented squash/rebase step: same file content, new SHA
+git commit -q --amend -m "sprint 6 work (squashed for history hygiene)"
+AMENDED_COMMIT=$(git rev-parse HEAD)
+[ "$AMENDED_COMMIT" != "$DRIFTED_COMMIT" ] || fail "test setup broken: amend did not change the commit SHA"
+$SCRIPT ship 6 --commit "$AMENDED_COMMIT" > /dev/null || fail "ship refused a content-identical commit just because rebase/amend changed its SHA"
+rm -f /tmp/out.txt
+
+echo "== dev-done/ship give a distinct 'nothing recorded' message for a pre-upgrade sprint missing the hash fields =="
+$SCRIPT new "Legacy sprint" > /dev/null   # sprint 7
+$SCRIPT start 7 > /dev/null
+git commit -q --allow-empty -m "sprint 7 work"
+$SCRIPT qa1 7 --verdict PASS --notes "looked good" > /dev/null
+LEGACY_STATE="docs/sprints/state/sprint-7.json"
+# simulate a sprint that PASSed under a version of this script from before
+# the hash fields existed, by stripping them out of an otherwise-valid PASS
+python3 -c "
+import json
+p = '$LEGACY_STATE'
+s = json.load(open(p))
+del s['qa1_audit_file_hash']
+del s['qa1_audited_tree_hash']
+json.dump(s, open(p, 'w'), indent=2)
+"
+
+$SCRIPT dev-done 7 > /tmp/out.txt 2>&1 && fail "dev-done succeeded on a sprint with no recorded audit hash" || true
+grep -q "no QA1-audited sprint-file hash on record" /tmp/out.txt || fail "legacy-sprint dev-done message missing"
+grep -q "has changed since QA1's PASS" /tmp/out.txt && fail "legacy sprint should not be told the file 'changed', nothing was ever recorded to compare against"
+
+$SCRIPT qa1 7 --verdict PASS --notes "re-audited under the upgraded script" > /dev/null
+$SCRIPT dev-done 7 > /dev/null || fail "dev-done still failed after a fresh QA1 PASS backfilled the hash fields"
+
+# repeat the same distinction one step later, for ship's tree-hash field
+python3 -c "
+import json
+p = '$LEGACY_STATE'
+s = json.load(open(p))
+del s['qa1_audited_tree_hash']
+json.dump(s, open(p, 'w'), indent=2)
+"
+LEGACY_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship 7 --commit "$LEGACY_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded on a sprint with no recorded audited commit" || true
+grep -q "no QA1-audited commit on record" /tmp/out.txt || fail "legacy-sprint ship message missing"
+grep -q "doesn't match what QA1 audited" /tmp/out.txt && fail "legacy sprint should not be told the commit 'doesn't match', nothing was ever recorded to compare against"
+rm -f /tmp/out.txt
+
+echo "== a custom template containing literal braces doesn't break sprint creation =="
+printf '\n### Example config\n```json\n{ "key": "value" }\n```\n' >> templates/sprint-template.md
+$SCRIPT new "Brace test sprint" > /dev/null || fail "sprint creation broke on a template containing literal { }"
+
+echo "== concurrent writes to the same sprint don't corrupt state or lose an update (file locking) =="
+$SCRIPT new "Race sprint" > /dev/null   # sprint 9
+$SCRIPT start 9 > /dev/null
+( $SCRIPT qa1 9 --verdict FAIL --notes "race A" > /dev/null 2>&1 ) &
+RACE_PID1=$!
+( $SCRIPT qa1 9 --verdict CONDITIONAL --notes "race B" > /dev/null 2>&1 ) &
+RACE_PID2=$!
+wait "$RACE_PID1" "$RACE_PID2"
+RACE_STATUS=$($SCRIPT status 9 --verbose)
+echo "$RACE_STATUS" | grep -q "rounds: 2" || fail "concurrent qa1 writes lost an update, expected audit_rounds: 2"
+python3 -c "import json; json.load(open('docs/sprints/state/sprint-9.json'))" || fail "sprint 9 state file is corrupted JSON after concurrent writes"
 
 echo "ALL SMOKE TESTS PASSED"

@@ -17,7 +17,7 @@ After Dev Team hands off a sprint, you review the diff before anything ships. Th
 
 YOUR REVIEW PROCESS:
 1. **Re-read the sprint file now, fresh, even if you already read it earlier in this session.** Requirements can be amended mid-build after your last read; auditing against a stale copy is exactly the gap that used to slip through. Treat this as a hard step, not a formality, before every verdict you record. Keep re-audits of a small, isolated amendment fast, if most of the file is unchanged, say so and focus the review on what moved, so nobody's tempted to route around the check below because a full re-audit feels too slow for a one-line change.
-2. Read the actual code changes (the diff against the base branch)
+2. Read the actual code changes (the diff against the base branch). The code must actually be committed before you record a PASS, a PASS captures the current commit's content (not the SHA, a later squash/rebase is fine) as what you audited, and `/sprint-ship` will refuse anything whose content doesn't match it. If you're reviewing uncommitted work, say so and hold the verdict until Dev Team commits
 3. Verify against these criteria:
    - Does the code match every sprint requirement, including anything added or changed since you last looked?
    - Are there tests? Do they test meaningful scenarios?
