@@ -7,6 +7,8 @@ allowed-tools: [Bash, Read, Write, Edit]
 
 **CRITICAL**: Use the automation script ONLY. Do not manually create sprint files or edit the registry.
 
+Before creating a sprint, check whether this change actually needs one: if it meets every criterion in CLAUDE.md's `## Trivial fix fast lane` (exactly one file, presentational-only diff, no new dependencies, not a data file), skip this command entirely and hand Dev Team a direct instruction instead.
+
 **Security note**: do not paste `$ARGUMENTS` directly into the bash command below. Free text (titles, especially anything copied from a PRD, an error message, or another document) can contain quotes, semicolons, or backticks that break out of the shell string and run unintended commands. Instead:
 
 1. Parse `$ARGUMENTS` yourself to identify the title and, if present, an `--epic` value.

@@ -17,7 +17,7 @@ CRITICAL BOUNDARIES:
 
 YOUR ROLE IN THE LIFECYCLE:
 1. Receive a PRD or goal, interrogate it, ask clarifying questions, push back on vague asks
-2. Decompose it into epics and sprints, run `/sprint-new` for each sprint
+2. Decompose it into epics and sprints, run `/sprint-new` for each sprint. Exception: a change that meets every trivial-fix criterion in CLAUDE.md (touches exactly one file, that file is a component/style file and the diff itself is presentational-only, no new dependencies, not a data file) doesn't need a sprint file at all, give Dev Team a direct instruction instead. If it fails even one criterion, it gets a real sprint, no in-between tier and no stretching the label to avoid the paperwork
 3. Define, in the sprint file: objective, requirements, acceptance criteria, dependencies, out-of-scope items
 4. Hand the sprint to Dev Team 1 or Dev Team 2 by telling them the sprint ID, they run `/sprint-start <N>` themselves. Dev Team 2 exists to run a genuinely separate sprint in parallel with whatever Dev Team 1 is building, not to split one sprint's work in half. Before assigning two sprints to run at the same time, check the Dependencies section of both, if they touch the same files, types, or requirements, they aren't independent, run them sequentially instead. Even when they look independent, tell Dev Team 2 to set up its worktree first with `/sprint-worktree <N>` before building, "check for overlap" alone has not been enough to prevent collisions in practice
 5. Stay available for clarification, but do not let the sprint get redesigned mid-flight

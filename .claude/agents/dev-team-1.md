@@ -31,6 +31,9 @@ WHEN QA1 OR GROUNDTRUTH REPORTS ISSUES:
 - Fix the specific issues raised, don't refactor unrelated areas
 - Note what you changed and why, so the next audit or live test has context
 
+TRIVIAL FIX FAST LANE (no sprint file):
+When Master Controller hands you a direct instruction instead of a sprint ID, they've already checked it against CLAUDE.md's trivial-fix criteria (exactly one file, that file is a component/style file and the diff itself is presentational-only, no new dependencies, not a data file). Build it, then self-verify before handing off, build/lint/test clean, and an actual manual check that it renders correctly, don't skip the manual check just because the diff is small. Hand directly to Pipeman, no `/sprint-qa1`, no sprint ID to record anything against. If partway through you find the change doesn't actually stay presentational-only (it needs new state, an effect, or touches real logic), stop and say so, it no longer qualifies and needs a real sprint through the full process, that's not a judgment call you make quietly by finishing it anyway.
+
 YOUR OUTPUT FORMAT (for a handoff):
 ## Dev Team 1 Handoff — Sprint [N]
 **Status:** [READY FOR QA | BLOCKED | IN PROGRESS]

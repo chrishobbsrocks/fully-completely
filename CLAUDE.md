@@ -4,7 +4,11 @@ This project uses a sprint workflow enforced by `scripts/sprint_lifecycle.py`.
 Slash commands in `.claude/commands/` are the only supported way to move a
 sprint forward. Never edit `docs/sprints/registry.json` or anything in
 `docs/sprints/state/` by hand, and never move sprint files between folders
-yourself, the script owns that.
+yourself, the script owns that. The one deliberate exception to all of this
+is the trivial fix fast lane, see `## Trivial fix fast lane` below, a
+narrow category of change, judged against an objective checklist rather
+than a size or risk feeling, that skips the sprint file and the state
+machine entirely.
 
 **Only Pipeman ever runs `git push`, no exceptions, ever.** This holds
 regardless of which command you're running or which role's session is
@@ -87,6 +91,48 @@ same time is what has actually caused duplicate-attempt races and stale
 point into *this* repo's `scripts/sprint_lifecycle.py`, stop, you're looking
 at output from a different tool (a stale global command, a same-named script
 elsewhere on disk), not this project's lifecycle state.
+
+## Trivial fix fast lane
+
+Not every change needs the full lifecycle. On the downstream project this
+is drawn from, the QA1 + GroundTruth gate process has repeatedly caught
+real bugs, a double-click scoring race, a requirement a static audit
+missed but the live test caught, a synchronous-write race on a new storage
+key, and every one of those catches was on a change that touched state,
+logic, or persistence. None of the real catches were on visual/copy-only
+changes. Running the full two-gate process on a one-line footer reorder is
+where the actual friction lives, not the verification itself.
+
+**Criteria** (all must hold, this is a checklist, not a size or risk
+judgment call):
+- The diff touches exactly one file.
+- That file is a component/style file (`.tsx`/`.jsx`/`.css` or
+  equivalent), **and** the diff itself is markup, text content, or
+  style/className props only, no new or modified state, hooks, effects,
+  function bodies, or business logic of any kind.
+- No new dependencies.
+- Not a data file (a `cards.json`/`players.json`-equivalent). Content
+  changes still go through the existing lightweight content-sprint
+  pattern, a print/export pipeline can be affected by a content change in
+  ways a diff doesn't show.
+
+If every criterion holds: Master Controller (or whoever's directing the
+work) gives Dev Team a direct instruction, no `/sprint-new` required. Dev
+Team builds it, self-verifies (build, lint, and test clean, plus an actual
+manual check that it renders correctly, don't skip this because the diff
+is small), and hands directly to Pipeman. QA1's static audit and
+GroundTruth's live test are both skipped, but only for this category
+specifically, not the whole verification layer, Pipeman's normal pre-push
+checks (branch hygiene, clean build) still apply exactly as they do for
+every other push.
+
+If a change fails even one criterion, it goes through the full process,
+unchanged, no partial credit and no in-between tier. These criteria are
+deliberately mechanical, file count, file type, diff content, dependency
+changes, rather than a judgment call about how big or risky a change
+*feels*, so "trivial" can't quietly stretch over time to cover changes
+that actually needed a real audit. When in doubt, it isn't trivial, run
+the full process.
 
 ## Running two sprints at once
 
