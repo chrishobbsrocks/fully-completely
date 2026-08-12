@@ -627,10 +627,15 @@ def cmd_override(args) -> None:
         state = load_state(args.id)
 
         if args.gate == "dev-done-hash":
-            if state["phase"] != "qa1_audit" or state["qa1_audit_result"] != "PASS":
+            if state["qa1_audit_result"] != "PASS":
                 die(f"Sprint {args.id} has no QA1 PASS on record. This overrides drift "
                     "since a real PASS, it does not substitute for one, QA1 still has "
                     "to actually pass this sprint first.")
+            if state["phase"] != "qa1_audit":
+                die(f"Sprint {args.id} is in phase '{state['phase']}', not qa1_audit. "
+                    "dev-done-hash only re-stamps the sprint-file hash /sprint-dev-done "
+                    "checks, and only makes sense before that command has run. If you're "
+                    "trying to unstick a mismatch at ship time instead, use --gate ship-hash.")
             current_hash = file_hash(registry_sprint_file(args.id))
             if current_hash is None:
                 die(f"Sprint {args.id}'s sprint file could not be read, nothing to stamp.")

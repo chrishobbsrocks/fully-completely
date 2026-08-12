@@ -42,41 +42,56 @@ git config user.name "Smoke Test"
 git add -A
 git commit -q -m "sandbox baseline"
 
+# Captures the numeric sprint id `new` just created from its own stdout,
+# rather than assuming IDs increment one-per-test. Some tests below create a
+# sprint without ever `start`-ing it (the injection regression test), which
+# shifts every later hand-counted ID by one; that drift previously caused a
+# later test block to accidentally re-`start` (and wipe the history of) an
+# unrelated sprint from an earlier block. Reading the real ID back out
+# instead of counting by hand makes that class of bug impossible.
+new_sprint() {
+  local out id
+  out=$($SCRIPT new "$@")
+  id=$(echo "$out" | grep -oE 'Created sprint [0-9]+' | grep -oE '[0-9]+')
+  [ -n "$id" ] || fail "could not parse a sprint id out of 'new' output: $out"
+  echo "$id"
+}
+
 echo "== happy path with both fail-loops =="
-$SCRIPT new "Smoke test sprint" --epic "CI" > /dev/null
-$SCRIPT start 1 > /dev/null
-$SCRIPT qa1 1 --verdict FAIL --notes "expected fail" > /dev/null
-git commit -q --allow-empty -m "address QA1 feedback for sprint 1"
-$SCRIPT qa1 1 --verdict PASS --notes "ok" > /dev/null
-$SCRIPT dev-done 1 > /dev/null
+SPRINT_1=$(new_sprint "Smoke test sprint" --epic "CI")
+$SCRIPT start "$SPRINT_1" > /dev/null
+$SCRIPT qa1 "$SPRINT_1" --verdict FAIL --notes "expected fail" > /dev/null
+git commit -q --allow-empty -m "address QA1 feedback for sprint $SPRINT_1"
+$SCRIPT qa1 "$SPRINT_1" --verdict PASS --notes "ok" > /dev/null
+$SCRIPT dev-done "$SPRINT_1" > /dev/null
 AUDITED_COMMIT_1=$(git rev-parse HEAD)
-$SCRIPT ship 1 --commit "$AUDITED_COMMIT_1" > /dev/null
-$SCRIPT groundtruth 1 --verdict FAIL --notes "expected fail" > /dev/null
-$SCRIPT reship 1 --commit smoke2 > /dev/null
-$SCRIPT groundtruth 1 --verdict PASS --notes "ok" > /dev/null
-$SCRIPT complete 1 > /dev/null
-STATUS=$($SCRIPT status 1)
-echo "$STATUS" | grep -q "Phase: complete" || fail "sprint 1 did not reach complete"
+$SCRIPT ship "$SPRINT_1" --commit "$AUDITED_COMMIT_1" > /dev/null
+$SCRIPT groundtruth "$SPRINT_1" --verdict FAIL --notes "expected fail" > /dev/null
+$SCRIPT reship "$SPRINT_1" --commit smoke2 > /dev/null
+$SCRIPT groundtruth "$SPRINT_1" --verdict PASS --notes "ok" > /dev/null
+$SCRIPT complete "$SPRINT_1" > /dev/null
+STATUS=$($SCRIPT status "$SPRINT_1")
+echo "$STATUS" | grep -q "Phase: complete" || fail "sprint $SPRINT_1 did not reach complete"
 echo "$STATUS" | grep -q "QA1 audit result: PASS" || fail "qa1 result not recorded"
 echo "$STATUS" | grep -q "GroundTruth live result: PASS" || fail "groundtruth result not recorded"
 
 echo "== completion actually relocates the file and updates its frontmatter, not just the phase =="
-DONE_FILE=$(find docs/sprints/3-done -name 'sprint-1_*.md' 2>/dev/null)
-[ -n "$DONE_FILE" ] || fail "sprint 1's file was not moved to docs/sprints/3-done/"
-[ ! -e docs/sprints/2-in-progress/sprint-1_smoke-test-sprint.md ] || fail "sprint 1's file is still in 2-in-progress/"
-grep -q '^status: done$' "$DONE_FILE" || fail "sprint 1's file frontmatter status was not updated to done"
+DONE_FILE=$(find docs/sprints/3-done -name "sprint-${SPRINT_1}_*.md" 2>/dev/null)
+[ -n "$DONE_FILE" ] || fail "sprint $SPRINT_1's file was not moved to docs/sprints/3-done/"
+[ ! -e "docs/sprints/2-in-progress/sprint-${SPRINT_1}_smoke-test-sprint.md" ] || fail "sprint $SPRINT_1's file is still in 2-in-progress/"
+grep -q '^status: done$' "$DONE_FILE" || fail "sprint $SPRINT_1's file frontmatter status was not updated to done"
 
 echo "== refusal paths =="
-$SCRIPT new "Edge case sprint" > /dev/null
-$SCRIPT start 2 > /dev/null
+SPRINT_2=$(new_sprint "Edge case sprint")
+$SCRIPT start "$SPRINT_2" > /dev/null
 
-$SCRIPT qa1 2 --verdict MAYBE > /tmp/out.txt 2>&1 && fail "bad verdict was accepted" || true
+$SCRIPT qa1 "$SPRINT_2" --verdict MAYBE > /tmp/out.txt 2>&1 && fail "bad verdict was accepted" || true
 grep -q "Verdict must be one of" /tmp/out.txt || fail "bad verdict error message missing"
 
-$SCRIPT ship 2 --commit x > /tmp/out.txt 2>&1 && fail "shipped before qa1/dev-done" || true
+$SCRIPT ship "$SPRINT_2" --commit x > /tmp/out.txt 2>&1 && fail "shipped before qa1/dev-done" || true
 grep -q "Pipeman can't ship yet" /tmp/out.txt || fail "ship-too-early error message missing"
 
-$SCRIPT complete 2 > /tmp/out.txt 2>&1 && fail "closed before any gate passed" || true
+$SCRIPT complete "$SPRINT_2" > /tmp/out.txt 2>&1 && fail "closed before any gate passed" || true
 grep -q "not ready to close" /tmp/out.txt || fail "early-complete error message missing"
 
 echo "" > /tmp/blank.txt
@@ -94,60 +109,60 @@ $SCRIPT new --title-file /tmp/evil.txt > /dev/null
 rm -f /tmp/evil.txt /tmp/PWNED /tmp/out.txt
 
 echo "== two independent sprints running concurrently =="
-$SCRIPT new "Parallel sprint A" > /dev/null   # sprint 3
-$SCRIPT start 3 > /dev/null
-$SCRIPT new "Parallel sprint B" > /dev/null   # sprint 4
-$SCRIPT start 4 > /dev/null
-$SCRIPT qa1 3 --verdict PASS --notes ok > /dev/null
-$SCRIPT status 4 | grep -q "Phase: dev_build" || fail "sprint 4 state was affected by sprint 3's transition"
+SPRINT_A=$(new_sprint "Parallel sprint A")
+$SCRIPT start "$SPRINT_A" > /dev/null
+SPRINT_B=$(new_sprint "Parallel sprint B")
+$SCRIPT start "$SPRINT_B" > /dev/null
+$SCRIPT qa1 "$SPRINT_A" --verdict PASS --notes ok > /dev/null
+$SCRIPT status "$SPRINT_B" | grep -q "Phase: dev_build" || fail "sprint $SPRINT_B state was affected by sprint $SPRINT_A's transition"
 
 echo "== dev-done refuses (no override) if the sprint file changed since QA1's PASS =="
-$SCRIPT new "Stale audit sprint" > /dev/null   # sprint 5
-$SCRIPT start 5 > /dev/null
-$SCRIPT qa1 5 --verdict PASS --notes "looked good" > /dev/null
-STALE_FILE=$(find docs/sprints/2-in-progress -name 'sprint-5_*.md')
+SPRINT_STALE=$(new_sprint "Stale audit sprint")
+$SCRIPT start "$SPRINT_STALE" > /dev/null
+$SCRIPT qa1 "$SPRINT_STALE" --verdict PASS --notes "looked good" > /dev/null
+STALE_FILE=$(find docs/sprints/2-in-progress -name "sprint-${SPRINT_STALE}_*.md")
 echo "### Requirements amended after audit" >> "$STALE_FILE"
 
-$SCRIPT dev-done 5 > /tmp/out.txt 2>&1 && fail "dev-done succeeded despite sprint file changing after QA1's PASS" || true
+$SCRIPT dev-done "$SPRINT_STALE" > /tmp/out.txt 2>&1 && fail "dev-done succeeded despite sprint file changing after QA1's PASS" || true
 grep -q "has changed since QA1's PASS" /tmp/out.txt || fail "stale-audit refusal message missing"
 grep -q "\-\-override" /tmp/out.txt && fail "refusal message must not offer an override"
 
-$SCRIPT qa1 5 --verdict PASS --notes "re-audited the amendment" > /dev/null
-$SCRIPT dev-done 5 > /dev/null || fail "dev-done still refused after a fresh QA1 PASS on the current file"
+$SCRIPT qa1 "$SPRINT_STALE" --verdict PASS --notes "re-audited the amendment" > /dev/null
+$SCRIPT dev-done "$SPRINT_STALE" > /dev/null || fail "dev-done still refused after a fresh QA1 PASS on the current file"
 rm -f /tmp/out.txt
 
 echo "== ship refuses (no override) if the commit's content differs from what QA1 audited =="
-$SCRIPT new "Commit drift sprint" > /dev/null   # sprint 6
-$SCRIPT start 6 > /dev/null
-git commit -q --allow-empty -m "sprint 6 initial work"
-$SCRIPT qa1 6 --verdict PASS --notes "looked good" > /dev/null
-$SCRIPT dev-done 6 > /dev/null
+SPRINT_DRIFT=$(new_sprint "Commit drift sprint")
+$SCRIPT start "$SPRINT_DRIFT" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_DRIFT initial work"
+$SCRIPT qa1 "$SPRINT_DRIFT" --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done "$SPRINT_DRIFT" > /dev/null
 # a real content change lands after QA1's PASS, unaudited
 echo "sneaky change" > sneaky.txt
 git add sneaky.txt
 git commit -q -m "unaudited change after QA1 PASS"
 DRIFTED_COMMIT=$(git rev-parse HEAD)
 
-$SCRIPT ship 6 --commit "$DRIFTED_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded on a commit QA1 never audited" || true
+$SCRIPT ship "$SPRINT_DRIFT" --commit "$DRIFTED_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded on a commit QA1 never audited" || true
 grep -q "doesn't match what QA1 audited" /tmp/out.txt || fail "commit-drift refusal message missing"
 grep -q "\-\-override" /tmp/out.txt && fail "commit-drift refusal message must not offer an override"
 
 echo "== ship tolerates a content-preserving amend/rebase after a fresh QA1 PASS (tree hash, not commit SHA) =="
-$SCRIPT qa1 6 --verdict PASS --notes "re-audited the sneaky change" > /dev/null
-$SCRIPT dev-done 6 > /dev/null   # a fresh qa1 PASS resets phase, dev-done must be re-run before ship
+$SCRIPT qa1 "$SPRINT_DRIFT" --verdict PASS --notes "re-audited the sneaky change" > /dev/null
+$SCRIPT dev-done "$SPRINT_DRIFT" > /dev/null   # a fresh qa1 PASS resets phase, dev-done must be re-run before ship
 # simulate Pipeman's documented squash/rebase step: same file content, new SHA
-git commit -q --amend -m "sprint 6 work (squashed for history hygiene)"
+git commit -q --amend -m "sprint $SPRINT_DRIFT work (squashed for history hygiene)"
 AMENDED_COMMIT=$(git rev-parse HEAD)
 [ "$AMENDED_COMMIT" != "$DRIFTED_COMMIT" ] || fail "test setup broken: amend did not change the commit SHA"
-$SCRIPT ship 6 --commit "$AMENDED_COMMIT" > /dev/null || fail "ship refused a content-identical commit just because rebase/amend changed its SHA"
+$SCRIPT ship "$SPRINT_DRIFT" --commit "$AMENDED_COMMIT" > /dev/null || fail "ship refused a content-identical commit just because rebase/amend changed its SHA"
 rm -f /tmp/out.txt
 
 echo "== dev-done/ship give a distinct 'nothing recorded' message for a pre-upgrade sprint missing the hash fields =="
-$SCRIPT new "Legacy sprint" > /dev/null   # sprint 7
-$SCRIPT start 7 > /dev/null
-git commit -q --allow-empty -m "sprint 7 work"
-$SCRIPT qa1 7 --verdict PASS --notes "looked good" > /dev/null
-LEGACY_STATE="docs/sprints/state/sprint-7.json"
+SPRINT_LEGACY=$(new_sprint "Legacy sprint")
+$SCRIPT start "$SPRINT_LEGACY" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_LEGACY work"
+$SCRIPT qa1 "$SPRINT_LEGACY" --verdict PASS --notes "looked good" > /dev/null
+LEGACY_STATE="docs/sprints/state/sprint-${SPRINT_LEGACY}.json"
 # simulate a sprint that PASSed under a version of this script from before
 # the hash fields existed, by stripping them out of an otherwise-valid PASS
 python3 -c "
@@ -159,12 +174,12 @@ del s['qa1_audited_tree_hash']
 json.dump(s, open(p, 'w'), indent=2)
 "
 
-$SCRIPT dev-done 7 > /tmp/out.txt 2>&1 && fail "dev-done succeeded on a sprint with no recorded audit hash" || true
+$SCRIPT dev-done "$SPRINT_LEGACY" > /tmp/out.txt 2>&1 && fail "dev-done succeeded on a sprint with no recorded audit hash" || true
 grep -q "no QA1-audited sprint-file hash on record" /tmp/out.txt || fail "legacy-sprint dev-done message missing"
 grep -q "has changed since QA1's PASS" /tmp/out.txt && fail "legacy sprint should not be told the file 'changed', nothing was ever recorded to compare against"
 
-$SCRIPT qa1 7 --verdict PASS --notes "re-audited under the upgraded script" > /dev/null
-$SCRIPT dev-done 7 > /dev/null || fail "dev-done still failed after a fresh QA1 PASS backfilled the hash fields"
+$SCRIPT qa1 "$SPRINT_LEGACY" --verdict PASS --notes "re-audited under the upgraded script" > /dev/null
+$SCRIPT dev-done "$SPRINT_LEGACY" > /dev/null || fail "dev-done still failed after a fresh QA1 PASS backfilled the hash fields"
 
 # repeat the same distinction one step later, for ship's tree-hash field
 python3 -c "
@@ -175,7 +190,7 @@ del s['qa1_audited_tree_hash']
 json.dump(s, open(p, 'w'), indent=2)
 "
 LEGACY_COMMIT=$(git rev-parse HEAD)
-$SCRIPT ship 7 --commit "$LEGACY_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded on a sprint with no recorded audited commit" || true
+$SCRIPT ship "$SPRINT_LEGACY" --commit "$LEGACY_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded on a sprint with no recorded audited commit" || true
 grep -q "no QA1-audited commit on record" /tmp/out.txt || fail "legacy-sprint ship message missing"
 grep -q "doesn't match what QA1 audited" /tmp/out.txt && fail "legacy sprint should not be told the commit 'doesn't match', nothing was ever recorded to compare against"
 rm -f /tmp/out.txt
@@ -185,66 +200,82 @@ printf '\n### Example config\n```json\n{ "key": "value" }\n```\n' >> templates/s
 $SCRIPT new "Brace test sprint" > /dev/null || fail "sprint creation broke on a template containing literal { }"
 
 echo "== concurrent writes to the same sprint don't corrupt state or lose an update (file locking) =="
-$SCRIPT new "Race sprint" > /dev/null   # sprint 9
-$SCRIPT start 9 > /dev/null
-( $SCRIPT qa1 9 --verdict FAIL --notes "race A" > /dev/null 2>&1 ) &
+SPRINT_RACE=$(new_sprint "Race sprint")
+$SCRIPT start "$SPRINT_RACE" > /dev/null
+( $SCRIPT qa1 "$SPRINT_RACE" --verdict FAIL --notes "race A" > /dev/null 2>&1 ) &
 RACE_PID1=$!
-( $SCRIPT qa1 9 --verdict CONDITIONAL --notes "race B" > /dev/null 2>&1 ) &
+( $SCRIPT qa1 "$SPRINT_RACE" --verdict CONDITIONAL --notes "race B" > /dev/null 2>&1 ) &
 RACE_PID2=$!
 wait "$RACE_PID1" "$RACE_PID2"
-RACE_STATUS=$($SCRIPT status 9 --verbose)
+RACE_STATUS=$($SCRIPT status "$SPRINT_RACE" --verbose)
 echo "$RACE_STATUS" | grep -q "rounds: 2" || fail "concurrent qa1 writes lost an update, expected audit_rounds: 2"
-python3 -c "import json; json.load(open('docs/sprints/state/sprint-9.json'))" || fail "sprint 9 state file is corrupted JSON after concurrent writes"
+python3 -c "import json; json.load(open('docs/sprints/state/sprint-${SPRINT_RACE}.json'))" || fail "sprint $SPRINT_RACE state file is corrupted JSON after concurrent writes"
 
 echo "== override refuses without the exact --confirm value, and without a --reason =="
-$SCRIPT new "Override refusal sprint" > /dev/null   # sprint 10
-$SCRIPT start 10 > /dev/null
-git commit -q --allow-empty -m "sprint 10 work"
-$SCRIPT qa1 10 --verdict PASS --notes "looked good" > /dev/null
+SPRINT_OVR_REFUSAL=$(new_sprint "Override refusal sprint")
+$SCRIPT start "$SPRINT_OVR_REFUSAL" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_OVR_REFUSAL work"
+$SCRIPT qa1 "$SPRINT_OVR_REFUSAL" --verdict PASS --notes "looked good" > /dev/null
 
-$SCRIPT override 10 --gate dev-done-hash --reason "test" --confirm YES > /tmp/out.txt 2>&1 && fail "override succeeded with the wrong --confirm value" || true
+$SCRIPT override "$SPRINT_OVR_REFUSAL" --gate dev-done-hash --reason "test" --confirm YES > /tmp/out.txt 2>&1 && fail "override succeeded with the wrong --confirm value" || true
 grep -q "must be exactly the literal word OVERRIDE" /tmp/out.txt || fail "wrong-confirm refusal message missing"
 
-$SCRIPT override 10 --gate dev-done-hash --confirm OVERRIDE > /tmp/out.txt 2>&1 && fail "override succeeded with an empty --reason" || true
+$SCRIPT override "$SPRINT_OVR_REFUSAL" --gate dev-done-hash --confirm OVERRIDE > /tmp/out.txt 2>&1 && fail "override succeeded with an empty --reason" || true
 grep -q -- "--reason is required" /tmp/out.txt || fail "empty-reason refusal message missing"
 rm -f /tmp/out.txt
 
 echo "== override unsticks a stale sprint-file hash, and is permanently logged with the given reason =="
-STALE_FILE_10=$(find docs/sprints/2-in-progress -name 'sprint-10_*.md')
-echo "### amendment after audit" >> "$STALE_FILE_10"
-$SCRIPT dev-done 10 > /tmp/out.txt 2>&1 && fail "dev-done succeeded despite a stale hash (test setup broken)" || true
+STALE_FILE_OVR=$(find docs/sprints/2-in-progress -name "sprint-${SPRINT_OVR_REFUSAL}_*.md")
+echo "### amendment after audit" >> "$STALE_FILE_OVR"
+$SCRIPT dev-done "$SPRINT_OVR_REFUSAL" > /tmp/out.txt 2>&1 && fail "dev-done succeeded despite a stale hash (test setup broken)" || true
 grep -q "has changed since QA1's PASS" /tmp/out.txt || fail "expected stale-hash refusal did not occur"
 
-$SCRIPT override 10 --gate dev-done-hash --reason "reviewed the amendment personally, cosmetic only" --confirm OVERRIDE > /dev/null || fail "override refused despite a valid --confirm and --reason"
-$SCRIPT dev-done 10 > /dev/null || fail "dev-done still refused after a valid override re-stamped the hash"
-OVERRIDE_STATUS=$($SCRIPT status 10 --verbose)
+$SCRIPT override "$SPRINT_OVR_REFUSAL" --gate dev-done-hash --reason "reviewed the amendment personally, cosmetic only" --confirm OVERRIDE > /dev/null || fail "override refused despite a valid --confirm and --reason"
+$SCRIPT dev-done "$SPRINT_OVR_REFUSAL" > /dev/null || fail "dev-done still refused after a valid override re-stamped the hash"
+OVERRIDE_STATUS=$($SCRIPT status "$SPRINT_OVR_REFUSAL" --verbose)
 echo "$OVERRIDE_STATUS" | grep -q "human-override" || fail "override was not recorded in the sprint's history"
 echo "$OVERRIDE_STATUS" | grep -q "reviewed the amendment personally" || fail "override reason was not recorded in the sprint's history"
 rm -f /tmp/out.txt
 
+echo "== dev-done-hash override refuses on the right sprint but the wrong phase, with an accurate message (not 'no PASS') =="
+$SCRIPT override "$SPRINT_OVR_REFUSAL" --gate dev-done-hash --reason "trying to re-use this gate after dev-done already succeeded" --confirm OVERRIDE > /tmp/out.txt 2>&1 && fail "dev-done-hash override succeeded on a sprint already past qa1_audit phase" || true
+grep -q "no QA1 PASS on record" /tmp/out.txt && fail "wrong-phase refusal must not claim there's no PASS on record, this sprint has one"
+grep -q "not qa1_audit" /tmp/out.txt || fail "wrong-phase refusal message missing or not phase-specific"
+rm -f /tmp/out.txt
+
 echo "== override on a sprint QA1 never actually passed still refuses (it overrides drift, not a missing PASS) =="
-$SCRIPT new "Never audited sprint" > /dev/null   # sprint 11
-$SCRIPT start 11 > /dev/null
-$SCRIPT override 11 --gate dev-done-hash --reason "trying to skip QA1 entirely" --confirm OVERRIDE > /tmp/out.txt 2>&1 && fail "override let a sprint bypass QA1 entirely" || true
+SPRINT_NEVER_AUDITED=$(new_sprint "Never audited sprint")
+$SCRIPT start "$SPRINT_NEVER_AUDITED" > /dev/null
+$SCRIPT override "$SPRINT_NEVER_AUDITED" --gate dev-done-hash --reason "trying to skip QA1 entirely" --confirm OVERRIDE > /tmp/out.txt 2>&1 && fail "override let a sprint bypass QA1 entirely" || true
 grep -q "no QA1 PASS on record" /tmp/out.txt || fail "no-real-PASS refusal message missing"
 rm -f /tmp/out.txt
 
-echo "== override unsticks a commit-content mismatch at ship time =="
-$SCRIPT new "Ship override sprint" > /dev/null   # sprint 12
-$SCRIPT start 12 > /dev/null
-git commit -q --allow-empty -m "sprint 12 initial work"
-$SCRIPT qa1 12 --verdict PASS --notes "looked good" > /dev/null
-$SCRIPT dev-done 12 > /dev/null
-echo "unaudited" > sprint12-sneaky.txt
-git add sprint12-sneaky.txt
+echo "== ship-hash override refuses in the wrong phase (the precondition that keeps it from bypassing QA1) =="
+SPRINT_SHIP_WRONG_PHASE=$(new_sprint "Ship override wrong phase sprint")
+$SCRIPT start "$SPRINT_SHIP_WRONG_PHASE" > /dev/null
+$SCRIPT override "$SPRINT_SHIP_WRONG_PHASE" --gate ship-hash --reason "trying to stamp a ship hash before dev work is even agreed done" --confirm OVERRIDE > /tmp/out.txt 2>&1 && fail "ship-hash override succeeded on a sprint not yet dev_agreed_done" || true
+grep -q "not ready to ship" /tmp/out.txt || fail "ship-hash wrong-phase refusal message missing"
+rm -f /tmp/out.txt
+
+echo "== override unsticks a commit-content mismatch at ship time, and is permanently logged with the given reason =="
+SPRINT_SHIP_OVR=$(new_sprint "Ship override sprint")
+$SCRIPT start "$SPRINT_SHIP_OVR" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_SHIP_OVR initial work"
+$SCRIPT qa1 "$SPRINT_SHIP_OVR" --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done "$SPRINT_SHIP_OVR" > /dev/null
+echo "unaudited" > "sprint${SPRINT_SHIP_OVR}-sneaky.txt"
+git add "sprint${SPRINT_SHIP_OVR}-sneaky.txt"
 git commit -q -m "unaudited change after PASS"
 SHIP_OVERRIDE_COMMIT=$(git rev-parse HEAD)
 
-$SCRIPT ship 12 --commit "$SHIP_OVERRIDE_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded despite a content mismatch (test setup broken)" || true
+$SCRIPT ship "$SPRINT_SHIP_OVR" --commit "$SHIP_OVERRIDE_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded despite a content mismatch (test setup broken)" || true
 grep -q "doesn't match what QA1 audited" /tmp/out.txt || fail "expected ship-time content-mismatch refusal did not occur"
 
-$SCRIPT override 12 --gate ship-hash --reason "reviewed the extra commit personally, safe to ship" --confirm OVERRIDE > /dev/null || fail "ship-hash override refused despite a valid --confirm and --reason"
-$SCRIPT ship 12 --commit "$SHIP_OVERRIDE_COMMIT" > /dev/null || fail "ship still refused after a valid ship-hash override"
+$SCRIPT override "$SPRINT_SHIP_OVR" --gate ship-hash --reason "reviewed the extra commit personally, safe to ship" --confirm OVERRIDE > /dev/null || fail "ship-hash override refused despite a valid --confirm and --reason"
+$SCRIPT ship "$SPRINT_SHIP_OVR" --commit "$SHIP_OVERRIDE_COMMIT" > /dev/null || fail "ship still refused after a valid ship-hash override"
+SHIP_OVERRIDE_STATUS=$($SCRIPT status "$SPRINT_SHIP_OVR" --verbose)
+echo "$SHIP_OVERRIDE_STATUS" | grep -q "human-override" || fail "ship-hash override was not recorded in the sprint's history"
+echo "$SHIP_OVERRIDE_STATUS" | grep -q "reviewed the extra commit personally" || fail "ship-hash override reason was not recorded in the sprint's history"
 rm -f /tmp/out.txt
 
 echo "ALL SMOKE TESTS PASSED"
