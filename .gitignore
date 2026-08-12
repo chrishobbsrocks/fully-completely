@@ -6,21 +6,3 @@ __pycache__/
 # to serialize concurrent sprint_lifecycle.py invocations, never meant to
 # be committed.
 docs/sprints/.locks/
-
-# --- TEMPLATE-ONLY: delete this block after you install into your project ---
-# These lines exist only so this template repo doesn't ship its own example
-# sprint data. If you copied this workflow into a real project, DELETE the
-# block below so your sprint definitions and state history get committed
-# like any other file. Left in place, every real sprint you create and all
-# gate history in docs/sprints/state/ is untracked and unrecoverable from
-# git the moment something wipes your working tree, a bad `git clean`, a
-# disk failure, anything. This has actually happened; don't inherit it.
-docs/sprints/0-backlog/*
-docs/sprints/1-todo/*
-docs/sprints/2-in-progress/*
-docs/sprints/3-done/*
-docs/sprints/4-blocked/*
-docs/sprints/5-abandoned/*
-docs/sprints/state/*
-!docs/sprints/*/.gitkeep
-# --- end template-only block ---
