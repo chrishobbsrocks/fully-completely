@@ -196,4 +196,55 @@ RACE_STATUS=$($SCRIPT status 9 --verbose)
 echo "$RACE_STATUS" | grep -q "rounds: 2" || fail "concurrent qa1 writes lost an update, expected audit_rounds: 2"
 python3 -c "import json; json.load(open('docs/sprints/state/sprint-9.json'))" || fail "sprint 9 state file is corrupted JSON after concurrent writes"
 
+echo "== override refuses without the exact --confirm value, and without a --reason =="
+$SCRIPT new "Override refusal sprint" > /dev/null   # sprint 10
+$SCRIPT start 10 > /dev/null
+git commit -q --allow-empty -m "sprint 10 work"
+$SCRIPT qa1 10 --verdict PASS --notes "looked good" > /dev/null
+
+$SCRIPT override 10 --gate dev-done-hash --reason "test" --confirm YES > /tmp/out.txt 2>&1 && fail "override succeeded with the wrong --confirm value" || true
+grep -q "must be exactly the literal word OVERRIDE" /tmp/out.txt || fail "wrong-confirm refusal message missing"
+
+$SCRIPT override 10 --gate dev-done-hash --confirm OVERRIDE > /tmp/out.txt 2>&1 && fail "override succeeded with an empty --reason" || true
+grep -q -- "--reason is required" /tmp/out.txt || fail "empty-reason refusal message missing"
+rm -f /tmp/out.txt
+
+echo "== override unsticks a stale sprint-file hash, and is permanently logged with the given reason =="
+STALE_FILE_10=$(find docs/sprints/2-in-progress -name 'sprint-10_*.md')
+echo "### amendment after audit" >> "$STALE_FILE_10"
+$SCRIPT dev-done 10 > /tmp/out.txt 2>&1 && fail "dev-done succeeded despite a stale hash (test setup broken)" || true
+grep -q "has changed since QA1's PASS" /tmp/out.txt || fail "expected stale-hash refusal did not occur"
+
+$SCRIPT override 10 --gate dev-done-hash --reason "reviewed the amendment personally, cosmetic only" --confirm OVERRIDE > /dev/null || fail "override refused despite a valid --confirm and --reason"
+$SCRIPT dev-done 10 > /dev/null || fail "dev-done still refused after a valid override re-stamped the hash"
+OVERRIDE_STATUS=$($SCRIPT status 10 --verbose)
+echo "$OVERRIDE_STATUS" | grep -q "human-override" || fail "override was not recorded in the sprint's history"
+echo "$OVERRIDE_STATUS" | grep -q "reviewed the amendment personally" || fail "override reason was not recorded in the sprint's history"
+rm -f /tmp/out.txt
+
+echo "== override on a sprint QA1 never actually passed still refuses (it overrides drift, not a missing PASS) =="
+$SCRIPT new "Never audited sprint" > /dev/null   # sprint 11
+$SCRIPT start 11 > /dev/null
+$SCRIPT override 11 --gate dev-done-hash --reason "trying to skip QA1 entirely" --confirm OVERRIDE > /tmp/out.txt 2>&1 && fail "override let a sprint bypass QA1 entirely" || true
+grep -q "no QA1 PASS on record" /tmp/out.txt || fail "no-real-PASS refusal message missing"
+rm -f /tmp/out.txt
+
+echo "== override unsticks a commit-content mismatch at ship time =="
+$SCRIPT new "Ship override sprint" > /dev/null   # sprint 12
+$SCRIPT start 12 > /dev/null
+git commit -q --allow-empty -m "sprint 12 initial work"
+$SCRIPT qa1 12 --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done 12 > /dev/null
+echo "unaudited" > sprint12-sneaky.txt
+git add sprint12-sneaky.txt
+git commit -q -m "unaudited change after PASS"
+SHIP_OVERRIDE_COMMIT=$(git rev-parse HEAD)
+
+$SCRIPT ship 12 --commit "$SHIP_OVERRIDE_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded despite a content mismatch (test setup broken)" || true
+grep -q "doesn't match what QA1 audited" /tmp/out.txt || fail "expected ship-time content-mismatch refusal did not occur"
+
+$SCRIPT override 12 --gate ship-hash --reason "reviewed the extra commit personally, safe to ship" --confirm OVERRIDE > /dev/null || fail "ship-hash override refused despite a valid --confirm and --reason"
+$SCRIPT ship 12 --commit "$SHIP_OVERRIDE_COMMIT" > /dev/null || fail "ship still refused after a valid ship-hash override"
+rm -f /tmp/out.txt
+
 echo "ALL SMOKE TESTS PASSED"

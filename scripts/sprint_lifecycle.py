@@ -42,6 +42,13 @@ Phases (in order, with the loops):
                        close the sprint.
   complete         -> Closed. Sprint file moved to 3-done/.
   aborted          -> Abandoned. Sprint file moved to 5-abandoned/.
+
+The "no override" language above is accurate for every path an agent can
+reach: no flag on dev-done or ship bypasses either hash check, and neither
+is documented anywhere an agent reads. There is a separate `override`
+subcommand below (cmd_override) for the human running this project, not
+wired to any slash command, not mentioned in CLAUDE.md or any agent file
+on purpose, see docs/HUMAN_OVERRIDE.md before using it.
 """
 
 import argparse
@@ -596,6 +603,68 @@ def cmd_abort(args) -> None:
     print(f"Sprint {args.id} aborted. Reason: {reason or '(none given)'}")
 
 
+def cmd_override(args) -> None:
+    """Human-only escape hatch. Deliberately absent from .claude/commands/ (no
+    slash command wraps this) and never mentioned in CLAUDE.md or any agent
+    file, see docs/HUMAN_OVERRIDE.md. QA1's and Pipeman's hash checks refuse
+    outright with no override by design, that's what makes them mean
+    something; this exists for the human ultimately accountable to force
+    past drift they've personally reviewed, not for any of the six roles to
+    reach for. It never fabricates a QA1 PASS that never happened, only
+    re-stamps the hash a gate compares against, so the underlying
+    requirement (a real PASS on record) still has to be true first."""
+    if args.confirm != "OVERRIDE":
+        die("Refusing: --confirm must be exactly the literal word OVERRIDE, typed "
+            "deliberately. This command exists for a human who has personally "
+            "reviewed the drift and is taking explicit responsibility for it.")
+    reason = resolve_text(args.reason, args.reason_file)
+    if not reason.strip():
+        die("--reason is required and must be non-empty. State exactly what you "
+            "reviewed and why it's safe to proceed despite the mismatch, this is "
+            "written permanently into the sprint's history.")
+
+    with locked(f"sprint-{args.id}"):
+        state = load_state(args.id)
+
+        if args.gate == "dev-done-hash":
+            if state["phase"] != "qa1_audit" or state["qa1_audit_result"] != "PASS":
+                die(f"Sprint {args.id} has no QA1 PASS on record. This overrides drift "
+                    "since a real PASS, it does not substitute for one, QA1 still has "
+                    "to actually pass this sprint first.")
+            current_hash = file_hash(registry_sprint_file(args.id))
+            if current_hash is None:
+                die(f"Sprint {args.id}'s sprint file could not be read, nothing to stamp.")
+            old_hash = state.get("qa1_audit_file_hash")
+            state["qa1_audit_file_hash"] = current_hash
+            log_event(state, "human-override", "dev_done_hash_override",
+                      f"reason={reason} | old_hash={old_hash} | new_hash={current_hash}")
+            save_state(args.id, state)
+            print(f"Sprint {args.id}: sprint-file hash re-stamped to current content.")
+            print("/sprint-dev-done will now proceed normally. This override is "
+                  "permanently recorded in the sprint's history.")
+
+        elif args.gate == "ship-hash":
+            if state["phase"] != "dev_agreed_done":
+                die(f"Sprint {args.id} is in phase '{state['phase']}', not ready to ship, "
+                    "override doesn't change that, dev work must be agreed done first.")
+            target_ref = args.commit or "HEAD"
+            current_tree = git_tree_hash(target_ref)
+            if current_tree is None:
+                die(f"'{target_ref}' does not resolve to a real commit in this repo, "
+                    "nothing to stamp.")
+            old_tree = state.get("qa1_audited_tree_hash")
+            state["qa1_audited_tree_hash"] = current_tree
+            log_event(state, "human-override", "ship_hash_override",
+                      f"reason={reason} | old_tree={old_tree} | new_tree={current_tree}")
+            save_state(args.id, state)
+            print(f"Sprint {args.id}: audited commit re-stamped to '{target_ref}'s current content.")
+            print("/sprint-ship will now proceed normally for a commit matching that "
+                  "content. This override is permanently recorded in the sprint's history.")
+
+        else:
+            die(f"Unknown --gate '{args.gate}'. Valid gates: dev-done-hash, ship-hash.")
+
+
 def cmd_list(args) -> None:
     reg = load_registry()
     if not reg["sprints"]:
@@ -646,6 +715,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--reason", default="")
     s.add_argument("--reason-file", help="Read the reason from this file instead of the command line.")
     s.set_defaults(func=cmd_abort)
+
+    # Deliberately not wired to any .claude/commands/*.md slash command, and
+    # never mentioned in CLAUDE.md or any agent file, see cmd_override's
+    # docstring and docs/HUMAN_OVERRIDE.md. Keeping it CLI-only, undiscoverable
+    # via / autocomplete, is intentional.
+    s = sub.add_parser("override")
+    s.add_argument("id", type=int)
+    s.add_argument("--gate", required=True, choices=["dev-done-hash", "ship-hash"])
+    s.add_argument("--reason", default="")
+    s.add_argument("--reason-file", help="Read the reason from this file instead of the command line.")
+    s.add_argument("--confirm", required=True, help="Must be exactly the literal word OVERRIDE.")
+    s.add_argument("--commit", default="", help="ship-hash only: which commit to stamp as audited (defaults to HEAD).")
+    s.set_defaults(func=cmd_override)
 
     s = sub.add_parser("list"); s.set_defaults(func=cmd_list)
 
