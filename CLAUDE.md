@@ -265,10 +265,11 @@ domain type locations, error handling conventions, git strategy, testing
 requirements, security baseline). Every agent above should read this file
 before starting work, so keep it current.
 
-**This is Fully Completely, not Maestro.** This machine also has a separate,
-unrelated sprint-workflow product called Maestro installed globally
-(`maestro-*`/`epic-*`/`project-*` skills), rolled out to several other
-projects. It shares structural similarity with this project (both are
+**This is Fully Completely, not Maestro.** The machine running this may also
+have a separate, unrelated sprint-workflow product called Maestro installed
+globally (`maestro-*`/`epic-*`/`project-*` skills). If those skills show up
+in the available-skills list, that's a fact about this machine, not about
+this project. It shares structural similarity with this project (both are
 sprint-lifecycle workflows) and possibly some shared lineage, but they are
 two different systems. Do not refer to this project as "Maestro," assume
 it uses Maestro's conventions, or treat the two as interchangeable, even
