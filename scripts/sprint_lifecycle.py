@@ -38,8 +38,9 @@ Phases (in order, with the loops):
                        fresh look after mid-build requirement changes —
                        is now QA1's responsibility at gate 1 (see above).
   complete_ready   -> Both gates (QA1 audit + GroundTruth live test) have
-                       passed. Waiting for /sprint-complete to actually
-                       close the sprint.
+                       passed. Waiting for /sprint-complete AND the user's
+                       explicit, real-time go-ahead (--user-said) to
+                       actually close the sprint.
   complete         -> Closed. Sprint file moved to 3-done/.
   aborted          -> Abandoned. Sprint file moved to 5-abandoned/.
 
@@ -538,7 +539,9 @@ def cmd_groundtruth(args) -> None:
             state["phase"] = "complete_ready"
             print(f"GroundTruth live test PASSED (round {state['live_test_rounds']}). "
                   f"Sprint {args.id} is complete-ready.")
-            print("Dev Team: run /sprint-complete to close it out.")
+            print("Dev Team: tell the user the sprint is ready and wait. "
+                  "/sprint-complete requires the user's explicit, real-time "
+                  "go-ahead (--user-said) — both gates passing is not that.")
         else:
             print(f"GroundTruth live test {verdict} (round {state['live_test_rounds']}). "
                   "Dev Team: fix, then Pipeman: /sprint-reship.")
@@ -547,6 +550,24 @@ def cmd_groundtruth(args) -> None:
 
 
 def cmd_complete(args) -> None:
+    # Both gates passing is necessary but never sufficient on its own to
+    # close a sprint, that only tells you the code is ready, not that the
+    # human has actually decided, right now, to close it. This check runs
+    # before the lock and before the gate checks below on purpose, same as
+    # override's --confirm/--reason: it's argument validation, independent
+    # of sprint state, and it should refuse before touching anything else.
+    # No override exists for this, unlike the hash gates: this isn't
+    # drift to unstick, it's the one place in the lifecycle a human's
+    # real-time word is the actual requirement, not a proxy for one.
+    user_said = resolve_text(args.user_said, args.user_said_file)
+    if not user_said.strip():
+        die("--user-said is required and must be non-empty. Quote what the "
+            "user actually told you, in this session, that authorizes closing "
+            "this sprint right now. Both QA1 and GroundTruth passing means the "
+            "code is ready to close, not that you're authorized to close it, "
+            "don't infer authorization from gate status alone, wait for the "
+            "user to actually say so.")
+
     with locked("registry"), locked(f"sprint-{args.id}"):
         state = load_state(args.id)
         missing = []
@@ -573,9 +594,9 @@ def cmd_complete(args) -> None:
 
         state["phase"] = "complete"
         state["completed"] = now()
-        log_event(state, "dev-team", "sprint_closed")
+        log_event(state, "dev-team", "sprint_closed", f"user_said={user_said}")
         save_state(args.id, state)
-    print(f"Sprint {args.id} closed. Both gates confirmed: QA1 audit, GroundTruth live test.")
+    print(f"Sprint {args.id} closed. Confirmed: QA1 audit, GroundTruth live test, user authorization.")
 
 
 def cmd_abort(args) -> None:
@@ -713,7 +734,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--notes-file", help="Read notes from this file instead of the command line.")
     s.set_defaults(func=cmd_groundtruth)
 
-    s = sub.add_parser("complete"); s.add_argument("id", type=int); s.set_defaults(func=cmd_complete)
+    s = sub.add_parser("complete")
+    s.add_argument("id", type=int)
+    s.add_argument("--user-said", default="",
+                    help="Required. Quote what the user actually told you, in this "
+                    "session, that authorizes closing this sprint right now. Both "
+                    "gates passing is not authorization on its own.")
+    s.add_argument("--user-said-file", help="Read --user-said from this file instead of the command line.")
+    s.set_defaults(func=cmd_complete)
 
     s = sub.add_parser("abort")
     s.add_argument("id", type=int)

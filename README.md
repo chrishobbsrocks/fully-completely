@@ -10,7 +10,11 @@ things forward, and a script that refuses to skip steps.
 The key difference from a simple "ask the agent nicely" workflow: closing
 a sprint is not optional-honesty, `/sprint-complete` will not run unless
 QA1's audit and GroundTruth's live test have both actually been recorded
-as PASS. Try to close early and it tells you exactly what's missing.
+as PASS, **and** the user has explicitly authorized closing it right now
+(`--user-said "..."`, required, non-empty — both gates passing tells you
+the code is ready, not that the user has decided to close it). Try to
+close early, or without that authorization, and it tells you exactly
+what's missing.
 
 ## What's here
 
@@ -70,8 +74,9 @@ python3 scripts/sprint_lifecycle.py ship 1 --commit abc123
 # GroundTruth tests the live deploy
 python3 scripts/sprint_lifecycle.py groundtruth 1 --verdict PASS --notes "3/3 clean runs"
 
-# Dev Team closes it out (same session that ran `start`, not Master Controller)
-python3 scripts/sprint_lifecycle.py complete 1
+# Dev Team closes it out (same session that ran `start`, not Master Controller),
+# only once the user has actually said to close it, not just because both gates are green
+python3 scripts/sprint_lifecycle.py complete 1 --user-said "close it"
 ```
 
 If you're running inside Claude Code, use the slash-command form instead
@@ -95,6 +100,14 @@ won't let either one stand in for the other, and refuses to close a sprint
 missing either. If GroundTruth's live test fails, the fix loop is Dev Team
 fixes → Pipeman `/sprint-reship` → GroundTruth retests, without needing to
 redo the whole sprint.
+
+Passing both gates is still not enough on its own: `/sprint-complete` also
+requires `--user-said "..."`, quoting what the user actually said, in that
+session, authorizing the close right now. Gate status answers "is the code
+ready," not "did the user decide to ship it," and the two aren't allowed to
+get conflated — Dev Team tells the user a sprint is ready and waits for
+them to actually say so, rather than closing automatically the moment both
+gates go green.
 
 Earlier versions of this template ran QA1 twice, a static audit before
 shipping and a second "final check" after GroundTruth passed. Across ~13
@@ -135,21 +148,25 @@ run something else entirely, this was verified, not theoretical.
 All of this now runs automatically on every push and pull request via
 `.github/workflows/scan.yml`: bandit, pyflakes, and
 `scripts/smoke_test.sh`, a full lifecycle run including both fail-loops,
-the two-gate close refusal, and a regression check that the exact
-injection payload above stays inert. It runs on Python 3.9 and 3.12
+the close refusal (both gates, and the user-authorization requirement),
+and a regression check that the exact injection payload above stays
+inert. It runs on Python 3.9 and 3.12
 both, so a future change that reintroduces a 3.10-only type hint gets
 caught too.
 
 The fix: every command that takes free text supports a `--*-file`
 variant (`--title-file`, `--epic-file`, `--notes-file`,
-`--reason-file`). The corresponding `.claude/commands/*.md` files
-instruct Claude to write the free text to a temp file with the Write
-tool first, then reference that file in the command, so untrusted text
-never gets interpolated into a shell string. `sprint-start`,
-`sprint-status`, `sprint-dev-done`, `sprint-ship`, `sprint-reship`,
-`sprint-complete`, and `sprint-list` only take a sprint ID, verdict
+`--reason-file`, `--user-said-file`). The corresponding
+`.claude/commands/*.md` files instruct Claude to write the free text to
+a temp file with the Write tool first, then reference that file in the
+command, so untrusted text never gets interpolated into a shell string.
+`sprint-start`, `sprint-status`, `sprint-dev-done`, `sprint-ship`,
+`sprint-reship`, and `sprint-list` only take a sprint ID, verdict
 keyword, or commit hash, low-entropy values you'd type yourself, so
-they were left as direct arguments.
+they were left as direct arguments. `sprint-complete` looks similar at
+a glance but isn't: `--user-said` is free text (it quotes what the user
+actually said), so it gets the same `--user-said-file` treatment as
+`--reason` and `--notes`, not the low-entropy treatment.
 
 Also fixed:
 - Sprint state and registry files are now written atomically (temp

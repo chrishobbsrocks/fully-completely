@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test for the sprint lifecycle script: exercises the full happy path,
-# both fail-loops, the two-gate refusal, and the standard edge cases (bad
-# verdict, skipping a phase, closing early, empty title). Exits non-zero on
-# the first unexpected result.
+# both fail-loops, the close refusal (both gates, and the user-authorization
+# requirement), and the standard edge cases (bad verdict, skipping a phase,
+# closing early, empty title). Exits non-zero on the first unexpected result.
 #
 # Runs entirely inside a throwaway sandbox directory (mktemp -d), never
 # against this repo's own docs/sprints/. Note that just `cd`-ing elsewhere
@@ -69,11 +69,21 @@ $SCRIPT ship "$SPRINT_1" --commit "$AUDITED_COMMIT_1" > /dev/null
 $SCRIPT groundtruth "$SPRINT_1" --verdict FAIL --notes "expected fail" > /dev/null
 $SCRIPT reship "$SPRINT_1" --commit smoke2 > /dev/null
 $SCRIPT groundtruth "$SPRINT_1" --verdict PASS --notes "ok" > /dev/null
-$SCRIPT complete "$SPRINT_1" > /dev/null
+
+echo "== complete refuses (no override) without a non-empty --user-said, even with both gates PASS =="
+$SCRIPT complete "$SPRINT_1" > /tmp/out.txt 2>&1 && fail "complete succeeded with no --user-said at all, despite both gates passing" || true
+grep -q -- "--user-said is required" /tmp/out.txt || fail "missing --user-said refusal message missing"
+
+$SCRIPT complete "$SPRINT_1" --user-said "   " > /tmp/out.txt 2>&1 && fail "complete succeeded with a whitespace-only --user-said" || true
+grep -q -- "--user-said is required" /tmp/out.txt || fail "whitespace-only --user-said refusal message missing"
+rm -f /tmp/out.txt
+
+$SCRIPT complete "$SPRINT_1" --user-said "close sprint 1, both gates look good" > /dev/null
 STATUS=$($SCRIPT status "$SPRINT_1")
 echo "$STATUS" | grep -q "Phase: complete" || fail "sprint $SPRINT_1 did not reach complete"
 echo "$STATUS" | grep -q "QA1 audit result: PASS" || fail "qa1 result not recorded"
 echo "$STATUS" | grep -q "GroundTruth live result: PASS" || fail "groundtruth result not recorded"
+$SCRIPT status "$SPRINT_1" --verbose | grep -q "close sprint 1, both gates look good" || fail "the --user-said text was not recorded in the sprint's history"
 
 echo "== completion actually relocates the file and updates its frontmatter, not just the phase =="
 DONE_FILE=$(find docs/sprints/3-done -name "sprint-${SPRINT_1}_*.md" 2>/dev/null)
@@ -91,7 +101,7 @@ grep -q "Verdict must be one of" /tmp/out.txt || fail "bad verdict error message
 $SCRIPT ship "$SPRINT_2" --commit x > /tmp/out.txt 2>&1 && fail "shipped before qa1/dev-done" || true
 grep -q "Pipeman can't ship yet" /tmp/out.txt || fail "ship-too-early error message missing"
 
-$SCRIPT complete "$SPRINT_2" > /tmp/out.txt 2>&1 && fail "closed before any gate passed" || true
+$SCRIPT complete "$SPRINT_2" --user-said "trying to close it early" > /tmp/out.txt 2>&1 && fail "closed before any gate passed" || true
 grep -q "not ready to close" /tmp/out.txt || fail "early-complete error message missing"
 
 echo "" > /tmp/blank.txt

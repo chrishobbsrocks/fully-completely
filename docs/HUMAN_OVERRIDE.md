@@ -9,13 +9,18 @@ reach for in the middle of a build.
 
 ## Why this exists
 
-Two of this project's mechanical checks refuse outright, no override, by
+Three of this project's mechanical checks refuse outright, no override, by
 design:
 
 - `/sprint-dev-done` refuses if the sprint file has changed since QA1's
   PASS.
 - `/sprint-ship` refuses if the commit being shipped doesn't match what
   QA1 audited.
+- `/sprint-complete` refuses without a non-empty `--user-said`, quoting
+  what the user actually told you authorizes closing the sprint right
+  now. Both gates passing is not that; there is nothing to re-stamp or
+  unstick here, only the user's own word suffices, so `override` doesn't
+  apply to this one either.
 
 Both are deliberately absolute in every piece of documentation an agent
 reads. That's correct — the moment an agent (or a human moving fast inside

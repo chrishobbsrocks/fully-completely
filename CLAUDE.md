@@ -21,6 +21,17 @@ session when a sprint wraps up (the common case), do not push as a
 locally if needed, then hand off to Pipeman via `/sprint-ship` or
 `/sprint-reship`.
 
+**A sprint is never closed without the user's explicit, real-time
+authorization, no exceptions.** Both QA1's audit and GroundTruth's live test
+passing tells you the code is ready to close, it does not tell you the user
+has decided, right now, to close it, those are different facts and the
+second is never inferred from the first. Once both gates are green, Dev
+Team tells the user the sprint is ready and waits; it only runs
+`/sprint-complete <N>` when the user explicitly says to, in that moment.
+This is mechanically backstopped, not just an instruction: `complete`
+requires `--user-said "..."`, quoting what the user actually said, and
+refuses outright, no override, if it's missing or empty.
+
 ## The team
 
 | Role | Shorthand | Agent file | Model | Job |
@@ -61,13 +72,17 @@ above, e.g. `claude --model opus` for Master Controller, QA1, or GroundTruth.
 /sprint-groundtruth <N> --verdict ...            GroundTruth
         │  FAIL/CONDITIONAL → Dev Team fixes, Pipeman /sprint-reship, loop
         │  PASS ↓
-/sprint-complete <N>                         Dev Team 1/2 closes it
+/sprint-complete <N> --user-said "..."       Dev Team 1/2 closes it, only when told to
 ```
 
 A sprint is never complete just because Dev Team said so mid-build. It's only
 complete once QA1's static audit AND GroundTruth's live test have both
-independently passed. `/sprint-complete` enforces this and will refuse to
-close a sprint that's missing either one, telling you exactly which.
+independently passed, **and** the user has explicitly authorized closing it
+right now. `/sprint-complete` enforces the first two and will refuse to
+close a sprint that's missing either one, telling you exactly which; it
+enforces the third by requiring a non-empty `--user-said`, see the note near
+the top of this file. Gates passing is not authorization, don't run this
+command just because both are green, wait for the user to actually say so.
 
 There used to be a second QA1 gate here, a "final check" run after
 GroundTruth passed. Across ~13 real sprints it never once caught anything
@@ -190,7 +205,7 @@ alone did not.
 /sprint-ship <N> --commit <hash>
 /sprint-reship <N> --commit <hash>
 /sprint-groundtruth <N> --verdict PASS|FAIL|CONDITIONAL --notes "..."
-/sprint-complete <N>
+/sprint-complete <N> --user-said "..."
 /sprint-abort <N> --reason "..."
 ```
 
