@@ -265,4 +265,14 @@ domain type locations, error handling conventions, git strategy, testing
 requirements, security baseline). Every agent above should read this file
 before starting work, so keep it current.
 
+**This is Fully Completely, not Maestro.** This machine also has a separate,
+unrelated sprint-workflow product called Maestro installed globally
+(`maestro-*`/`epic-*`/`project-*` skills), rolled out to several other
+projects. It shares structural similarity with this project (both are
+sprint-lifecycle workflows) and possibly some shared lineage, but they are
+two different systems. Do not refer to this project as "Maestro," assume
+it uses Maestro's conventions, or treat the two as interchangeable, even
+when the global skill list shows Maestro skills alongside this project's
+own `.claude/commands/sprint-*` and `.claude/agents/` files.
+
 ---
