@@ -84,7 +84,7 @@ on that handoff.
         │
    groundtruth_live ──────────────────────────── GroundTruth tests live
         │
-/sprint-groundtruth <N> --verdict ...            GroundTruth
+/sprint-groundtruth <N> --deployed-commit <sha> --verdict ...   GroundTruth
         │  FAIL/CONDITIONAL → Dev Team fixes, Pipeman /sprint-reship, loop
         │  PASS ↓
 /sprint-complete <N> --user-said "..."       Dev Team 1/2 closes it, only when told to
@@ -219,7 +219,7 @@ alone did not.
 /sprint-dev-done <N>
 /sprint-ship <N> --commit <hash>
 /sprint-reship <N> --commit <hash>
-/sprint-groundtruth <N> --verdict PASS|FAIL|CONDITIONAL --notes "..."
+/sprint-groundtruth <N> --deployed-commit <sha> --verdict PASS|FAIL|CONDITIONAL --notes "..."
 /sprint-complete <N> --user-said "..."
 /sprint-abort <N> --reason "..."
 ```

@@ -71,8 +71,9 @@ python3 scripts/sprint_lifecycle.py dev-done 1
 # Pipeman ships
 python3 scripts/sprint_lifecycle.py ship 1 --commit abc123
 
-# GroundTruth tests the live deploy
-python3 scripts/sprint_lifecycle.py groundtruth 1 --verdict PASS --notes "3/3 clean runs"
+# GroundTruth tests the live deploy — --deployed-commit must match what was
+# actually shipped, an exact SHA check, not free text
+python3 scripts/sprint_lifecycle.py groundtruth 1 --deployed-commit abc123 --verdict PASS --notes "3/3 clean runs"
 
 # Dev Team closes it out (same session that ran `start`, not Master Controller),
 # only once the user has actually said to close it, not just because both gates are green
@@ -134,6 +135,20 @@ SHA is deliberate: Pipeman's own process legitimately squashes or
 rebases before pushing, which changes the SHA without changing any file,
 and that has to keep working, only a real, unaudited content change
 should block a ship.
+
+`/sprint-ship` (and `/sprint-reship`) also record the resolved full SHA
+of what actually got pushed. `/sprint-groundtruth` requires
+`--deployed-commit`, the SHA GroundTruth actually tested, and refuses if
+it doesn't match — an exact identity check this time, not a content
+check, since there's no legitimate rebase step between shipping and
+testing live the way there is between auditing and shipping. Nothing
+here has an override: a mismatch always means the live test ran against
+something other than what was actually deployed, closing the gap where a
+verdict could otherwise get recorded against any deployment, correct or
+not. `/sprint-status` also flags a sprint whose most recent ship or
+reship landed after its last recorded GroundTruth verdict, so a
+not-yet-re-tested sprint doesn't require reconstructing that from raw
+timestamps by hand.
 
 ## Security notes
 

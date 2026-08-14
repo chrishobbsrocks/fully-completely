@@ -9,13 +9,21 @@ reach for in the middle of a build.
 
 ## Why this exists
 
-Three of this project's mechanical checks refuse outright, no override, by
+Four of this project's mechanical checks refuse outright, no override, by
 design:
 
 - `/sprint-dev-done` refuses if the sprint file has changed since QA1's
   PASS.
 - `/sprint-ship` refuses if the commit being shipped doesn't match what
   QA1 audited.
+- `/sprint-groundtruth` refuses if `--deployed-commit`, the commit you
+  actually tested live, doesn't match what Pipeman's last ship or reship
+  recorded. This one doesn't get a gate here either, on purpose: unlike
+  the QA1-to-ship check above, there's no legitimate transform (rebase,
+  squash, whatever) that would make these two differ and still be fine.
+  A mismatch always means the live test ran against something other than
+  what was actually deployed — there's nothing to responsibly re-stamp,
+  only a wrong deployment to go re-test against the right one.
 - `/sprint-complete` refuses without a non-empty `--user-said`, quoting
   what the user actually told you authorizes closing the sprint right
   now. Both gates passing is not that; there is nothing to re-stamp or

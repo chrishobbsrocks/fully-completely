@@ -81,9 +81,11 @@ $SCRIPT qa1 "$SPRINT_1" --verdict PASS --notes "ok" > /dev/null
 $SCRIPT dev-done "$SPRINT_1" > /dev/null
 AUDITED_COMMIT_1=$(git rev-parse HEAD)
 $SCRIPT ship "$SPRINT_1" --commit "$AUDITED_COMMIT_1" > /dev/null
-$SCRIPT groundtruth "$SPRINT_1" --verdict FAIL --notes "expected fail" > /dev/null
-$SCRIPT reship "$SPRINT_1" --commit smoke2 > /dev/null
-$SCRIPT groundtruth "$SPRINT_1" --verdict PASS --notes "ok" > /dev/null
+$SCRIPT groundtruth "$SPRINT_1" --deployed-commit "$AUDITED_COMMIT_1" --verdict FAIL --notes "expected fail" > /dev/null
+git commit -q --allow-empty -m "fix for sprint $SPRINT_1"
+FIX_COMMIT_1=$(git rev-parse HEAD)
+$SCRIPT reship "$SPRINT_1" --commit "$FIX_COMMIT_1" > /dev/null
+$SCRIPT groundtruth "$SPRINT_1" --deployed-commit "$FIX_COMMIT_1" --verdict PASS --notes "ok" > /dev/null
 
 echo "== complete refuses (no override) without a non-empty --user-said, even with both gates PASS =="
 $SCRIPT complete "$SPRINT_1" > /tmp/out.txt 2>&1 && fail "complete succeeded with no --user-said at all, despite both gates passing" || true
@@ -322,11 +324,15 @@ $SCRIPT qa1 "$SPRINT_UNAUDITED" --verdict PASS --notes ok > /dev/null
 $SCRIPT dev-done "$SPRINT_UNAUDITED" > /dev/null
 UNAUDITED_COMMIT=$(git rev-parse HEAD)
 $SCRIPT ship "$SPRINT_UNAUDITED" --commit "$UNAUDITED_COMMIT" > /dev/null
-$SCRIPT groundtruth "$SPRINT_UNAUDITED" --verdict FAIL --notes "first fail, audited miss" > /dev/null
-$SCRIPT reship "$SPRINT_UNAUDITED" --commit fix1 > /dev/null
-$SCRIPT groundtruth "$SPRINT_UNAUDITED" --verdict FAIL --notes "second fail, unaudited miss" > /dev/null
-$SCRIPT reship "$SPRINT_UNAUDITED" --commit fix2 > /dev/null
-$SCRIPT groundtruth "$SPRINT_UNAUDITED" --verdict PASS --notes ok > /dev/null
+$SCRIPT groundtruth "$SPRINT_UNAUDITED" --deployed-commit "$UNAUDITED_COMMIT" --verdict FAIL --notes "first fail, audited miss" > /dev/null
+git commit -q --allow-empty -m "fix1 for sprint $SPRINT_UNAUDITED"
+FIX1_COMMIT=$(git rev-parse HEAD)
+$SCRIPT reship "$SPRINT_UNAUDITED" --commit "$FIX1_COMMIT" > /dev/null
+$SCRIPT groundtruth "$SPRINT_UNAUDITED" --deployed-commit "$FIX1_COMMIT" --verdict FAIL --notes "second fail, unaudited miss" > /dev/null
+git commit -q --allow-empty -m "fix2 for sprint $SPRINT_UNAUDITED"
+FIX2_COMMIT=$(git rev-parse HEAD)
+$SCRIPT reship "$SPRINT_UNAUDITED" --commit "$FIX2_COMMIT" > /dev/null
+$SCRIPT groundtruth "$SPRINT_UNAUDITED" --deployed-commit "$FIX2_COMMIT" --verdict PASS --notes ok > /dev/null
 $SCRIPT complete "$SPRINT_UNAUDITED" --user-said "close it, both misses are understood" > /dev/null
 
 echo "== gates: a completed sprint that needed a dev-done-hash override is counted under hash-drift, not miscounted as a gate override =="
@@ -340,7 +346,7 @@ $SCRIPT override "$SPRINT_GATES_OVR" --gate dev-done-hash --reason "reviewed, co
 $SCRIPT dev-done "$SPRINT_GATES_OVR" > /dev/null
 GATES_OVR_COMMIT=$(git rev-parse HEAD)
 $SCRIPT ship "$SPRINT_GATES_OVR" --commit "$GATES_OVR_COMMIT" > /dev/null
-$SCRIPT groundtruth "$SPRINT_GATES_OVR" --verdict PASS --notes ok > /dev/null
+$SCRIPT groundtruth "$SPRINT_GATES_OVR" --deployed-commit "$GATES_OVR_COMMIT" --verdict PASS --notes ok > /dev/null
 $SCRIPT complete "$SPRINT_GATES_OVR" --user-said "close it" > /dev/null
 
 echo "== gates: a GT fail after a ship-hash-overridden ship is NOT an audited miss (content that shipped was never QA1's) =="
@@ -356,9 +362,11 @@ DRIFT_COMMIT=$(git rev-parse HEAD)
 $SCRIPT ship "$SPRINT_SHIP_OVR_MISS" --commit "$DRIFT_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded on drifted content (test setup broken)" || true
 $SCRIPT override "$SPRINT_SHIP_OVR_MISS" --gate ship-hash --reason "reviewed the drift personally, safe to ship" --confirm OVERRIDE > /dev/null
 $SCRIPT ship "$SPRINT_SHIP_OVR_MISS" --commit "$DRIFT_COMMIT" > /dev/null
-$SCRIPT groundtruth "$SPRINT_SHIP_OVR_MISS" --verdict FAIL --notes "GT caught what QA1 never actually saw" > /dev/null
-$SCRIPT reship "$SPRINT_SHIP_OVR_MISS" --commit fix > /dev/null
-$SCRIPT groundtruth "$SPRINT_SHIP_OVR_MISS" --verdict PASS --notes ok > /dev/null
+$SCRIPT groundtruth "$SPRINT_SHIP_OVR_MISS" --deployed-commit "$DRIFT_COMMIT" --verdict FAIL --notes "GT caught what QA1 never actually saw" > /dev/null
+git commit -q --allow-empty -m "fix for sprint $SPRINT_SHIP_OVR_MISS"
+SHIP_OVR_MISS_FIX_COMMIT=$(git rev-parse HEAD)
+$SCRIPT reship "$SPRINT_SHIP_OVR_MISS" --commit "$SHIP_OVR_MISS_FIX_COMMIT" > /dev/null
+$SCRIPT groundtruth "$SPRINT_SHIP_OVR_MISS" --deployed-commit "$SHIP_OVR_MISS_FIX_COMMIT" --verdict PASS --notes ok > /dev/null
 $SCRIPT complete "$SPRINT_SHIP_OVR_MISS" --user-said "close it" > /dev/null
 rm -f /tmp/out.txt
 
@@ -385,7 +393,7 @@ $SCRIPT qa1 "$SPRINT_CORRUPT_VERDICT" --verdict PASS --notes ok > /dev/null
 $SCRIPT dev-done "$SPRINT_CORRUPT_VERDICT" > /dev/null
 CORRUPT_COMMIT=$(git rev-parse HEAD)
 $SCRIPT ship "$SPRINT_CORRUPT_VERDICT" --commit "$CORRUPT_COMMIT" > /dev/null
-$SCRIPT groundtruth "$SPRINT_CORRUPT_VERDICT" --verdict PASS --notes ok > /dev/null
+$SCRIPT groundtruth "$SPRINT_CORRUPT_VERDICT" --deployed-commit "$CORRUPT_COMMIT" --verdict PASS --notes ok > /dev/null
 $SCRIPT complete "$SPRINT_CORRUPT_VERDICT" --user-said "close it" > /dev/null
 
 # Simulate hand-corrupted state (or a future format change) rather than
@@ -413,5 +421,75 @@ print('MATCH' if re.search(r'\b${SPRINT_CORRUPT_VERDICT}\b', line) else 'NOMATCH
 ")
 [ "$FOUND" = "NOMATCH" ] || fail "gates should not count sprint ${SPRINT_CORRUPT_VERDICT} under QA1's catch rate from an unparseable verdict alone"
 rm -f /tmp/qa1_catch_line.txt
+
+echo "== groundtruth refuses a --deployed-commit that doesn't match what Pipeman actually shipped =="
+SPRINT_GT_CHECK=$(new_sprint "Deployed commit check sprint")
+$SCRIPT start "$SPRINT_GT_CHECK" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_GT_CHECK work"
+$SCRIPT qa1 "$SPRINT_GT_CHECK" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_GT_CHECK" > /dev/null
+GT_SHIPPED_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_GT_CHECK" --commit "$GT_SHIPPED_COMMIT" > /dev/null
+
+git commit -q --allow-empty -m "an unrelated later commit, never shipped for this sprint"
+UNSHIPPED_COMMIT=$(git rev-parse HEAD)
+$SCRIPT groundtruth "$SPRINT_GT_CHECK" --deployed-commit "$UNSHIPPED_COMMIT" --verdict PASS --notes "tested the wrong thing" \
+  > /tmp/out.txt 2>&1 && fail "groundtruth accepted a --deployed-commit that was never shipped for this sprint" || true
+grep -q "doesn't match what Pipeman actually shipped" /tmp/out.txt || fail "deployed-commit mismatch refusal message missing"
+grep -q "$GT_SHIPPED_COMMIT" /tmp/out.txt || fail "mismatch refusal should name the commit that was actually shipped"
+grep -q "$UNSHIPPED_COMMIT" /tmp/out.txt || fail "mismatch refusal should name the commit that was actually tested"
+rm -f /tmp/out.txt
+
+echo "== groundtruth refuses a --deployed-commit that doesn't resolve to a real commit =="
+$SCRIPT groundtruth "$SPRINT_GT_CHECK" --deployed-commit not-a-real-commit --verdict PASS --notes ok \
+  > /tmp/out.txt 2>&1 && fail "groundtruth accepted a --deployed-commit that doesn't resolve" || true
+grep -q "does not resolve to a real commit" /tmp/out.txt || fail "unresolvable deployed-commit refusal message missing"
+rm -f /tmp/out.txt
+
+echo "== groundtruth succeeds once --deployed-commit actually matches what was shipped =="
+$SCRIPT groundtruth "$SPRINT_GT_CHECK" --deployed-commit "$GT_SHIPPED_COMMIT" --verdict FAIL --notes "real bug found" > /dev/null || \
+  fail "groundtruth refused a --deployed-commit that genuinely matched the shipped commit"
+
+echo "== status: no stale-test line right after a fresh verdict against the current ship =="
+$SCRIPT status "$SPRINT_GT_CHECK" 2>/dev/null | grep -q "not yet re-tested" && \
+  fail "status showed the stale-test line when the recorded verdict is current"
+
+echo "== status: stale-test line appears once a reship lands after the last recorded verdict =="
+git commit -q --allow-empty -m "fix for sprint $SPRINT_GT_CHECK"
+GT_FIX_COMMIT=$(git rev-parse HEAD)
+$SCRIPT reship "$SPRINT_GT_CHECK" --commit "$GT_FIX_COMMIT" > /dev/null
+$SCRIPT status "$SPRINT_GT_CHECK" 2>/dev/null | grep -q "Code has changed since the last recorded GroundTruth verdict — not yet re-tested." || \
+  fail "status did not show the stale-test line after a reship with no fresh verdict yet"
+
+echo "== status: stale-test line clears once a fresh verdict is recorded against the reshipped commit =="
+$SCRIPT groundtruth "$SPRINT_GT_CHECK" --deployed-commit "$GT_FIX_COMMIT" --verdict PASS --notes ok > /dev/null
+$SCRIPT status "$SPRINT_GT_CHECK" 2>/dev/null | grep -q "not yet re-tested" && \
+  fail "status still showed the stale-test line after a fresh verdict against the current ship"
+
+echo "== groundtruth refuses distinctly when no ship has ever been recorded for this sprint =="
+SPRINT_GT_NOSHIP=$(new_sprint "No ship recorded sprint")
+$SCRIPT start "$SPRINT_GT_NOSHIP" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_GT_NOSHIP work"
+$SCRIPT qa1 "$SPRINT_GT_NOSHIP" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_GT_NOSHIP" > /dev/null
+NOSHIP_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_GT_NOSHIP" --commit "$NOSHIP_COMMIT" > /dev/null
+# Simulate a pre-upgrade sprint (or a hand-edited state file) with no
+# last_shipped_commit on record, same technique as the existing
+# SPRINT_LEGACY scenario above for the other hash fields.
+NOSHIP_STATE="docs/sprints/state/sprint-${SPRINT_GT_NOSHIP}.json"
+python3 -c "
+import json
+p = '$NOSHIP_STATE'
+s = json.load(open(p))
+s['last_shipped_commit'] = None
+json.dump(s, open(p, 'w'), indent=2)
+"
+$SCRIPT groundtruth "$SPRINT_GT_NOSHIP" --deployed-commit "$NOSHIP_COMMIT" --verdict PASS --notes ok \
+  > /tmp/out.txt 2>&1 && fail "groundtruth succeeded with no last_shipped_commit on record" || true
+grep -q "has no shipped commit on record" /tmp/out.txt || fail "no-ship-recorded refusal message missing"
+grep -q "doesn't match what Pipeman actually shipped" /tmp/out.txt && \
+  fail "no-ship-recorded refusal must be a distinct message from the mismatch refusal, not reuse it"
+rm -f /tmp/out.txt
 
 echo "ALL SMOKE TESTS PASSED"

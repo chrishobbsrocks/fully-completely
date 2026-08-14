@@ -26,17 +26,26 @@ Phases (in order, with the loops):
                        audited commit's tree hash (content, not the SHA,
                        so a legitimate rebase/squash/merge before push
                        doesn't trip this); ship refuses, no override, if
-                       the commit it's pushing doesn't match.
-  groundtruth_live -> GroundTruth is live-testing. FAIL/CONDITIONAL means
-                       fixes + a reship, then GroundTruth tests again.
-                       A recorded PASS here moves straight to
-                       complete_ready — there used to be a QA1 "final
-                       check" gate here (gate 2), but across ~13 real
-                       sprints it never once caught anything gate 1 +
-                       GroundTruth's live test hadn't already caught, so
-                       it was removed. The one real value it had — a
-                       fresh look after mid-build requirement changes —
-                       is now QA1's responsibility at gate 1 (see above).
+                       the commit it's pushing doesn't match. Ship (and
+                       reship) also record the full SHA actually pushed,
+                       as last_shipped_commit, an identity, not content,
+                       fact for groundtruth_live below to check against.
+  groundtruth_live -> GroundTruth is live-testing. GroundTruth must pass
+                       --deployed-commit, the SHA it actually tested;
+                       this has to match last_shipped_commit exactly, no
+                       tolerance for a differing SHA the way ship's
+                       content check tolerates a rebase, there's no
+                       legitimate reason a live test and what was shipped
+                       would differ. FAIL/CONDITIONAL means fixes + a
+                       reship, then GroundTruth tests again. A recorded
+                       PASS here moves straight to complete_ready — there
+                       used to be a QA1 "final check" gate here (gate 2),
+                       but across ~13 real sprints it never once caught
+                       anything gate 1 + GroundTruth's live test hadn't
+                       already caught, so it was removed. The one real
+                       value it had — a fresh look after mid-build
+                       requirement changes — is now QA1's responsibility
+                       at gate 1 (see above).
   complete_ready   -> Both gates (QA1 audit + GroundTruth live test) have
                        passed. Waiting for /sprint-complete AND the user's
                        explicit, real-time go-ahead (--user-said) to
@@ -49,7 +58,12 @@ reach: no flag on dev-done or ship bypasses either hash check, and neither
 is documented anywhere an agent reads. There is a separate `override`
 subcommand below (cmd_override) for the human running this project, not
 wired to any slash command, not mentioned in CLAUDE.md or any agent file
-on purpose, see docs/HUMAN_OVERRIDE.md before using it.
+on purpose, see docs/HUMAN_OVERRIDE.md before using it. groundtruth's
+deployed-commit check has no override at all, in cmd_override or anywhere
+else: unlike the QA1-to-ship content check, there's no legitimate
+transform (rebase, squash, whatever) that would make a live test and what
+was actually shipped differ and still be fine, so there's nothing here to
+responsibly re-stamp.
 """
 
 import argparse
@@ -250,6 +264,25 @@ def git_tree_hash(ref: str) -> Optional[str]:
         return None
 
 
+def git_commit_sha(ref: str) -> Optional[str]:
+    """Resolve a git ref to its full commit SHA, not the tree hash. Used to
+    record exactly which commit Pipeman shipped, and later to check that
+    GroundTruth's live test ran against that same commit. This is an
+    identity check, not a content check like the QA1-to-ship tree-hash
+    comparison: there's no legitimate rebase/squash/merge step between
+    shipping and deploying that would need tolerating here, a mismatch
+    always means GroundTruth tested something other than what actually
+    went out. Returns None if the ref doesn't resolve."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", ref],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+
+
 def file_hash(path: Path) -> Optional[str]:
     if not path.exists():
         return None
@@ -369,6 +402,7 @@ def cmd_start(args) -> None:
             "qa1_audit_result": None,
             "qa1_audit_file_hash": None,
             "qa1_audited_tree_hash": None,
+            "last_shipped_commit": None,
             "groundtruth_result": None,
             "audit_rounds": 0,
             "live_test_rounds": 0,
@@ -397,6 +431,19 @@ def cmd_status(args) -> None:
     print(f"Phase: {state['phase']}")
     print(f"QA1 audit result: {state['qa1_audit_result']} (rounds: {state['audit_rounds']})")
     print(f"GroundTruth live result: {state['groundtruth_result']} (rounds: {state['live_test_rounds']})")
+    if state["phase"] == "groundtruth_live":
+        # Pure observability, doesn't gate anything: a ship/reship that
+        # landed after the last recorded live_test verdict means whatever
+        # verdict is on record was tested against older code. cmd_groundtruth
+        # already refuses a mismatched --deployed-commit when someone tries
+        # to record a new verdict, this just makes that already-mechanically-
+        # enforced fact legible to whoever reads status, instead of it only
+        # surfacing as a refusal message at the moment someone tries.
+        history = state.get("history", [])
+        ship_indices = [i for i, h in enumerate(history) if h["event"] in ("shipped", "reshipped")]
+        test_indices = [i for i, h in enumerate(history) if h["event"] == "live_test"]
+        if ship_indices and test_indices and ship_indices[-1] > test_indices[-1]:
+            print("Code has changed since the last recorded GroundTruth verdict — not yet re-tested.")
     if args.verbose:
         print("\nHistory:")
         for h in state["history"]:
@@ -498,7 +545,13 @@ def cmd_ship(args) -> None:
                 "preserves content). New changes landed after QA1's PASS need a fresh "
                 "/sprint-qa1 audit before they can ship. No override.")
 
+        shipped_commit = git_commit_sha(args.commit)
+        if shipped_commit is None:
+            die(f"'{args.commit}' resolved a tree hash but not a full commit SHA — "
+                "unexpected, please investigate before shipping.")
+
         state["phase"] = "groundtruth_live"
+        state["last_shipped_commit"] = shipped_commit
         log_event(state, "pipeman", "shipped", f"commit={args.commit or ''}")
         save_state(args.id, state)
     print(f"Sprint {args.id}: shipped (commit {args.commit or '?'}). Phase: groundtruth_live.")
@@ -511,11 +564,19 @@ def cmd_reship(args) -> None:
     # (that's intentional in this two-gate design, GroundTruth's retest
     # after reship is the check for this code, not a fresh QA1 pass). So
     # this commit is *expected* to differ in content from what QA1 audited.
+    # It still has to resolve to a real commit: last_shipped_commit is what
+    # cmd_groundtruth's --deployed-commit check compares against, and an
+    # unresolved ref would leave nothing real recorded to check.
     with locked(f"sprint-{args.id}"):
         state = load_state(args.id)
         if state["phase"] != "groundtruth_live":
             die(f"Sprint {args.id} is in phase '{state['phase']}', reship only applies during "
                 "the GroundTruth live-test fix loop.")
+        reshipped_commit = git_commit_sha(args.commit) if args.commit else None
+        if reshipped_commit is None:
+            die(f"'{args.commit or ''}' does not resolve to a real commit in this repo. "
+                "--commit must be an actual commit hash Pipeman is about to push.")
+        state["last_shipped_commit"] = reshipped_commit
         log_event(state, "pipeman", "reshipped", f"commit={args.commit or ''}")
         save_state(args.id, state)
     print(f"Sprint {args.id}: fix reshipped (commit {args.commit or '?'}). "
@@ -527,6 +588,32 @@ def cmd_groundtruth(args) -> None:
         state = load_state(args.id)
         if state["phase"] != "groundtruth_live":
             die(f"Sprint {args.id} is in phase '{state['phase']}', not ready for a GroundTruth live test.")
+
+        # Identity check, not a content check: unlike the QA1-to-ship
+        # tree-hash comparison, there's no legitimate rebase/squash step
+        # between shipping and deploying that would need tolerating here —
+        # a mismatch always means this live test ran against something
+        # other than what Pipeman actually shipped.
+        deployed_commit = git_commit_sha(args.deployed_commit)
+        if deployed_commit is None:
+            die(f"'{args.deployed_commit}' does not resolve to a real commit in this repo. "
+                "--deployed-commit must be the actual commit hash you tested live.")
+        last_shipped = state.get("last_shipped_commit")
+        if last_shipped is None:
+            # Same distinction as ship's tree-hash check: either this sprint
+            # predates the deployed-commit field, or ship/reship never
+            # actually ran, either way nothing was recorded to verify
+            # against, so a "doesn't match" message would be misleading.
+            die(f"Sprint {args.id} has no shipped commit on record to verify this live test "
+                "against (either this sprint predates the deployed-commit check, or Pipeman "
+                "hasn't actually run /sprint-ship yet). Run /sprint-ship (or /sprint-reship) "
+                "first so there's something real to check this against. No override.")
+        if deployed_commit != last_shipped:
+            die(f"Sprint {args.id}: the commit you tested ({deployed_commit}) doesn't match "
+                f"what Pipeman actually shipped ({last_shipped}). Re-test against what was "
+                "actually deployed, or if the wrong thing went out, Pipeman needs a fresh "
+                "/sprint-ship or /sprint-reship first. No override.")
+
         verdict = args.verdict.upper()
         if verdict not in VALID_VERDICTS:
             die(f"Verdict must be one of {sorted(VALID_VERDICTS)}.")
@@ -918,6 +1005,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("groundtruth")
     s.add_argument("id", type=int); s.add_argument("--verdict", required=True)
+    s.add_argument("--deployed-commit", required=True,
+                    help="The commit SHA you actually tested live. Must match the commit "
+                    "Pipeman's most recent /sprint-ship or /sprint-reship recorded — an "
+                    "exact identity match, not a content/tree-hash comparison.")
     s.add_argument("--notes", default="")
     s.add_argument("--notes-file", help="Read notes from this file instead of the command line.")
     s.set_defaults(func=cmd_groundtruth)
