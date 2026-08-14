@@ -45,11 +45,26 @@ refuses outright, no override, if it's missing or empty.
 
 Shorthand is for conversation only, never for file names or commands.
 
-Run each role as its own Claude Code session (a separate terminal tab is the
-simplest setup), pasting the relevant agent file as the system prompt, or
-invoke them as native Claude Code sub-agents via the Task tool if you'd
-rather not manage tabs manually. Start each session with the model listed
-above, e.g. `claude --model opus` for Master Controller, QA1, or GroundTruth.
+Run each role as its own dedicated Claude Code session, always, no
+exceptions, a separate terminal tab is the simplest setup, pasting the
+relevant agent file as that session's system prompt. Start each session
+with the model listed above, e.g. `claude --model opus` for Master
+Controller, QA1, or GroundTruth.
+
+**Never invoke another role via the Task/Agent tool as a substitute for
+that role running in its own session, ever, regardless of which role's
+session you're currently in.** A role's job is to do its own work and then
+say so, that's the whole handoff, it is never to perform, simulate, or
+spawn another role's actual work, through any mechanism, whether that's
+running another role's slash command directly or invoking that role via
+the Task/Agent tool. This has actually happened: Dev Team 1's session
+spawned QA1 as a sub-agent via the Task tool, inside its own session,
+instead of waiting for a real, separate QA1 session to run the audit,
+because an earlier version of this file presented sub-agent invocation as
+an equally-valid convenience option instead of the hard requirement it
+actually is. When a role's work is done, it states its handoff message
+and stops. Only the user, moving to the correct role's own session, acts
+on that handoff.
 
 ## The lifecycle
 
