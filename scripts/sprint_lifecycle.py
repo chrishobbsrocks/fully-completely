@@ -836,8 +836,28 @@ def cmd_gates(args) -> None:
     # completed sprint, and how many rounds did it take? Independent of the
     # crossover bucketing above.
     def sprints_with_non_pass(event_name: str) -> list:
-        return [s["id"] for s in completed
-                if any(h["event"] == event_name and verdict_of(h) != "PASS" for h in s.get("history", []))]
+        # An unparseable verdict (verdict_of returns None) must not silently
+        # count as "caught something" just because None != "PASS" — that's
+        # the same guessing this function's crossover section above refuses
+        # to do. Flag it and exclude it instead, same as a malformed state
+        # file gets a WARNING rather than being silently included or crashing.
+        result = []
+        for s in completed:
+            found_non_pass = False
+            for h in s.get("history", []):
+                if h["event"] != event_name:
+                    continue
+                verdict = verdict_of(h)
+                if verdict is None:
+                    print(f"WARNING: sprint {s['id']} has a '{event_name}' event with an "
+                          f"unrecognized verdict format, excluded from the catch-rate count: "
+                          f"{h['detail']!r}", file=sys.stderr)
+                    continue
+                if verdict != "PASS":
+                    found_non_pass = True
+            if found_non_pass:
+                result.append(s["id"])
+        return result
 
     qa1_catch = sprints_with_non_pass("audit")
     gt_catch = sprints_with_non_pass("live_test")

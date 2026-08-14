@@ -377,4 +377,41 @@ echo "$FINAL_GATES_OUT" | grep -q "dev-done-hash overrides: 1 — sprints: ${SPR
 echo "$FINAL_GATES_OUT" | grep -q "ship-hash overrides: 1 — sprints: ${SPRINT_SHIP_OVR_MISS}" || fail "gates should count sprint $SPRINT_SHIP_OVR_MISS's ship-hash override under hash-drift frequency"
 echo "$FINAL_GATES_OUT" | grep -qE "sprint ${SPRINT_GATES_OVR}: audit_rounds=1, live_test_rounds=1" || fail "gates' round-count distribution for sprint $SPRINT_GATES_OVR is wrong"
 
+echo "== gates: an unparseable verdict format is flagged and excluded, never silently counted as a catch =="
+SPRINT_CORRUPT_VERDICT=$(new_sprint "Corrupt verdict sprint")
+$SCRIPT start "$SPRINT_CORRUPT_VERDICT" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_CORRUPT_VERDICT work"
+$SCRIPT qa1 "$SPRINT_CORRUPT_VERDICT" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_CORRUPT_VERDICT" > /dev/null
+CORRUPT_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_CORRUPT_VERDICT" --commit "$CORRUPT_COMMIT" > /dev/null
+$SCRIPT groundtruth "$SPRINT_CORRUPT_VERDICT" --verdict PASS --notes ok > /dev/null
+$SCRIPT complete "$SPRINT_CORRUPT_VERDICT" --user-said "close it" > /dev/null
+
+# Simulate hand-corrupted state (or a future format change) rather than
+# anything sprint_lifecycle.py itself would ever write.
+CORRUPT_STATE="docs/sprints/state/sprint-${SPRINT_CORRUPT_VERDICT}.json"
+python3 -c "
+import json
+p = '$CORRUPT_STATE'
+s = json.load(open(p))
+for h in s['history']:
+    if h['event'] == 'audit':
+        h['detail'] = 'garbled text with no leading verdict token'
+json.dump(s, open(p, 'w'), indent=2)
+"
+
+CORRUPT_GATES_OUT=$($SCRIPT gates 2>&1)
+echo "$CORRUPT_GATES_OUT" | grep -q "Traceback" && fail "gates crashed on an unparseable verdict format"
+echo "$CORRUPT_GATES_OUT" | grep -q "WARNING: sprint ${SPRINT_CORRUPT_VERDICT} has a 'audit' event with an unrecognized verdict format" \
+  || fail "gates should warn about the unparseable verdict instead of silently guessing"
+echo "$CORRUPT_GATES_OUT" | grep "^   QA1:" > /tmp/qa1_catch_line.txt
+FOUND=$(python3 -c "
+import re
+line = open('/tmp/qa1_catch_line.txt').read()
+print('MATCH' if re.search(r'\b${SPRINT_CORRUPT_VERDICT}\b', line) else 'NOMATCH')
+")
+[ "$FOUND" = "NOMATCH" ] || fail "gates should not count sprint ${SPRINT_CORRUPT_VERDICT} under QA1's catch rate from an unparseable verdict alone"
+rm -f /tmp/qa1_catch_line.txt
+
 echo "ALL SMOKE TESTS PASSED"
