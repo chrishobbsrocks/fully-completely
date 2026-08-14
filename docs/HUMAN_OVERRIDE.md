@@ -30,7 +30,7 @@ design:
   unstick here, only the user's own word suffices, so `override` doesn't
   apply to this one either.
 
-Both are deliberately absolute in every piece of documentation an agent
+All four are deliberately absolute in every piece of documentation an agent
 reads. That's correct — the moment an agent (or a human moving fast inside
 an agent-driven session) has a `--override` flag sitting next to the
 command it's already running, the check stops meaning anything. It becomes
