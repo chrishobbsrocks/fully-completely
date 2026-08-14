@@ -62,6 +62,7 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 import time
+from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -723,6 +724,9 @@ def cmd_gates(args) -> None:
         except (json.JSONDecodeError, OSError) as exc:
             print(f"WARNING: skipping unreadable state file {path}: {exc}", file=sys.stderr)
             continue
+        if not isinstance(state, dict) or "id" not in state:
+            print(f"WARNING: skipping malformed state file {path}: not a sprint state object", file=sys.stderr)
+            continue
         if state.get("phase") == "complete":
             completed.append(state)
     completed.sort(key=lambda s: s["id"])
@@ -741,13 +745,16 @@ def cmd_gates(args) -> None:
               "single data point, not a rate.")
     print()
 
-    def verdict_of(event: dict) -> str:
-        return event["detail"].split(":", 1)[0].strip()
+    def verdict_of(event: dict) -> Optional[str]:
+        # Matched against VALID_VERDICTS rather than trusting whatever sits
+        # before the first colon: if cmd_qa1/cmd_groundtruth's "{verdict}:
+        # {notes}" detail format ever changes, this returns None instead of
+        # silently treating garbage as a real verdict.
+        token = event["detail"].split(":", 1)[0].strip()
+        return token if token in VALID_VERDICTS else None
 
     def counts_str(sids: list) -> str:
-        tally: dict = {}
-        for sid in sids:
-            tally[sid] = tally.get(sid, 0) + 1
+        tally = Counter(sids)
         return ", ".join(f"{sid}(x{tally[sid]})" if tally[sid] > 1 else str(sid)
                           for sid in sorted(tally)) or "(none)"
 
@@ -758,9 +765,19 @@ def cmd_gates(args) -> None:
     # whether a qa1 audit PASS landed between that ship and the ship before
     # it. A "reshipped" ship never has one by design (cmd_reship skips the
     # hash/audit check on purpose), so those always land in the unaudited
-    # bucket; a "shipped" ship normally does, since cmd_ship refuses to
-    # record one without it, and lands in the audited bucket. Anything that
-    # doesn't fit either shape is flagged rather than guessed into a bucket.
+    # bucket. A "shipped" ship normally does, since cmd_ship refuses to
+    # record one without it — UNLESS a ship-hash override (cmd_override
+    # --gate ship-hash) also landed in that same window: that means the
+    # content Pipeman actually pushed differs from what QA1's PASS covered,
+    # a human vouched for it, not QA1, so it must not be counted as an
+    # audited miss either. Anything that doesn't fit one of these shapes is
+    # flagged rather than guessed into a bucket.
+    #
+    # This assumes at most one "shipped" event per sprint, true for every
+    # reachable state today (cmd_ship only fires from dev_agreed_done, and
+    # nothing currently routes groundtruth_live back to dev_agreed_done —
+    # every ship after the first is necessarily a reship). If that ever
+    # changes, this window math needs to change with it.
     audited_miss = []
     unaudited_fix_miss = []
     unclassified = []
@@ -770,7 +787,13 @@ def cmd_gates(args) -> None:
         history = state.get("history", [])
         ship_positions = [i for i, h in enumerate(history) if h["event"] in ("shipped", "reshipped")]
         for i, h in enumerate(history):
-            if h["event"] != "live_test" or verdict_of(h) not in ("FAIL", "CONDITIONAL"):
+            if h["event"] != "live_test":
+                continue
+            verdict = verdict_of(h)
+            if verdict is None:
+                unclassified.append((sid, f"history[{i}] live_test has an unrecognized verdict format: {h['detail']!r}"))
+                continue
+            if verdict not in ("FAIL", "CONDITIONAL"):
                 continue
             prior_ships = [sp for sp in ship_positions if sp < i]
             if not prior_ships:
@@ -778,12 +801,19 @@ def cmd_gates(args) -> None:
                 continue
             ship_idx = prior_ships[-1]
             ship_event = history[ship_idx]
+            if ship_event["event"] == "reshipped":
+                unaudited_fix_miss.append(sid)
+                continue
             earlier_ships = [sp for sp in ship_positions if sp < ship_idx]
             window_start = (earlier_ships[-1] + 1) if earlier_ships else 0
             window = history[window_start:ship_idx]
             audited_in_window = any(e["event"] == "audit" and verdict_of(e) == "PASS" for e in window)
-            if ship_event["event"] == "reshipped":
-                unaudited_fix_miss.append(sid)
+            overridden_in_window = any(e["actor"] == "human-override" and e["event"] == "ship_hash_override"
+                                        for e in window)
+            if overridden_in_window:
+                unclassified.append((sid, f"history[{i}] live_test followed a 'shipped' event whose ship-hash "
+                                          "was human-overridden — the content that actually shipped was not "
+                                          "vetted by QA1's own audit, needs a human look, not an automatic bucket"))
             elif audited_in_window:
                 audited_miss.append(sid)
             else:
@@ -805,10 +835,12 @@ def cmd_gates(args) -> None:
     # --- 2. Per-gate catch rate: did each gate ever return non-PASS on a
     # completed sprint, and how many rounds did it take? Independent of the
     # crossover bucketing above.
-    qa1_catch = [s["id"] for s in completed
-                 if any(h["event"] == "audit" and verdict_of(h) != "PASS" for h in s.get("history", []))]
-    gt_catch = [s["id"] for s in completed
-                if any(h["event"] == "live_test" and verdict_of(h) != "PASS" for h in s.get("history", []))]
+    def sprints_with_non_pass(event_name: str) -> list:
+        return [s["id"] for s in completed
+                if any(h["event"] == event_name and verdict_of(h) != "PASS" for h in s.get("history", []))]
+
+    qa1_catch = sprints_with_non_pass("audit")
+    gt_catch = sprints_with_non_pass("live_test")
 
     print("2. Per-gate catch rate (completed sprints where the gate ever returned non-PASS):")
     print(f"   QA1: {len(qa1_catch)} of {n} — sprints: {qa1_catch or '(none)'}")
@@ -823,10 +855,12 @@ def cmd_gates(args) -> None:
     # clear the content-drift safety net (cmd_override), grouped by which
     # gate's hash it re-stamped. This is not "QA1/GroundTruth overridden" —
     # no such override exists in this codebase, only the hash checks do.
-    dev_done_hash_events = [s["id"] for s in completed for h in s.get("history", [])
-                             if h["actor"] == "human-override" and h["event"] == "dev_done_hash_override"]
-    ship_hash_events = [s["id"] for s in completed for h in s.get("history", [])
-                         if h["actor"] == "human-override" and h["event"] == "ship_hash_override"]
+    def override_event_sprints(event_name: str) -> list:
+        return [s["id"] for s in completed for h in s.get("history", [])
+                if h["actor"] == "human-override" and h["event"] == event_name]
+
+    dev_done_hash_events = override_event_sprints("dev_done_hash_override")
+    ship_hash_events = override_event_sprints("ship_hash_override")
 
     print("3. Hash-drift override frequency (content-drift safety net manually cleared, "
           "NOT a QA1/GroundTruth override — no such override exists):")

@@ -34,6 +34,12 @@ SCRIPT="python3 scripts/sprint_lifecycle.py"
 
 fail() { echo "SMOKE TEST FAILED: $1" >&2; exit 1; }
 
+# Content hash of every file under docs/sprints/, used to assert a command
+# (like `gates`) that claims to be read-only actually didn't write anything.
+sprints_hash() {
+  find docs/sprints -type f -exec sha256sum {} \; | sort | sha256sum
+}
+
 # ship's tree-hash check needs a real git repo to resolve commits against,
 # entirely local to the sandbox, never the invoking repo.
 git init -q
@@ -101,9 +107,9 @@ DONE_FILE=$(find docs/sprints/3-done -name "sprint-${SPRINT_1}_*.md" 2>/dev/null
 grep -q '^status: done$' "$DONE_FILE" || fail "sprint $SPRINT_1's file frontmatter status was not updated to done"
 
 echo "== gates: one completed sprint (with a GT fail after a normal ship) is an audited miss, not a rate =="
-GATES_HASH_BEFORE=$(find docs/sprints -type f -exec sha256sum {} \; | sort | sha256sum)
+GATES_HASH_BEFORE=$(sprints_hash)
 GATES_OUT=$($SCRIPT gates)
-GATES_HASH_AFTER=$(find docs/sprints -type f -exec sha256sum {} \; | sort | sha256sum)
+GATES_HASH_AFTER=$(sprints_hash)
 [ "$GATES_HASH_BEFORE" = "$GATES_HASH_AFTER" ] || fail "gates modified docs/sprints/ (should be strictly read-only)"
 echo "$GATES_OUT" | grep -q "single data point, not a rate" || fail "gates didn't flag a single completed sprint as non-statistical"
 echo "$GATES_OUT" | grep -q "Audited miss.*: 1 — sprints: ${SPRINT_1}$" || fail "gates didn't count sprint $SPRINT_1's GT fail (after a normal ship) as an audited miss"
@@ -337,18 +343,38 @@ $SCRIPT ship "$SPRINT_GATES_OVR" --commit "$GATES_OVR_COMMIT" > /dev/null
 $SCRIPT groundtruth "$SPRINT_GATES_OVR" --verdict PASS --notes ok > /dev/null
 $SCRIPT complete "$SPRINT_GATES_OVR" --user-said "close it" > /dev/null
 
+echo "== gates: a GT fail after a ship-hash-overridden ship is NOT an audited miss (content that shipped was never QA1's) =="
+SPRINT_SHIP_OVR_MISS=$(new_sprint "Ship override miss sprint")
+$SCRIPT start "$SPRINT_SHIP_OVR_MISS" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_SHIP_OVR_MISS initial work"
+$SCRIPT qa1 "$SPRINT_SHIP_OVR_MISS" --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done "$SPRINT_SHIP_OVR_MISS" > /dev/null
+echo "unaudited content" > "sprint${SPRINT_SHIP_OVR_MISS}-drift.txt"
+git add "sprint${SPRINT_SHIP_OVR_MISS}-drift.txt"
+git commit -q -m "unaudited change after PASS"
+DRIFT_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_SHIP_OVR_MISS" --commit "$DRIFT_COMMIT" > /tmp/out.txt 2>&1 && fail "ship succeeded on drifted content (test setup broken)" || true
+$SCRIPT override "$SPRINT_SHIP_OVR_MISS" --gate ship-hash --reason "reviewed the drift personally, safe to ship" --confirm OVERRIDE > /dev/null
+$SCRIPT ship "$SPRINT_SHIP_OVR_MISS" --commit "$DRIFT_COMMIT" > /dev/null
+$SCRIPT groundtruth "$SPRINT_SHIP_OVR_MISS" --verdict FAIL --notes "GT caught what QA1 never actually saw" > /dev/null
+$SCRIPT reship "$SPRINT_SHIP_OVR_MISS" --commit fix > /dev/null
+$SCRIPT groundtruth "$SPRINT_SHIP_OVR_MISS" --verdict PASS --notes ok > /dev/null
+$SCRIPT complete "$SPRINT_SHIP_OVR_MISS" --user-said "close it" > /dev/null
+rm -f /tmp/out.txt
+
 echo "== gates: final aggregate across every completed sprint, still strictly read-only =="
-FINAL_HASH_BEFORE=$(find docs/sprints -type f -exec sha256sum {} \; | sort | sha256sum)
+FINAL_HASH_BEFORE=$(sprints_hash)
 FINAL_GATES_OUT=$($SCRIPT gates)
-FINAL_HASH_AFTER=$(find docs/sprints -type f -exec sha256sum {} \; | sort | sha256sum)
+FINAL_HASH_AFTER=$(sprints_hash)
 [ "$FINAL_HASH_BEFORE" = "$FINAL_HASH_AFTER" ] || fail "gates modified docs/sprints/ on the multi-sprint aggregate (should be strictly read-only)"
 
-echo "$FINAL_GATES_OUT" | grep -q "Gates aggregate over 3 completed sprints" || fail "gates should count exactly 3 completed sprints (sprints in other phases, aborted, or mid-loop must be excluded)"
-echo "$FINAL_GATES_OUT" | grep -q "Audited miss.*sprints: ${SPRINT_1}, ${SPRINT_UNAUDITED}\$" || fail "gates' audited-miss bucket should list both sprint $SPRINT_1 and sprint $SPRINT_UNAUDITED's first GT fail"
-echo "$FINAL_GATES_OUT" | grep -q "Unaudited-fix miss.*sprints: ${SPRINT_UNAUDITED}\$" || fail "gates' unaudited-fix-miss bucket should list only sprint $SPRINT_UNAUDITED, never sprint $SPRINT_1"
+echo "$FINAL_GATES_OUT" | grep -q "Gates aggregate over 4 completed sprints" || fail "gates should count exactly 4 completed sprints (sprints in other phases, aborted, or mid-loop must be excluded)"
+echo "$FINAL_GATES_OUT" | grep -q "Audited miss.*sprints: ${SPRINT_1}, ${SPRINT_UNAUDITED}\$" || fail "gates' audited-miss bucket should list only sprint $SPRINT_1 and sprint $SPRINT_UNAUDITED's first GT fail — a ship-hash-overridden ship must NOT count as audited"
+echo "$FINAL_GATES_OUT" | grep -q "Unaudited-fix miss.*sprints: ${SPRINT_UNAUDITED}\$" || fail "gates' unaudited-fix-miss bucket should list only sprint $SPRINT_UNAUDITED, never sprint $SPRINT_1 or sprint $SPRINT_SHIP_OVR_MISS"
+echo "$FINAL_GATES_OUT" | grep -q "UNCLASSIFIED" || fail "gates should flag the ship-hash-overridden sprint's GT fail as unclassified, not silently fold it into audited miss"
+echo "$FINAL_GATES_OUT" | grep -q "sprint ${SPRINT_SHIP_OVR_MISS}: .*ship-hash.*was human-overridden" || fail "gates' unclassified note for sprint $SPRINT_SHIP_OVR_MISS should explain why (ship-hash override), not just flag it"
 echo "$FINAL_GATES_OUT" | grep -q "dev-done-hash overrides: 1 — sprints: ${SPRINT_GATES_OVR}" || fail "gates should count sprint $SPRINT_GATES_OVR's dev-done-hash override under hash-drift frequency"
-echo "$FINAL_GATES_OUT" | grep -q "ship-hash overrides: 0 " || fail "gates should show zero ship-hash overrides among these completed sprints"
+echo "$FINAL_GATES_OUT" | grep -q "ship-hash overrides: 1 — sprints: ${SPRINT_SHIP_OVR_MISS}" || fail "gates should count sprint $SPRINT_SHIP_OVR_MISS's ship-hash override under hash-drift frequency"
 echo "$FINAL_GATES_OUT" | grep -qE "sprint ${SPRINT_GATES_OVR}: audit_rounds=1, live_test_rounds=1" || fail "gates' round-count distribution for sprint $SPRINT_GATES_OVR is wrong"
-echo "$FINAL_GATES_OUT" | grep -q "UNCLASSIFIED" && fail "gates should not report any unclassified crossover events on this well-formed data"
 
 echo "ALL SMOKE TESTS PASSED"
