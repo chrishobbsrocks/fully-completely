@@ -42,6 +42,15 @@ git config user.name "Smoke Test"
 git add -A
 git commit -q -m "sandbox baseline"
 
+# docs/sprints/ doesn't exist yet at this point in the sandbox, so this also
+# covers the "no state directory at all" path, not just "zero completed
+# sprints with a state dir present".
+echo "== gates: zero completed sprints prints a clean no-data message, not zeroes or a traceback =="
+$SCRIPT gates > /tmp/gates_out.txt 2>&1 || fail "gates exited non-zero with no sprint data"
+grep -q "Nothing to aggregate" /tmp/gates_out.txt || fail "gates zero-data message missing"
+grep -qE "Traceback" /tmp/gates_out.txt && fail "gates raised a traceback on zero completed sprints"
+rm -f /tmp/gates_out.txt
+
 # Captures the numeric sprint id `new` just created from its own stdout,
 # rather than assuming IDs increment one-per-test. Some tests below create a
 # sprint without ever `start`-ing it (the injection regression test), which
@@ -90,6 +99,17 @@ DONE_FILE=$(find docs/sprints/3-done -name "sprint-${SPRINT_1}_*.md" 2>/dev/null
 [ -n "$DONE_FILE" ] || fail "sprint $SPRINT_1's file was not moved to docs/sprints/3-done/"
 [ ! -e "docs/sprints/2-in-progress/sprint-${SPRINT_1}_smoke-test-sprint.md" ] || fail "sprint $SPRINT_1's file is still in 2-in-progress/"
 grep -q '^status: done$' "$DONE_FILE" || fail "sprint $SPRINT_1's file frontmatter status was not updated to done"
+
+echo "== gates: one completed sprint (with a GT fail after a normal ship) is an audited miss, not a rate =="
+GATES_HASH_BEFORE=$(find docs/sprints -type f -exec sha256sum {} \; | sort | sha256sum)
+GATES_OUT=$($SCRIPT gates)
+GATES_HASH_AFTER=$(find docs/sprints -type f -exec sha256sum {} \; | sort | sha256sum)
+[ "$GATES_HASH_BEFORE" = "$GATES_HASH_AFTER" ] || fail "gates modified docs/sprints/ (should be strictly read-only)"
+echo "$GATES_OUT" | grep -q "single data point, not a rate" || fail "gates didn't flag a single completed sprint as non-statistical"
+echo "$GATES_OUT" | grep -q "Audited miss.*: 1 — sprints: ${SPRINT_1}$" || fail "gates didn't count sprint $SPRINT_1's GT fail (after a normal ship) as an audited miss"
+echo "$GATES_OUT" | grep -q "Unaudited-fix miss.*: 0 " || fail "gates should show zero unaudited-fix misses so far"
+echo "$GATES_OUT" | grep -q "GroundTruth: 1 of 1 — sprints: \[${SPRINT_1}\]" || fail "gates didn't record sprint $SPRINT_1 under GroundTruth's non-PASS catch"
+echo "$GATES_OUT" | grep -q "QA1: 1 of 1 — sprints: \[${SPRINT_1}\]" || fail "gates should count sprint $SPRINT_1 under QA1's non-PASS catch (it had an initial FAIL round)"
 
 echo "== refusal paths =="
 SPRINT_2=$(new_sprint "Edge case sprint")
@@ -287,5 +307,48 @@ SHIP_OVERRIDE_STATUS=$($SCRIPT status "$SPRINT_SHIP_OVR" --verbose)
 echo "$SHIP_OVERRIDE_STATUS" | grep -q "human-override" || fail "ship-hash override was not recorded in the sprint's history"
 echo "$SHIP_OVERRIDE_STATUS" | grep -q "reviewed the extra commit personally" || fail "ship-hash override reason was not recorded in the sprint's history"
 rm -f /tmp/out.txt
+
+echo "== gates: a GT fail after a reship is an unaudited-fix miss, never folded into the audited bucket =="
+SPRINT_UNAUDITED=$(new_sprint "Unaudited fix miss sprint")
+$SCRIPT start "$SPRINT_UNAUDITED" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_UNAUDITED work"
+$SCRIPT qa1 "$SPRINT_UNAUDITED" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_UNAUDITED" > /dev/null
+UNAUDITED_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_UNAUDITED" --commit "$UNAUDITED_COMMIT" > /dev/null
+$SCRIPT groundtruth "$SPRINT_UNAUDITED" --verdict FAIL --notes "first fail, audited miss" > /dev/null
+$SCRIPT reship "$SPRINT_UNAUDITED" --commit fix1 > /dev/null
+$SCRIPT groundtruth "$SPRINT_UNAUDITED" --verdict FAIL --notes "second fail, unaudited miss" > /dev/null
+$SCRIPT reship "$SPRINT_UNAUDITED" --commit fix2 > /dev/null
+$SCRIPT groundtruth "$SPRINT_UNAUDITED" --verdict PASS --notes ok > /dev/null
+$SCRIPT complete "$SPRINT_UNAUDITED" --user-said "close it, both misses are understood" > /dev/null
+
+echo "== gates: a completed sprint that needed a dev-done-hash override is counted under hash-drift, not miscounted as a gate override =="
+SPRINT_GATES_OVR=$(new_sprint "Gates override sprint")
+$SCRIPT start "$SPRINT_GATES_OVR" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_GATES_OVR work"
+$SCRIPT qa1 "$SPRINT_GATES_OVR" --verdict PASS --notes ok > /dev/null
+GATES_OVR_FILE=$(find docs/sprints/2-in-progress -name "sprint-${SPRINT_GATES_OVR}_*.md")
+echo "### amended after audit" >> "$GATES_OVR_FILE"
+$SCRIPT override "$SPRINT_GATES_OVR" --gate dev-done-hash --reason "reviewed, cosmetic only" --confirm OVERRIDE > /dev/null
+$SCRIPT dev-done "$SPRINT_GATES_OVR" > /dev/null
+GATES_OVR_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_GATES_OVR" --commit "$GATES_OVR_COMMIT" > /dev/null
+$SCRIPT groundtruth "$SPRINT_GATES_OVR" --verdict PASS --notes ok > /dev/null
+$SCRIPT complete "$SPRINT_GATES_OVR" --user-said "close it" > /dev/null
+
+echo "== gates: final aggregate across every completed sprint, still strictly read-only =="
+FINAL_HASH_BEFORE=$(find docs/sprints -type f -exec sha256sum {} \; | sort | sha256sum)
+FINAL_GATES_OUT=$($SCRIPT gates)
+FINAL_HASH_AFTER=$(find docs/sprints -type f -exec sha256sum {} \; | sort | sha256sum)
+[ "$FINAL_HASH_BEFORE" = "$FINAL_HASH_AFTER" ] || fail "gates modified docs/sprints/ on the multi-sprint aggregate (should be strictly read-only)"
+
+echo "$FINAL_GATES_OUT" | grep -q "Gates aggregate over 3 completed sprints" || fail "gates should count exactly 3 completed sprints (sprints in other phases, aborted, or mid-loop must be excluded)"
+echo "$FINAL_GATES_OUT" | grep -q "Audited miss.*sprints: ${SPRINT_1}, ${SPRINT_UNAUDITED}\$" || fail "gates' audited-miss bucket should list both sprint $SPRINT_1 and sprint $SPRINT_UNAUDITED's first GT fail"
+echo "$FINAL_GATES_OUT" | grep -q "Unaudited-fix miss.*sprints: ${SPRINT_UNAUDITED}\$" || fail "gates' unaudited-fix-miss bucket should list only sprint $SPRINT_UNAUDITED, never sprint $SPRINT_1"
+echo "$FINAL_GATES_OUT" | grep -q "dev-done-hash overrides: 1 — sprints: ${SPRINT_GATES_OVR}" || fail "gates should count sprint $SPRINT_GATES_OVR's dev-done-hash override under hash-drift frequency"
+echo "$FINAL_GATES_OUT" | grep -q "ship-hash overrides: 0 " || fail "gates should show zero ship-hash overrides among these completed sprints"
+echo "$FINAL_GATES_OUT" | grep -qE "sprint ${SPRINT_GATES_OVR}: audit_rounds=1, live_test_rounds=1" || fail "gates' round-count distribution for sprint $SPRINT_GATES_OVR is wrong"
+echo "$FINAL_GATES_OUT" | grep -q "UNCLASSIFIED" && fail "gates should not report any unclassified crossover events on this well-formed data"
 
 echo "ALL SMOKE TESTS PASSED"

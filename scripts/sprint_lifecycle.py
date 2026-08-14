@@ -700,6 +700,140 @@ def cmd_list(args) -> None:
         print(f"{sid:>3}  {entry['status']:<12} {entry['title']}")
 
 
+def cmd_gates(args) -> None:
+    """Read-only cross-sprint aggregate over every completed sprint's
+    history[]. Never writes to state, the registry, or any sprint file,
+    this only reads docs/sprints/state/*.json and prints. Scoped to
+    phase == "complete" only: an aborted sprint or one still mid-loop
+    isn't a verdict on the gates yet, so it's excluded rather than
+    counted as some kind of non-event.
+
+    Every number below is followed by the sprint IDs that produced it,
+    on purpose, so any of this is checkable by hand against the state
+    files instead of having to trust the aggregate.
+    """
+    if not STATE_DIR.exists():
+        print("No sprint state yet. Nothing to aggregate.")
+        return
+
+    completed = []
+    for path in sorted(STATE_DIR.glob("sprint-*.json")):
+        try:
+            state = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"WARNING: skipping unreadable state file {path}: {exc}", file=sys.stderr)
+            continue
+        if state.get("phase") == "complete":
+            completed.append(state)
+    completed.sort(key=lambda s: s["id"])
+
+    if not completed:
+        print("No completed sprints yet (phase == 'complete'). Nothing to aggregate. "
+              "This counts only sprints that finished /sprint-complete, not ones still "
+              "mid-loop or aborted.")
+        return
+
+    n = len(completed)
+    ids = [s["id"] for s in completed]
+    print(f"Gates aggregate over {n} completed sprint{'s' if n != 1 else ''}: {ids}")
+    if n == 1:
+        print("Only one completed sprint on record — treat every number below as a "
+              "single data point, not a rate.")
+    print()
+
+    def verdict_of(event: dict) -> str:
+        return event["detail"].split(":", 1)[0].strip()
+
+    def counts_str(sids: list) -> str:
+        tally: dict = {}
+        for sid in sids:
+            tally[sid] = tally.get(sid, 0) + 1
+        return ", ".join(f"{sid}(x{tally[sid]})" if tally[sid] > 1 else str(sid)
+                          for sid in sorted(tally)) or "(none)"
+
+    # --- 1. Crossover: did GroundTruth catch something QA1's audit had
+    # already passed, or something QA1 never got a second look at? Walk
+    # each sprint's history in order; for every live_test FAIL/CONDITIONAL,
+    # find the shipped/reshipped event immediately before it, then check
+    # whether a qa1 audit PASS landed between that ship and the ship before
+    # it. A "reshipped" ship never has one by design (cmd_reship skips the
+    # hash/audit check on purpose), so those always land in the unaudited
+    # bucket; a "shipped" ship normally does, since cmd_ship refuses to
+    # record one without it, and lands in the audited bucket. Anything that
+    # doesn't fit either shape is flagged rather than guessed into a bucket.
+    audited_miss = []
+    unaudited_fix_miss = []
+    unclassified = []
+
+    for state in completed:
+        sid = state["id"]
+        history = state.get("history", [])
+        ship_positions = [i for i, h in enumerate(history) if h["event"] in ("shipped", "reshipped")]
+        for i, h in enumerate(history):
+            if h["event"] != "live_test" or verdict_of(h) not in ("FAIL", "CONDITIONAL"):
+                continue
+            prior_ships = [sp for sp in ship_positions if sp < i]
+            if not prior_ships:
+                unclassified.append((sid, f"history[{i}] live_test has no preceding shipped/reshipped event"))
+                continue
+            ship_idx = prior_ships[-1]
+            ship_event = history[ship_idx]
+            earlier_ships = [sp for sp in ship_positions if sp < ship_idx]
+            window_start = (earlier_ships[-1] + 1) if earlier_ships else 0
+            window = history[window_start:ship_idx]
+            audited_in_window = any(e["event"] == "audit" and verdict_of(e) == "PASS" for e in window)
+            if ship_event["event"] == "reshipped":
+                unaudited_fix_miss.append(sid)
+            elif audited_in_window:
+                audited_miss.append(sid)
+            else:
+                unclassified.append((sid, f"history[{i}] live_test followed a 'shipped' event "
+                                          "with no qa1 audit PASS found in the preceding window"))
+
+    print("1. Crossover (GroundTruth catching what shipped, split by audit provenance):")
+    print(f"   Audited miss — QA1 passed fresh, GroundTruth still caught it: "
+          f"{len(audited_miss)} — sprints: {counts_str(audited_miss)}")
+    print(f"   Unaudited-fix miss — fix reshipped without a fresh QA1 re-audit, not evidence "
+          f"QA1 missed anything: {len(unaudited_fix_miss)} — sprints: {counts_str(unaudited_fix_miss)}")
+    if unclassified:
+        print("   UNCLASSIFIED (doesn't match the expected shipped/reshipped state machine, "
+              "check by hand):")
+        for sid, note in unclassified:
+            print(f"     sprint {sid}: {note}")
+    print()
+
+    # --- 2. Per-gate catch rate: did each gate ever return non-PASS on a
+    # completed sprint, and how many rounds did it take? Independent of the
+    # crossover bucketing above.
+    qa1_catch = [s["id"] for s in completed
+                 if any(h["event"] == "audit" and verdict_of(h) != "PASS" for h in s.get("history", []))]
+    gt_catch = [s["id"] for s in completed
+                if any(h["event"] == "live_test" and verdict_of(h) != "PASS" for h in s.get("history", []))]
+
+    print("2. Per-gate catch rate (completed sprints where the gate ever returned non-PASS):")
+    print(f"   QA1: {len(qa1_catch)} of {n} — sprints: {qa1_catch or '(none)'}")
+    print(f"   GroundTruth: {len(gt_catch)} of {n} — sprints: {gt_catch or '(none)'}")
+    print("   Round-count distribution (audit_rounds / live_test_rounds), per completed sprint:")
+    for state in completed:
+        print(f"     sprint {state['id']}: audit_rounds={state.get('audit_rounds', 0)}, "
+              f"live_test_rounds={state.get('live_test_rounds', 0)}")
+    print()
+
+    # --- 3. Hash-drift override frequency: how often did a human have to
+    # clear the content-drift safety net (cmd_override), grouped by which
+    # gate's hash it re-stamped. This is not "QA1/GroundTruth overridden" —
+    # no such override exists in this codebase, only the hash checks do.
+    dev_done_hash_events = [s["id"] for s in completed for h in s.get("history", [])
+                             if h["actor"] == "human-override" and h["event"] == "dev_done_hash_override"]
+    ship_hash_events = [s["id"] for s in completed for h in s.get("history", [])
+                         if h["actor"] == "human-override" and h["event"] == "ship_hash_override"]
+
+    print("3. Hash-drift override frequency (content-drift safety net manually cleared, "
+          "NOT a QA1/GroundTruth override — no such override exists):")
+    print(f"   dev-done-hash overrides: {len(dev_done_hash_events)} — sprints: {counts_str(dev_done_hash_events)}")
+    print(f"   ship-hash overrides: {len(ship_hash_events)} — sprints: {counts_str(ship_hash_events)}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sprint_lifecycle.py")
     sub = p.add_subparsers(dest="command", required=True)
@@ -763,6 +897,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_override)
 
     s = sub.add_parser("list"); s.set_defaults(func=cmd_list)
+
+    s = sub.add_parser("gates", help="Read-only cross-sprint gate aggregate over completed sprints.")
+    s.set_defaults(func=cmd_gates)
 
     return p
 
