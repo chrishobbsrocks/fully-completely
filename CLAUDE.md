@@ -210,19 +210,21 @@ alone did not.
 ## Quick reference
 
 ```bash
-/sprint-new "Title" [--epic "Epic name"]
-/sprint-start <N>
+/sprint-new "Title" [--epic "Epic name"]                                                        # Master Controller
+/sprint-start <N>                                                                               # Dev Team 1/2
 /sprint-worktree <N>            # Dev Team 2 only, before building
-/sprint-status [<N>]
-/sprint-list
-/sprint-qa1 <N> --verdict PASS|FAIL|CONDITIONAL --notes "..."
-/sprint-dev-done <N>
-/sprint-ship <N> --commit <hash>
-/sprint-reship <N> --commit <hash>
-/sprint-groundtruth <N> --deployed-commit <sha> --verdict PASS|FAIL|CONDITIONAL --notes "..."
-/sprint-complete <N> --user-said "..."
-/sprint-abort <N> --reason "..."
+/sprint-status [<N>]                                                                            # any role, read-only
+/sprint-list                                                                                    # any role, read-only
+/sprint-qa1 <N> --verdict PASS|FAIL|CONDITIONAL --notes "..."                                   # QA1
+/sprint-dev-done <N>                                                                            # Dev Team 1/2
+/sprint-ship <N> --commit <hash>                                                                # Pipeman
+/sprint-reship <N> --commit <hash>                                                              # Pipeman
+/sprint-groundtruth <N> --deployed-commit <sha> --verdict PASS|FAIL|CONDITIONAL --notes "..."   # GroundTruth
+/sprint-complete <N> --user-said "..."                                                          # Dev Team 1/2
+/sprint-abort <N> --reason "..."                                                                # Dev Team 1/2
 ```
+
+`/sprint-abort` isn't attributed to a role anywhere else in this file (it's absent from the lifecycle diagram above); "Dev Team 1/2" here is inferred from the "Command ownership" note further up — lifecycle transition commands belong to whichever Dev Team owns the sprint, not Master Controller — not a direct quote like the other eleven labels are.
 
 ## Sprint data persistence
 
