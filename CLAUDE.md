@@ -212,7 +212,7 @@ alone did not.
 ```bash
 /sprint-new "Title" [--epic "Epic name"]                                                        # Master Controller
 /sprint-start <N>                                                                               # Dev Team 1/2
-/sprint-worktree <N>            # Dev Team 2 only, before building
+/sprint-worktree <N>                                                                            # Dev Team 2 only, before building
 /sprint-status [<N>]                                                                            # any role, read-only
 /sprint-list                                                                                    # any role, read-only
 /sprint-qa1 <N> --verdict PASS|FAIL|CONDITIONAL --notes "..."                                   # QA1
