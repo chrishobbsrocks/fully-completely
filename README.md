@@ -28,6 +28,12 @@ scripts/sprint_lifecycle.py    The actual enforcement logic
 scripts/dev2_worktree.sh       Creates Dev Team 2's isolated git worktree
 scripts/smoke_test.sh          Full lifecycle test, runs in a sandbox
 scripts/worktree_test.sh       Tests dev2_worktree.sh, also sandboxed
+scripts/launcher/               VS Code launcher: run-role.js, generate-tasks.js
+scripts/install.js             Copies this framework into another project,
+                                non-destructively
+.vscode/tasks.json             Generated — one launch + one resume task per
+                                role, plus a plain Shell task (don't hand-edit)
+.vscode/settings.json          fullyCompletely.autoLaunch toggle (off by default)
 templates/sprint-template.md   Template used by /sprint-new
 docs/sprints/                  Where sprint files and state live
   0-backlog/  1-todo/  2-in-progress/  3-done/  4-blocked/  5-abandoned/
@@ -39,21 +45,97 @@ docs/sprints/                  Where sprint files and state live
 
 ## Install
 
-1. Copy this whole folder into your project (or copy just `.claude/`,
-   `scripts/`, `templates/`, `docs/sprints/`, and `CLAUDE.md` into an
-   existing project root).
-2. Requires only Python 3, no dependencies to install. Runs on macOS, Linux, and Windows. The shell scripts (`smoke_test.sh`, `worktree_test.sh`, `dev2_worktree.sh`) need a POSIX-style shell, which Windows users typically already have via Git Bash or WSL; they aren't required to use `sprint_lifecycle.py` itself.
-3. If you're not using Claude Code's native sub-agent feature, you can
-   still use this by hand: open a terminal tab per role, start a session
-   with the model noted in `CLAUDE.md`, and paste the matching file from
-   `.claude/agents/` as your first message.
-4. **Open `.gitignore` and delete the block marked `TEMPLATE-ONLY`.** It
-   keeps this template repo from shipping its own example sprint data, but
-   left in place in your project it means every real sprint you create and
-   all QA/LiveQA gate history in `docs/sprints/state/` is untracked,
-   so a wiped working tree loses it for good with nothing to recover from
-   git. `docs/sprints/registry.json` is already tracked by default and
-   needs no change.
+1. Copy this whole folder into your project, or run
+   `node /path/to/fully-completely/scripts/install.js` from inside your
+   project (see [`scripts/install.js`](#launching-the-agents) below) —
+   non-destructive either way, it never overwrites a file that already
+   exists with different content, and reports anything it skipped.
+2. Requires only Python 3 and Node.js, no packages to install for either.
+   Runs on macOS, Linux, and Windows. The shell scripts (`smoke_test.sh`,
+   `worktree_test.sh`, `dev2_worktree.sh`) need a POSIX-style shell, which
+   Windows users typically already have via Git Bash or WSL; they aren't
+   required to use `sprint_lifecycle.py` itself.
+3. See "Launching the agents" below for both the VS Code launcher and the
+   fully manual fallback (open a terminal tab per role yourself).
+
+## Launching the agents
+
+Each role runs as its own genuinely separate Claude Code session — never
+one session sub-agenting another, that's forbidden absolutely (see
+`CLAUDE.md`). The six sessions are `claude --agent <id>`, where `<id>` is
+the agent's filename in `.claude/agents/` (`master-controller`,
+`dev-team-1`, `dev-team-2`, `qa1`, `pipeman`, `liveqa`). `--agent` alone is
+enough — the agent file's own `model:` frontmatter wins even over an
+explicit `--model` on the same command line (verified on the CLI this was
+built against), so frontmatter stays the single place a model is ever set.
+Nothing in this launcher passes `--model`.
+
+**By hand:** open a terminal tab per role, `cd` into the project root, run
+`claude --agent <id>`, and you're running that role.
+
+**VS Code launcher:** `.vscode/tasks.json` (generated, see below) defines
+one launch task and one resume task per role, plus a plain `Shell` task,
+and two compound tasks:
+
+- **FC: Launch All** — Command Palette → "Tasks: Run Task" → `FC: Launch
+  All` (or `Cmd/Ctrl+Shift+B` if it's your default build task) opens seven
+  dedicated terminals in the project root: the six roles, each running
+  `claude --agent <id> --name fc:<id>:<repo>` with a short first message
+  confirming its role and telling it to check `docs/sprints/registry.json`
+  and wait for instructions, plus **Shell**, a plain `zsh` login shell with
+  no `claude` in it at all — for `docs/HUMAN_OVERRIDE.md`'s override
+  command (which must never be run from inside an agent session, see that
+  file) and any raw git you want to do outside of Pipeman's session.
+- **FC: Resume All** — reopens the same seven terminals. Each role
+  terminal tries `claude --agent <id> --resume fc:<id>:<repo>` if this
+  launcher has a local record of having started that named session before
+  (`.claude-launcher/state.json`, gitignored, machine-specific); otherwise,
+  or if the resume attempt exits almost immediately (the recorded session
+  most likely no longer exists), it falls back to a fresh launch
+  automatically. Dev Team 2 is the one role whose working directory can
+  legitimately move mid-sprint (into a separate git worktree, see
+  "Customizing" below) — the launcher itself never scans for or manages
+  that worktree, it always reopens Dev Team 2 in the project root and adds
+  one extra line to its resume message telling it to check the sprint
+  registry and `cd` back into an active worktree itself if one exists.
+- Every individual role also has its own task (`FC: Launch — QA1`, `FC:
+  Resume — Pipeman`, ...) if you only want one terminal.
+
+Each task's terminal gets the color from that agent's `color:` frontmatter
+(VS Code only supports the ANSI terminal palette for this, so Dev Team 2's
+orange and LiveQA's purple are the closest available shades, not exact).
+Colors and the auto-launch setting below are baked into `tasks.json` at
+generation time, not read live — after changing an agent's `color:` or
+`.vscode/settings.json`'s `fullyCompletely.autoLaunch`, regenerate it:
+
+```bash
+node scripts/launcher/generate-tasks.js
+```
+
+**Auto-launch:** `.vscode/settings.json` → `"fullyCompletely.autoLaunch"`,
+`false` by default. Set it to `true` and regenerate `tasks.json` to have
+`FC: Launch All` run automatically whenever this folder opens in VS Code
+(VS Code will still ask you to trust automatic tasks the first time, that
+prompt is native and this doesn't try to bypass it).
+
+**Errors:** if `claude` isn't on PATH, or an agent's `.claude/agents/*.md`
+file is missing, the corresponding terminal prints one line explaining
+which and exits, rather than silently doing nothing.
+
+**`scripts/install.js`** copies `.claude/`, `scripts/` (including the
+launcher), `templates/`, `docs/sprints/`, `docs/HUMAN_OVERRIDE.md`, and
+`CLAUDE.md` into an existing project, run from inside it:
+
+```bash
+node /path/to/fully-completely/scripts/install.js
+```
+
+It never overwrites a file that already exists with different content —
+those are reported as conflicts for you to reconcile by hand.
+`.vscode/tasks.json`, `.vscode/settings.json`, and `.gitignore` get a real
+merge instead (your own unrelated tasks/settings/ignore rules are left
+alone; only the `FC:` tasks and the two entries this framework needs are
+added). This is also the shape a future `npx fully-completely` would run.
 
 ## Using it
 

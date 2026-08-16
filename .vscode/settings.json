@@ -1,0 +1,9 @@
+{
+  // Fully Completely launcher: when true, "FC: Launch All" runs
+  // automatically when this folder opens in VS Code (VS Code will still
+  // ask you to trust automatic tasks the first time). Defaults to off —
+  // flip this and re-run `node scripts/launcher/generate-tasks.js` to
+  // apply it, since the corresponding task property is baked into
+  // .vscode/tasks.json at generation time, not read live at folder-open.
+  "fullyCompletely.autoLaunch": false
+}
