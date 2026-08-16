@@ -7,6 +7,19 @@
 // any agent's `color:` field, or after flipping fullyCompletely.autoLaunch
 // in .vscode/settings.json.
 //
+// Each role gets exactly one task, named after the role ("Master
+// Controller", "QA1", ...) — that's also the terminal's tab name, since
+// VS Code names a task's terminal after its label. It resumes a prior
+// session automatically if one is recorded, falling back to fresh
+// otherwise (see run-role.js).
+//
+// There is deliberately no separate "restart" task: VS Code ties a
+// dedicated terminal's identity to the task's label, so a second task for
+// the same role opens a second terminal alongside the first rather than
+// replacing it (confirmed the hard way). To force a role fresh, run
+// `node scripts/launcher/run-role.js <role-id> --restart` by hand from
+// Shell instead — see the README.
+//
 // Exports buildTasks(root) so scripts/install.js can reuse the exact same
 // task shapes when merging them into a target project's own tasks.json.
 const fs = require('fs');
@@ -24,17 +37,12 @@ function readAutoLaunchSetting(root) {
   }
 }
 
-function roleTask(role, meta, mode) {
-  const isResume = mode === 'resume';
+function roleTask(role, meta) {
   const task = {
-    label: `FC: ${isResume ? 'Resume' : 'Launch'} — ${role.label}`,
+    label: role.label,
     type: 'shell',
     command: 'node',
-    args: [
-      path.posix.join('scripts', 'launcher', 'run-role.js'),
-      role.id,
-      ...(isResume ? ['--resume'] : []),
-    ],
+    args: [path.posix.join('scripts', 'launcher', 'run-role.js'), role.id],
     options: { cwd: '${workspaceFolder}' },
     presentation: {
       panel: 'dedicated',
@@ -50,7 +58,7 @@ function roleTask(role, meta, mode) {
 
 function shellTask() {
   return {
-    label: 'FC: Launch — Shell',
+    label: 'Shell',
     type: 'shell',
     command: 'exec zsh -l',
     options: { cwd: '${workspaceFolder}' },
@@ -69,30 +77,22 @@ function buildTasks(root) {
   const autoLaunch = readAutoLaunchSetting(root);
   const roleMetas = ROLES.map((role) => ({ role, meta: readAgentMeta(role.id) }));
 
-  const launchTasks = roleMetas.map(({ role, meta }) => roleTask(role, meta, 'launch'));
-  const resumeTasks = roleMetas.map(({ role, meta }) => roleTask(role, meta, 'resume'));
+  const roleTasks = roleMetas.map(({ role, meta }) => roleTask(role, meta));
   const shell = shellTask();
 
-  const launchAll = {
-    label: 'FC: Launch All',
-    dependsOn: [...launchTasks.map((t) => t.label), shell.label],
+  const startAll = {
+    label: 'FC: Start All',
+    dependsOn: [...roleTasks.map((t) => t.label), shell.label],
     dependsOrder: 'parallel',
     problemMatcher: [],
   };
   if (autoLaunch) {
-    launchAll.runOptions = { runOn: 'folderOpen' };
+    startAll.runOptions = { runOn: 'folderOpen' };
   }
-
-  const resumeAll = {
-    label: 'FC: Resume All',
-    dependsOn: [...resumeTasks.map((t) => t.label), shell.label],
-    dependsOrder: 'parallel',
-    problemMatcher: [],
-  };
 
   return {
     autoLaunch,
-    tasks: [...launchTasks, ...resumeTasks, shell, launchAll, resumeAll],
+    tasks: [...roleTasks, shell, startAll],
   };
 }
 

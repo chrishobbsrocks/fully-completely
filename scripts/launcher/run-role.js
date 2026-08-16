@@ -1,14 +1,23 @@
 #!/usr/bin/env node
 'use strict';
 // Invoked by .vscode/tasks.json, one process per role terminal:
-//   node scripts/launcher/run-role.js <role-id> [--resume]
+//   node scripts/launcher/run-role.js <role-id> [--restart]
 //
-// Fresh launch:  claude --agent <id> --name <title> "<initial prompt>"
-// Resume:        claude --agent <id> --resume <title> ["<extra prompt>"]
-//   falling back to a fresh launch if this launcher never started a named
-//   session for this role before, or if the resume attempt exits almost
-//   immediately with a non-zero code (most likely: the recorded session no
-//   longer exists on this machine).
+// Default (smart): if this launcher has a local record of a prior session
+// for this role, try to resume it (`claude --agent <id> --resume <title>`);
+// otherwise, or if the resume attempt exits almost immediately (most
+// likely: the recorded session no longer exists), launch fresh
+// (`claude --agent <id> --name <title> "<initial prompt>"`). This is the
+// task actually named after the role ("Master Controller", "QA1", ...),
+// since it's the one people run day to day.
+//
+// --restart: skip resume entirely and always start a brand-new named
+// session, even if one is already recorded. Previous history isn't
+// deleted, just not reconnected to. Not wired into any VS Code task —
+// VS Code ties a dedicated terminal's identity to the task's label, so a
+// second task for the same role would open a second terminal alongside
+// the first rather than replacing it. Run this by hand instead (e.g. from
+// Shell) when you actually want to abandon a session.
 //
 // Model is never passed here — `--agent <id>` alone puts the agent file's
 // own frontmatter `model:` in charge (confirmed to win even over an
@@ -48,9 +57,15 @@ function spawnClaude(args) {
   });
 }
 
+async function launchFresh(role, sessionTitle) {
+  const result = await spawnClaude(['--agent', role.id, '--name', sessionTitle, initialPrompt(role.label)]);
+  markLaunched(role.id);
+  return result;
+}
+
 async function main() {
   const [, , roleId, ...rest] = process.argv;
-  const isResume = rest.includes('--resume');
+  const forceRestart = rest.includes('--restart');
 
   const role = ROLES.find((r) => r.id === roleId);
   if (!role) {
@@ -75,31 +90,33 @@ async function main() {
   const repoName = path.basename(ROOT);
   const sessionTitle = `fc:${role.id}:${repoName}`;
 
-  if (isResume && wasLaunched(role.id)) {
-    const resumeArgs = ['--agent', role.id, '--resume', sessionTitle];
-    if (role.id === 'dev-team-2') {
-      resumeArgs.push(devTeam2ResumePrompt(repoName));
-    }
-    const result = await spawnClaude(resumeArgs);
-    if (result.code && result.elapsedMs < FAST_FAILURE_MS) {
-      console.log(
-        `Resume of ${role.label} exited almost immediately (code ${result.code}), ` +
-          `the recorded session probably no longer exists. Starting fresh instead.`
-      );
-      const fresh = await spawnClaude(['--agent', role.id, '--name', sessionTitle, initialPrompt(role.label)]);
-      markLaunched(role.id);
-      process.exitCode = fresh.code === null ? 1 : fresh.code;
-      return;
-    }
+  if (forceRestart) {
+    console.log(`Restarting ${role.label}: starting a brand-new session (any prior one is left alone).`);
+    const result = await launchFresh(role, sessionTitle);
     process.exitCode = result.code === null ? 0 : result.code;
     return;
   }
 
-  if (isResume) {
-    console.log(`No prior ${role.label} session recorded for this project, starting fresh instead.`);
+  if (!wasLaunched(role.id)) {
+    const result = await launchFresh(role, sessionTitle);
+    process.exitCode = result.code === null ? 0 : result.code;
+    return;
   }
-  const result = await spawnClaude(['--agent', role.id, '--name', sessionTitle, initialPrompt(role.label)]);
-  markLaunched(role.id);
+
+  const resumeArgs = ['--agent', role.id, '--resume', sessionTitle];
+  if (role.id === 'dev-team-2') {
+    resumeArgs.push(devTeam2ResumePrompt(repoName));
+  }
+  const result = await spawnClaude(resumeArgs);
+  if (result.code && result.elapsedMs < FAST_FAILURE_MS) {
+    console.log(
+      `Resume of ${role.label} exited almost immediately (code ${result.code}), ` +
+        `the recorded session probably no longer exists. Starting fresh instead.`
+    );
+    const fresh = await launchFresh(role, sessionTitle);
+    process.exitCode = fresh.code === null ? 1 : fresh.code;
+    return;
+  }
   process.exitCode = result.code === null ? 0 : result.code;
 }
 

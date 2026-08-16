@@ -170,7 +170,7 @@ function mergeTasks() {
       existing = readJsonc(destPath);
       if (!Array.isArray(existing.tasks)) existing.tasks = [];
     } catch {
-      conflicts.push(`${relPath} (couldn't parse as JSON, left untouched — merge the FC: tasks in by hand)`);
+      conflicts.push(`${relPath} (couldn't parse as JSON, left untouched — merge the launcher tasks in by hand)`);
       return;
     }
   }
@@ -184,7 +184,7 @@ function mergeTasks() {
   }
 
   if (added === 0 && existed) {
-    skipped.push(`${relPath} (all FC: tasks already present)`);
+    skipped.push(`${relPath} (all launcher tasks already present)`);
     return;
   }
 
@@ -192,7 +192,7 @@ function mergeTasks() {
   fs.writeFileSync(destPath, JSON.stringify(existing, null, 2) + '\n');
   copied.push(
     existed
-      ? `${relPath} (added ${added} FC: task(s) to your existing file, left the rest untouched)`
+      ? `${relPath} (added ${added} launcher task(s) to your existing file, left the rest untouched)`
       : `${relPath} (${added} tasks)`
   );
 }

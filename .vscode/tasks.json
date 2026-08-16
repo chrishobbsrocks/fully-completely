@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "FC: Launch — Master Controller",
+      "label": "Master Controller",
       "type": "shell",
       "command": "node",
       "args": [
@@ -25,7 +25,7 @@
       }
     },
     {
-      "label": "FC: Launch — Dev Team 1",
+      "label": "Dev Team 1",
       "type": "shell",
       "command": "node",
       "args": [
@@ -48,7 +48,7 @@
       }
     },
     {
-      "label": "FC: Launch — Dev Team 2",
+      "label": "Dev Team 2",
       "type": "shell",
       "command": "node",
       "args": [
@@ -71,7 +71,7 @@
       }
     },
     {
-      "label": "FC: Launch — QA1",
+      "label": "QA1",
       "type": "shell",
       "command": "node",
       "args": [
@@ -94,7 +94,7 @@
       }
     },
     {
-      "label": "FC: Launch — Pipeman",
+      "label": "Pipeman",
       "type": "shell",
       "command": "node",
       "args": [
@@ -117,7 +117,7 @@
       }
     },
     {
-      "label": "FC: Launch — LiveQA",
+      "label": "LiveQA",
       "type": "shell",
       "command": "node",
       "args": [
@@ -140,151 +140,7 @@
       }
     },
     {
-      "label": "FC: Resume — Master Controller",
-      "type": "shell",
-      "command": "node",
-      "args": [
-        "scripts/launcher/run-role.js",
-        "master-controller",
-        "--resume"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "presentation": {
-        "panel": "dedicated",
-        "reveal": "always",
-        "focus": false,
-        "clear": false
-      },
-      "problemMatcher": [],
-      "icon": {
-        "id": "organization",
-        "color": "terminal.ansiBlue"
-      }
-    },
-    {
-      "label": "FC: Resume — Dev Team 1",
-      "type": "shell",
-      "command": "node",
-      "args": [
-        "scripts/launcher/run-role.js",
-        "dev-team-1",
-        "--resume"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "presentation": {
-        "panel": "dedicated",
-        "reveal": "always",
-        "focus": false,
-        "clear": false
-      },
-      "problemMatcher": [],
-      "icon": {
-        "id": "code",
-        "color": "terminal.ansiRed"
-      }
-    },
-    {
-      "label": "FC: Resume — Dev Team 2",
-      "type": "shell",
-      "command": "node",
-      "args": [
-        "scripts/launcher/run-role.js",
-        "dev-team-2",
-        "--resume"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "presentation": {
-        "panel": "dedicated",
-        "reveal": "always",
-        "focus": false,
-        "clear": false
-      },
-      "problemMatcher": [],
-      "icon": {
-        "id": "repo-forked",
-        "color": "terminal.ansiBrightYellow"
-      }
-    },
-    {
-      "label": "FC: Resume — QA1",
-      "type": "shell",
-      "command": "node",
-      "args": [
-        "scripts/launcher/run-role.js",
-        "qa1",
-        "--resume"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "presentation": {
-        "panel": "dedicated",
-        "reveal": "always",
-        "focus": false,
-        "clear": false
-      },
-      "problemMatcher": [],
-      "icon": {
-        "id": "verified",
-        "color": "terminal.ansiYellow"
-      }
-    },
-    {
-      "label": "FC: Resume — Pipeman",
-      "type": "shell",
-      "command": "node",
-      "args": [
-        "scripts/launcher/run-role.js",
-        "pipeman",
-        "--resume"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "presentation": {
-        "panel": "dedicated",
-        "reveal": "always",
-        "focus": false,
-        "clear": false
-      },
-      "problemMatcher": [],
-      "icon": {
-        "id": "rocket",
-        "color": "terminal.ansiGreen"
-      }
-    },
-    {
-      "label": "FC: Resume — LiveQA",
-      "type": "shell",
-      "command": "node",
-      "args": [
-        "scripts/launcher/run-role.js",
-        "liveqa",
-        "--resume"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "presentation": {
-        "panel": "dedicated",
-        "reveal": "always",
-        "focus": false,
-        "clear": false
-      },
-      "problemMatcher": [],
-      "icon": {
-        "id": "eye",
-        "color": "terminal.ansiMagenta"
-      }
-    },
-    {
-      "label": "FC: Launch — Shell",
+      "label": "Shell",
       "type": "shell",
       "command": "exec zsh -l",
       "options": {
@@ -302,29 +158,15 @@
       "problemMatcher": []
     },
     {
-      "label": "FC: Launch All",
+      "label": "FC: Start All",
       "dependsOn": [
-        "FC: Launch — Master Controller",
-        "FC: Launch — Dev Team 1",
-        "FC: Launch — Dev Team 2",
-        "FC: Launch — QA1",
-        "FC: Launch — Pipeman",
-        "FC: Launch — LiveQA",
-        "FC: Launch — Shell"
-      ],
-      "dependsOrder": "parallel",
-      "problemMatcher": []
-    },
-    {
-      "label": "FC: Resume All",
-      "dependsOn": [
-        "FC: Resume — Master Controller",
-        "FC: Resume — Dev Team 1",
-        "FC: Resume — Dev Team 2",
-        "FC: Resume — QA1",
-        "FC: Resume — Pipeman",
-        "FC: Resume — LiveQA",
-        "FC: Launch — Shell"
+        "Master Controller",
+        "Dev Team 1",
+        "Dev Team 2",
+        "QA1",
+        "Pipeman",
+        "LiveQA",
+        "Shell"
       ],
       "dependsOrder": "parallel",
       "problemMatcher": []

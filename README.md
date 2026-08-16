@@ -31,8 +31,8 @@ scripts/worktree_test.sh       Tests dev2_worktree.sh, also sandboxed
 scripts/launcher/               VS Code launcher: run-role.js, generate-tasks.js
 scripts/install.js             Copies this framework into another project,
                                 non-destructively
-.vscode/tasks.json             Generated — one launch + one resume task per
-                                role, plus a plain Shell task (don't hand-edit)
+.vscode/tasks.json             Generated — one task per role, plus Shell
+                                (don't hand-edit)
 .vscode/settings.json          fullyCompletely.autoLaunch toggle (off by default)
 templates/sprint-template.md   Template used by /sprint-new
 docs/sprints/                  Where sprint files and state live
@@ -73,33 +73,53 @@ Nothing in this launcher passes `--model`.
 **By hand:** open a terminal tab per role, `cd` into the project root, run
 `claude --agent <id>`, and you're running that role.
 
-**VS Code launcher:** `.vscode/tasks.json` (generated, see below) defines
-one launch task and one resume task per role, plus a plain `Shell` task,
-and two compound tasks:
+**VS Code launcher:** `.vscode/tasks.json` (generated, see below) gives
+each role a task named exactly after it — `Master Controller`, `Dev Team
+1`, `Dev Team 2`, `QA1`, `Pipeman`, `LiveQA` — since a task's label is also
+its terminal's tab name. Every one of those is "smart": it resumes a prior
+session automatically if this launcher has a local record of having
+started one before (`.claude-launcher/state.json`, gitignored,
+machine-specific), or if the resume attempt exits almost immediately (the
+recorded session most likely no longer exists), or launches fresh with a
+short first message confirming the role and telling it to check
+`docs/sprints/registry.json` and wait for instructions. There's also
+**Shell**, a plain `zsh` login shell with no `claude` in it at all — for
+`docs/HUMAN_OVERRIDE.md`'s override command (which must never be run from
+inside an agent session, see that file) and any raw git you want to do
+outside of Pipeman's session.
 
-- **FC: Launch All** — Command Palette → "Tasks: Run Task" → `FC: Launch
-  All` (or `Cmd/Ctrl+Shift+B` if it's your default build task) opens seven
-  dedicated terminals in the project root: the six roles, each running
-  `claude --agent <id> --name fc:<id>:<repo>` with a short first message
-  confirming its role and telling it to check `docs/sprints/registry.json`
-  and wait for instructions, plus **Shell**, a plain `zsh` login shell with
-  no `claude` in it at all — for `docs/HUMAN_OVERRIDE.md`'s override
-  command (which must never be run from inside an agent session, see that
-  file) and any raw git you want to do outside of Pipeman's session.
-- **FC: Resume All** — reopens the same seven terminals. Each role
-  terminal tries `claude --agent <id> --resume fc:<id>:<repo>` if this
-  launcher has a local record of having started that named session before
-  (`.claude-launcher/state.json`, gitignored, machine-specific); otherwise,
-  or if the resume attempt exits almost immediately (the recorded session
-  most likely no longer exists), it falls back to a fresh launch
-  automatically. Dev Team 2 is the one role whose working directory can
-  legitimately move mid-sprint (into a separate git worktree, see
-  "Customizing" below) — the launcher itself never scans for or manages
-  that worktree, it always reopens Dev Team 2 in the project root and adds
-  one extra line to its resume message telling it to check the sprint
-  registry and `cd` back into an active worktree itself if one exists.
-- Every individual role also has its own task (`FC: Launch — QA1`, `FC:
-  Resume — Pipeman`, ...) if you only want one terminal.
+**FC: Start All** — Command Palette → "Tasks: Run Task" → `FC: Start All`
+(or `Cmd/Ctrl+Shift+B` if it's your default build task) opens all seven
+terminals in the project root using the smart per-role behavior above.
+Safe to run again later in the same window: VS Code leaves each role's
+still-running dedicated terminal alone rather than restarting or
+duplicating it, so re-running this just fills in whichever of the seven
+aren't already open.
+
+There's deliberately no separate "restart" task: VS Code ties a dedicated
+terminal's identity to the task's label, so a second task for the same
+role opens a second terminal alongside the first instead of replacing it
+(this actually happened — six roles briefly had two terminals apiece
+before this got caught). If you want to abandon a role's session and
+start clean rather than continue it, run this by hand instead, e.g. from
+**Shell**:
+
+```bash
+node scripts/launcher/run-role.js qa1 --restart
+```
+
+That starts a brand-new named session for that role right there in
+whatever terminal you ran it from (previous history isn't deleted, just
+not reconnected to), and records it, so the next time you run that role's
+own task it resumes this new session. Close the role's stale existing
+terminal tab yourself once you're done with it.
+
+Dev Team 2 is the one role whose working directory can legitimately move
+mid-sprint (into a separate git worktree, see "Customizing" below) — the
+launcher itself never scans for or manages that worktree, it always
+reopens Dev Team 2 in the project root and adds one extra line to its
+resume message telling it to check the sprint registry and `cd` back into
+an active worktree itself if one exists.
 
 Each task's terminal gets the color from that agent's `color:` frontmatter
 (VS Code only supports the ANSI terminal palette for this, so Dev Team 2's
@@ -114,7 +134,7 @@ node scripts/launcher/generate-tasks.js
 
 **Auto-launch:** `.vscode/settings.json` → `"fullyCompletely.autoLaunch"`,
 `false` by default. Set it to `true` and regenerate `tasks.json` to have
-`FC: Launch All` run automatically whenever this folder opens in VS Code
+`FC: Start All` run automatically whenever this folder opens in VS Code
 (VS Code will still ask you to trust automatic tasks the first time, that
 prompt is native and this doesn't try to bypass it).
 
@@ -134,8 +154,9 @@ It never overwrites a file that already exists with different content —
 those are reported as conflicts for you to reconcile by hand.
 `.vscode/tasks.json`, `.vscode/settings.json`, and `.gitignore` get a real
 merge instead (your own unrelated tasks/settings/ignore rules are left
-alone; only the `FC:` tasks and the two entries this framework needs are
-added). This is also the shape a future `npx fully-completely` would run.
+alone; only this framework's own tasks and the two `.gitignore` entries it
+needs are added). This is also the shape a future `npx fully-completely`
+would run.
 
 ## Using it
 
