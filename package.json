@@ -1,0 +1,23 @@
+{
+  "name": "fully-completely",
+  "version": "0.1.0",
+  "description": "Six-role Claude Code sprint workflow, with enforcement mechanics that actually block a sprint from closing until both QA gates pass.",
+  "bin": {
+    "fully-completely": "scripts/install.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chrishobbsrocks/fully-completely.git"
+  },
+  "keywords": [
+    "claude-code",
+    "sprint-workflow",
+    "ai-agents",
+    "multi-agent"
+  ],
+  "author": "Chris Hobbs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
