@@ -28,6 +28,8 @@ scripts/sprint_lifecycle.py    The actual enforcement logic
 scripts/dev2_worktree.sh       Creates Dev Team 2's isolated git worktree
 scripts/smoke_test.sh          Full lifecycle test, runs in a sandbox
 scripts/worktree_test.sh       Tests dev2_worktree.sh, also sandboxed
+scripts/launcher_test.js       Tests the launcher's JSONC parser, task
+                                generation, and install.js's merge logic
 scripts/launcher/               VS Code launcher: run-role.js, generate-tasks.js
 scripts/install.js             Copies this framework into another project,
                                 non-destructively
@@ -83,7 +85,8 @@ machine-specific), or if the resume attempt exits almost immediately (the
 recorded session most likely no longer exists), or launches fresh with a
 short first message confirming the role and telling it to check
 `docs/sprints/registry.json` and wait for instructions. There's also
-**Shell**, a plain `zsh` login shell with no `claude` in it at all — for
+**Shell**, a plain login shell with no `claude` in it at all (your own
+`$SHELL` on macOS/Linux, PowerShell on Windows) — for
 `docs/HUMAN_OVERRIDE.md`'s override command (which must never be run from
 inside an agent session, see that file) and any raw git you want to do
 outside of Pipeman's session.
@@ -91,10 +94,11 @@ outside of Pipeman's session.
 **FC: Start All** — Command Palette → "Tasks: Run Task" → `FC: Start All`
 (or `Cmd/Ctrl+Shift+B` if it's your default build task) opens all seven
 terminals in the project root using the smart per-role behavior above.
-Safe to run again later in the same window: VS Code leaves each role's
-still-running dedicated terminal alone rather than restarting or
-duplicating it, so re-running this just fills in whichever of the seven
-aren't already open.
+Observed as safe to run again later in the same window (VS Code left each
+role's still-running dedicated terminal alone rather than restarting or
+duplicating it, so re-running this just filled in whichever of the seven
+weren't already open) — from one real test, not something that's been
+exercised across VS Code versions or checked any other way.
 
 There's deliberately no separate "restart" task: VS Code ties a dedicated
 terminal's identity to the task's label, so a second task for the same
@@ -156,7 +160,10 @@ those are reported as conflicts for you to reconcile by hand.
 merge instead (your own unrelated tasks/settings/ignore rules are left
 alone; only this framework's own tasks and the two `.gitignore` entries it
 needs are added). This is also the shape a future `npx fully-completely`
-would run.
+would run. `scripts/launcher_test.js` covers this merge logic (comments
+present, colliding task labels, CRLF vs LF) along with the JSONC parser
+and generated task shapes, and runs in CI alongside `smoke_test.sh` and
+`worktree_test.sh`.
 
 ## Using it
 

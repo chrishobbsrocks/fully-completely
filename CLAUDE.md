@@ -228,16 +228,13 @@ alone did not.
 
 ## Sprint data persistence
 
-This template's own `.gitignore` keeps `docs/sprints/` content (sprint files
-and `state/`) untracked, so the template repo doesn't ship its own example
-sprint data. If you installed this workflow into a real project, that
-ignore block gets inherited wholesale and left in place, which means your
-project's *actual* sprint definitions and state history are never
-committed anywhere, a wipe of the working tree (bad `clean`, disk failure,
-anything) loses them for good with no git history to recover from. See the
-`## Install` section of `README.md` for the one-time fix: delete the
-sprint-data block from your project's `.gitignore` so it rides along with
-your commits like everything else.
+`docs/sprints/` content (sprint files, `state/`, `registry.json`) is
+tracked by git like everything else in this repo, so it's committed and
+recoverable the same way any other change is — there's no ignore block
+excluding it and nothing to configure. The only sprint-related ignore
+rule is `docs/sprints/.locks/`, transient OS file locks used to serialize
+concurrent `sprint_lifecycle.py` invocations, never sprint data — leave
+that line alone.
 
 ## Changes to this repo's own tooling
 

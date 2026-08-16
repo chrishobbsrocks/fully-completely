@@ -19,6 +19,7 @@
 // from.
 const fs = require('fs');
 const path = require('path');
+const { hasComments, parseJsonc } = require('./launcher/jsonc');
 
 const SOURCE_ROOT = path.resolve(__dirname, '..');
 const DEST_ROOT = process.cwd();
@@ -62,11 +63,19 @@ function walkFiles(relPath, visit) {
   }
 }
 
+function normalizeLineEndings(buf) {
+  return buf.toString('utf8').replace(/\r\n/g, '\n');
+}
+
 function copyFile(relPath) {
   const src = path.join(SOURCE_ROOT, relPath);
   const dest = path.join(DEST_ROOT, relPath);
   if (fs.existsSync(dest)) {
-    const same = fs.readFileSync(src).equals(fs.readFileSync(dest));
+    // Compare with line endings normalized, not a raw byte compare — a
+    // Windows target with core.autocrlf=true has CRLF on disk against
+    // this repo's LF source, which would otherwise report every framework
+    // file as a conflict on every re-run even though nothing differs.
+    const same = normalizeLineEndings(fs.readFileSync(src)) === normalizeLineEndings(fs.readFileSync(dest));
     (same ? skipped : conflicts).push(relPath);
     return;
   }
@@ -75,78 +84,34 @@ function copyFile(relPath) {
   copied.push(relPath);
 }
 
-function stripJsonComments(text) {
-  // Minimal JSONC stripper: string- and escape-aware, so a "//" inside a
-  // real string value (a URL, a path) is never mistaken for a comment.
-  let out = '';
-  let inString = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    const next = text[i + 1];
-    if (inLineComment) {
-      if (c === '\n') {
-        inLineComment = false;
-        out += c;
-      }
-      continue;
-    }
-    if (inBlockComment) {
-      if (c === '*' && next === '/') {
-        inBlockComment = false;
-        i++;
-      }
-      continue;
-    }
-    if (inString) {
-      out += c;
-      if (c === '\\') {
-        out += next;
-        i++;
-        continue;
-      }
-      if (c === '"') inString = false;
-      continue;
-    }
-    if (c === '"') {
-      inString = true;
-      out += c;
-      continue;
-    }
-    if (c === '/' && next === '/') {
-      inLineComment = true;
-      i++;
-      continue;
-    }
-    if (c === '/' && next === '*') {
-      inBlockComment = true;
-      i++;
-      continue;
-    }
-    out += c;
+// Parses a target's existing JSONC file, or reports why it can't be
+// safely merged. Deliberately refuses (rather than silently doing a lossy
+// round-trip) when the file has comments: this tool only ever writes
+// plain JSON.parse -> JSON.stringify, which would delete every comment
+// in the file — including ones that say things like "DO NOT REMOVE".
+function readExistingJsonc(destPath, relPath, adviceIfMissing) {
+  if (!fs.existsSync(destPath)) return { value: null, existed: false };
+  const raw = fs.readFileSync(destPath, 'utf8');
+  if (hasComments(raw)) {
+    conflicts.push(`${relPath} (has comments this tool can't preserve — ${adviceIfMissing} by hand instead)`);
+    return { conflict: true };
   }
-  return out.replace(/,(\s*[}\]])/g, '$1'); // trailing commas, VS Code allows them
-}
-
-function readJsonc(filePath) {
-  const raw = fs.readFileSync(filePath, 'utf8');
-  return JSON.parse(stripJsonComments(raw));
+  try {
+    return { value: parseJsonc(raw), existed: true };
+  } catch {
+    conflicts.push(`${relPath} (couldn't parse as JSON, left untouched — ${adviceIfMissing} by hand instead)`);
+    return { conflict: true };
+  }
 }
 
 function mergeSettings() {
   const relPath = path.join('.vscode', 'settings.json');
   const destPath = path.join(DEST_ROOT, relPath);
-  let obj = {};
-  let existed = fs.existsSync(destPath);
-  if (existed) {
-    try {
-      obj = readJsonc(destPath);
-    } catch {
-      conflicts.push(`${relPath} (couldn't parse as JSON, left untouched — add "fullyCompletely.autoLaunch": false by hand)`);
-      return;
-    }
-  }
+  const parsed = readExistingJsonc(destPath, relPath, 'add "fullyCompletely.autoLaunch": false');
+  if (parsed.conflict) return;
+  const obj = parsed.value || {};
+  const existed = parsed.existed;
+
   if (Object.prototype.hasOwnProperty.call(obj, 'fullyCompletely.autoLaunch')) {
     skipped.push(`${relPath} (fullyCompletely.autoLaunch already set)`);
     return;
@@ -163,24 +128,42 @@ function mergeTasks() {
   const { buildTasks } = require(path.join(SOURCE_ROOT, 'scripts', 'launcher', 'generate-tasks.js'));
   const { tasks: ourTasks } = buildTasks(DEST_ROOT);
 
-  let existing = { version: '2.0.0', tasks: [] };
-  let existed = fs.existsSync(destPath);
-  if (existed) {
-    try {
-      existing = readJsonc(destPath);
-      if (!Array.isArray(existing.tasks)) existing.tasks = [];
-    } catch {
-      conflicts.push(`${relPath} (couldn't parse as JSON, left untouched — merge the launcher tasks in by hand)`);
-      return;
+  const parsed = readExistingJsonc(destPath, relPath, 'merge the launcher tasks in');
+  if (parsed.conflict) return;
+  const existing = parsed.value || { version: '2.0.0', tasks: [] };
+  const existed = parsed.existed;
+  if (!Array.isArray(existing.tasks)) existing.tasks = [];
+
+  // A label that already exists but isn't byte-identical to what we'd
+  // generate is a real collision, not "already installed" — this repo's
+  // own labels went from "FC: Launch — QA1" to a bare "QA1" for cleaner
+  // terminal names, which means a target project's own unrelated task
+  // (a bare "Shell" is hardly an exotic label) can now collide. Silently
+  // skipping it would leave FC: Start All's dependsOn pointing at
+  // whatever that project's task does instead of ours — including, for
+  // the Shell task specifically, opening something other than the plain
+  // no-claude shell docs/HUMAN_OVERRIDE.md depends on, with no warning.
+  const existingByLabel = new Map(existing.tasks.map((t) => [t.label, t]));
+  const collisions = [];
+  let added = 0;
+  for (const task of ourTasks) {
+    const already = existingByLabel.get(task.label);
+    if (!already) {
+      existing.tasks.push(task);
+      added += 1;
+      continue;
+    }
+    if (JSON.stringify(already) !== JSON.stringify(task)) {
+      collisions.push(task.label);
     }
   }
 
-  const existingLabels = new Set(existing.tasks.map((t) => t.label));
-  let added = 0;
-  for (const task of ourTasks) {
-    if (existingLabels.has(task.label)) continue;
-    existing.tasks.push(task);
-    added += 1;
+  if (collisions.length > 0) {
+    conflicts.push(
+      `${relPath} (task label(s) already exist here with different content: ${collisions.join(', ')} — ` +
+        'rename one side before installing; nothing written)'
+    );
+    return;
   }
 
   if (added === 0 && existed) {

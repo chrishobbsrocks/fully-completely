@@ -25,13 +25,16 @@
 const fs = require('fs');
 const path = require('path');
 const { ROOT, ROLES, readAgentMeta } = require('./agents');
+const { parseJsonc } = require('./jsonc');
 
 function readAutoLaunchSetting(root) {
   const settingsPath = path.join(root, '.vscode', 'settings.json');
   try {
-    const text = fs.readFileSync(settingsPath, 'utf8');
-    const match = text.match(/"fullyCompletely\.autoLaunch"\s*:\s*(true|false)/);
-    return match ? match[1] === 'true' : false;
+    // A real JSONC parse, not a raw regex over the file text — a regex
+    // would happily match a commented-out
+    // `// "fullyCompletely.autoLaunch": true` line as if it were live.
+    const settings = parseJsonc(fs.readFileSync(settingsPath, 'utf8'));
+    return settings['fullyCompletely.autoLaunch'] === true;
   } catch {
     return false;
   }
@@ -60,7 +63,16 @@ function shellTask() {
   return {
     label: 'Shell',
     type: 'shell',
-    command: 'exec zsh -l',
+    // Default (macOS/Linux): drop into the user's own login shell,
+    // whatever it is, rather than assuming zsh. $SHELL is expanded by the
+    // shell this command itself runs in (not by VS Code), so the POSIX
+    // ${SHELL:-/bin/sh} fallback works as written even if it's unset.
+    command: 'exec ${SHELL:-/bin/sh} -l',
+    // No POSIX $SHELL equivalent on Windows; PowerShell ships with every
+    // supported Windows version, so it's a safe, dependency-free default.
+    windows: {
+      command: 'powershell',
+    },
     options: { cwd: '${workspaceFolder}' },
     presentation: {
       panel: 'dedicated',

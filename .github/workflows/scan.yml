@@ -21,6 +21,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install analysis tools
         run: pip install bandit pyflakes
 
@@ -35,3 +40,6 @@ jobs:
 
       - name: Dev Team 2 worktree test
         run: bash scripts/worktree_test.sh
+
+      - name: VS Code launcher tests
+        run: node scripts/launcher_test.js

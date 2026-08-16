@@ -142,7 +142,10 @@
     {
       "label": "Shell",
       "type": "shell",
-      "command": "exec zsh -l",
+      "command": "exec ${SHELL:-/bin/sh} -l",
+      "windows": {
+        "command": "powershell"
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },

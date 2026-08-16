@@ -36,18 +36,45 @@ function fail(message) {
   process.exit(1);
 }
 
-function claudeOnPath() {
-  const probe = spawnSync('claude', ['--version'], {
-    stdio: 'ignore',
-    shell: process.platform === 'win32',
-  });
-  return !(probe.error && probe.error.code === 'ENOENT');
+// On Windows, a global npm install of claude is typically a .cmd shim,
+// which can't be exec'd directly the way a real macOS/Linux binary can.
+// The tempting fix is spawn(..., {shell: true}), but that's actively
+// unsafe: Node's shell:true mode does NOT escape array args, it just
+// concatenates them (see the DEP0190 deprecation warning) — confirmed by
+// hand, a prompt string containing parentheses breaks the shell outright,
+// silently mangling every argument after it into separate shell tokens.
+// Node's own docs recommend the alternative used here instead: spawn
+// cmd.exe directly (shell: false, the safe default) with /c plus the
+// target and its args as a normal array — Node's already-safe non-shell
+// Windows argv quoting does the escaping, so there's nothing to hand-roll.
+function claudeCommand(args) {
+  if (process.platform === 'win32') {
+    return ['cmd.exe', ['/c', 'claude', ...args]];
+  }
+  return ['claude', args];
 }
 
-function spawnClaude(args) {
+function claudeOnPath() {
+  const [cmd, args] = claudeCommand(['--version']);
+  const probe = spawnSync(cmd, args, { stdio: 'ignore' });
+  // On Windows this runs via cmd.exe, which doesn't surface ENOENT the
+  // way a direct spawn does when the target is missing — it exits
+  // non-zero instead, so that has to be checked too, not just probe.error.
+  if (probe.error) return false;
+  return probe.status === 0;
+}
+
+function spawnClaude(args, { onSpawned } = {}) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
-    const child = spawn('claude', args, { stdio: 'inherit', cwd: ROOT });
+    const [cmd, fullArgs] = claudeCommand(args);
+    const child = spawn(cmd, fullArgs, { stdio: 'inherit', cwd: ROOT });
+    // Fires once the OS confirms the process actually started — the
+    // earliest reliable "this happened" signal, well before markLaunched()
+    // would ever race a user closing the terminal.
+    child.on('spawn', () => {
+      if (onSpawned) onSpawned();
+    });
     child.on('error', (err) => {
       fail(`Failed to start claude: ${err.message}`);
     });
@@ -58,9 +85,16 @@ function spawnClaude(args) {
 }
 
 async function launchFresh(role, sessionTitle) {
-  const result = await spawnClaude(['--agent', role.id, '--name', sessionTitle, initialPrompt(role.label)]);
-  markLaunched(role.id);
-  return result;
+  // Record the launch at spawn time, not after the process exits.
+  // Recording on exit meant closing the terminal tab (the normal way
+  // people end these sessions, and the normal way VS Code kills the
+  // whole process tree on window close) killed this script before it
+  // ever reached the exit handler — the record never got written, and
+  // "resume" silently degraded to always-fresh with no sign anything
+  // was wrong.
+  return spawnClaude(['--agent', role.id, '--name', sessionTitle, initialPrompt(role.label)], {
+    onSpawned: () => markLaunched(role.id),
+  });
 }
 
 async function main() {
@@ -73,9 +107,15 @@ async function main() {
   }
 
   if (!claudeOnPath()) {
+    // A non-zero exit here could mean claude isn't on PATH, but on
+    // Windows (routed through cmd.exe) it could also mean claude was
+    // found and --version itself failed for some other reason — the two
+    // aren't reliably distinguishable across platforms, so the message
+    // doesn't claim more precisely than it knows.
     fail(
-      "'claude' was not found on PATH. Install Claude Code and confirm " +
-        "'claude' works in a plain terminal, then re-run this task."
+      "'claude --version' didn't succeed in a plain terminal — either " +
+        "it's not on PATH, or something else is wrong with the install. " +
+        "Confirm 'claude --version' works by hand, then re-run this task."
     );
   }
 
@@ -114,7 +154,7 @@ async function main() {
         `the recorded session probably no longer exists. Starting fresh instead.`
     );
     const fresh = await launchFresh(role, sessionTitle);
-    process.exitCode = fresh.code === null ? 1 : fresh.code;
+    process.exitCode = fresh.code === null ? 0 : fresh.code;
     return;
   }
   process.exitCode = result.code === null ? 0 : result.code;
