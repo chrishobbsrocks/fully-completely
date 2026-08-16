@@ -11,4 +11,4 @@ Usage: `/sprint-ship <sprint-id> --commit <hash>`
 python3 scripts/sprint_lifecycle.py ship $ARGUMENTS
 ```
 
-Only succeeds once Dev Team has run `/sprint-dev-done`. Moves the sprint into the `groundtruth_live` phase, GroundTruth should now test the deployed product with `/sprint-groundtruth`.
+Only succeeds once Dev Team has run `/sprint-dev-done`. Moves the sprint into the `liveqa_live` phase, LiveQA should now test the deployed product with `/sprint-liveqa`.

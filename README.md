@@ -3,13 +3,13 @@
 [![Scan and smoke test](https://github.com/chrishobbsrocks/fully-completely/actions/workflows/scan.yml/badge.svg)](https://github.com/chrishobbsrocks/fully-completely/actions/workflows/scan.yml)
 
 Your six-role sprint workflow (Master Controller, Dev Team 1, Dev Team 2,
-QA1, Pipeman, GroundTruth), with enforcement mechanics built to make it
+QA1, Pipeman, LiveQA), with enforcement mechanics built to make it
 stick: a state file per sprint, slash commands as the only way to move
 things forward, and a script that refuses to skip steps.
 
 The key difference from a simple "ask the agent nicely" workflow: closing
 a sprint is not optional-honesty, `/sprint-complete` will not run unless
-QA1's audit and GroundTruth's live test have both actually been recorded
+QA1's audit and LiveQA's live test have both actually been recorded
 as PASS, **and** the user has explicitly authorized closing it right now
 (`--user-said "..."`, required, non-empty — both gates passing tells you
 the code is ready, not that the user has decided to close it). Try to
@@ -21,7 +21,7 @@ what's missing.
 ```
 CLAUDE.md                     Root instructions (read this first)
 .claude/agents/                Six agent personas (Master Controller, Dev
-                                Team 1/2, QA1, Pipeman, GroundTruth)
+                                Team 1/2, QA1, Pipeman, LiveQA)
 .claude/commands/               Slash commands, thin wrappers around the
                                 script below
 scripts/sprint_lifecycle.py    The actual enforcement logic
@@ -50,7 +50,7 @@ docs/sprints/                  Where sprint files and state live
 4. **Open `.gitignore` and delete the block marked `TEMPLATE-ONLY`.** It
    keeps this template repo from shipping its own example sprint data, but
    left in place in your project it means every real sprint you create and
-   all QA/GroundTruth gate history in `docs/sprints/state/` is untracked,
+   all QA/LiveQA gate history in `docs/sprints/state/` is untracked,
    so a wiped working tree loses it for good with nothing to recover from
    git. `docs/sprints/registry.json` is already tracked by default and
    needs no change.
@@ -71,9 +71,9 @@ python3 scripts/sprint_lifecycle.py dev-done 1
 # Pipeman ships
 python3 scripts/sprint_lifecycle.py ship 1 --commit abc123
 
-# GroundTruth tests the live deploy — --deployed-commit must match what was
+# LiveQA tests the live deploy — --deployed-commit must match what was
 # actually shipped, an exact SHA check, not free text
-python3 scripts/sprint_lifecycle.py groundtruth 1 --deployed-commit abc123 --verdict PASS --notes "3/3 clean runs"
+python3 scripts/sprint_lifecycle.py liveqa 1 --deployed-commit abc123 --verdict PASS --notes "3/3 clean runs"
 
 # Dev Team closes it out (same session that ran `start`, not Master Controller),
 # only once the user has actually said to close it, not just because both gates are green
@@ -95,11 +95,11 @@ python3 scripts/sprint_lifecycle.py list                 # every sprint
 
 A sprint only closes once two independent claims have both been verified:
 QA1's static audit (does the diff actually match the requirements) and
-GroundTruth's live test (does the deployed product actually work). A clean
+LiveQA's live test (does the deployed product actually work). A clean
 diff and a working live product are different claims, `/sprint-complete`
 won't let either one stand in for the other, and refuses to close a sprint
-missing either. If GroundTruth's live test fails, the fix loop is Dev Team
-fixes → Pipeman `/sprint-reship` → GroundTruth retests, without needing to
+missing either. If LiveQA's live test fails, the fix loop is Dev Team
+fixes → Pipeman `/sprint-reship` → LiveQA retests, without needing to
 redo the whole sprint.
 
 Passing both gates is still not enough on its own: `/sprint-complete` also
@@ -111,9 +111,9 @@ them to actually say so, rather than closing automatically the moment both
 gates go green.
 
 Earlier versions of this template ran QA1 twice, a static audit before
-shipping and a second "final check" after GroundTruth passed. Across ~13
+shipping and a second "final check" after LiveQA passed. Across ~13
 real sprints that second check never once caught anything the first audit
-and the live test hadn't already caught, so it was cut, GroundTruth's PASS
+and the live test hadn't already caught, so it was cut, LiveQA's PASS
 now sends the sprint straight to complete-ready. The one thing the second
 check occasionally caught, a sprint file amended mid-build after QA1's
 first read, is now covered two ways: QA1 re-reads the sprint file fresh
@@ -137,8 +137,8 @@ and that has to keep working, only a real, unaudited content change
 should block a ship.
 
 `/sprint-ship` (and `/sprint-reship`) also record the resolved full SHA
-of what actually got pushed. `/sprint-groundtruth` requires
-`--deployed-commit`, the SHA GroundTruth actually tested, and refuses if
+of what actually got pushed. `/sprint-liveqa` requires
+`--deployed-commit`, the SHA LiveQA actually tested, and refuses if
 it doesn't match — an exact identity check this time, not a content
 check, since there's no legitimate rebase step between shipping and
 testing live the way there is between auditing and shipping. Nothing
@@ -146,7 +146,7 @@ here has an override: a mismatch always means the live test ran against
 something other than what was actually deployed, closing the gap where a
 verdict could otherwise get recorded against any deployment, correct or
 not. `/sprint-status` also flags a sprint whose most recent ship or
-reship landed after its last recorded GroundTruth verdict, so a
+reship landed after its last recorded LiveQA verdict, so a
 not-yet-re-tested sprint doesn't require reconstructing that from raw
 timestamps by hand.
 
@@ -228,9 +228,9 @@ resolved to a stale global command definition instead of this repo's
 `.claude/commands/`. Both times the output looked plausible enough to
 almost act on.
 
-**"QA1 / GroundTruth wrote a full verdict report but the state file is
+**"QA1 / LiveQA wrote a full verdict report but the state file is
 still empty."** Writing the report is not the same as recording it, the
-verdict only exists once `/sprint-qa1` or `/sprint-groundtruth` actually
+verdict only exists once `/sprint-qa1` or `/sprint-liveqa` actually
 runs. Both agents' instructions end with an explicit step to re-run
 `/sprint-status` and confirm the verdict shows up before considering the
 work done, if you're seeing this, that step got skipped.

@@ -16,7 +16,7 @@ design:
   PASS.
 - `/sprint-ship` refuses if the commit being shipped doesn't match what
   QA1 audited.
-- `/sprint-groundtruth` refuses if `--deployed-commit`, the commit you
+- `/sprint-liveqa` refuses if `--deployed-commit`, the commit you
   actually tested live, doesn't match what Pipeman's last ship or reship
   recorded. This one doesn't get a gate here either, on purpose: unlike
   the QA1-to-ship check above, there's no legitimate transform (rebase,

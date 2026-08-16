@@ -22,7 +22,7 @@ locally if needed, then hand off to Pipeman via `/sprint-ship` or
 `/sprint-reship`.
 
 **A sprint is never closed without the user's explicit, real-time
-authorization, no exceptions.** Both QA1's audit and GroundTruth's live test
+authorization, no exceptions.** Both QA1's audit and LiveQA's live test
 passing tells you the code is ready to close, it does not tell you the user
 has decided, right now, to close it, those are different facts and the
 second is never inferred from the first. Once both gates are green, Dev
@@ -41,7 +41,7 @@ refuses outright, no override, if it's missing or empty.
 | Dev Team 2 | Dev2 | `.claude/agents/dev-team-2.md` | sonnet | Runs a separate, independent sprint in parallel, in its own git worktree |
 | QA1 | QA1 | `.claude/agents/qa1.md` | opus | Static code audit (the only gate) |
 | Pipeman | PM | `.claude/agents/pipeman.md` | sonnet | Only one who pushes to remote |
-| GroundTruth | GT | `.claude/agents/groundtruth.md` | opus | Live browser testing after every push |
+| LiveQA | LQ | `.claude/agents/liveqa.md` | opus | Live browser testing after every push |
 
 Shorthand is for conversation only, never for file names or commands.
 
@@ -49,7 +49,7 @@ Run each role as its own dedicated Claude Code session, always, no
 exceptions, a separate terminal tab is the simplest setup, pasting the
 relevant agent file as that session's system prompt. Start each session
 with the model listed above, e.g. `claude --model opus` for Master
-Controller, QA1, or GroundTruth.
+Controller, QA1, or LiveQA.
 
 **Never invoke another role via the Task/Agent tool as a substitute for
 that role running in its own session, ever, regardless of which role's
@@ -82,16 +82,16 @@ on that handoff.
         │
 /sprint-ship <N> --commit <hash>             Pipeman
         │
-   groundtruth_live ──────────────────────────── GroundTruth tests live
+   liveqa_live ──────────────────────────── LiveQA tests live
         │
-/sprint-groundtruth <N> --deployed-commit <sha> --verdict ...   GroundTruth
+/sprint-liveqa <N> --deployed-commit <sha> --verdict ...   LiveQA
         │  FAIL/CONDITIONAL → Dev Team fixes, Pipeman /sprint-reship, loop
         │  PASS ↓
 /sprint-complete <N> --user-said "..."       Dev Team 1/2 closes it, only when told to
 ```
 
 A sprint is never complete just because Dev Team said so mid-build. It's only
-complete once QA1's static audit AND GroundTruth's live test have both
+complete once QA1's static audit AND LiveQA's live test have both
 independently passed, **and** the user has explicitly authorized closing it
 right now. `/sprint-complete` enforces the first two and will refuse to
 close a sprint that's missing either one, telling you exactly which; it
@@ -100,7 +100,7 @@ the top of this file. Gates passing is not authorization, don't run this
 command just because both are green, wait for the user to actually say so.
 
 There used to be a second QA1 gate here, a "final check" run after
-GroundTruth passed. Across ~13 real sprints it never once caught anything
+LiveQA passed. Across ~13 real sprints it never once caught anything
 gate 1 + the live test hadn't already caught, so it was removed — the one
 thing it occasionally caught (a sprint file amended mid-build, after QA1's
 first read) is now handled two ways: QA1 re-reads the sprint file fresh
@@ -142,7 +142,7 @@ and need a fresh audit (a new commit landed after the fact), re-running
 ## Trivial fix fast lane
 
 Not every change needs the full lifecycle. On the downstream project this
-is drawn from, the QA1 + GroundTruth gate process has repeatedly caught
+is drawn from, the QA1 + LiveQA gate process has repeatedly caught
 real bugs, a double-click scoring race, a requirement a static audit
 missed but the live test caught, a synchronous-write race on a new storage
 key, and every one of those catches was on a change that touched state,
@@ -168,7 +168,7 @@ work) gives Dev Team a direct instruction, no `/sprint-new` required. Dev
 Team builds it, self-verifies (build, lint, and test clean, plus an actual
 manual check that it renders correctly, don't skip this because the diff
 is small), and hands directly to Pipeman. QA1's static audit and
-GroundTruth's live test are both skipped, but only for this category
+LiveQA's live test are both skipped, but only for this category
 specifically, not the whole verification layer, Pipeman's normal pre-push
 checks (branch hygiene, clean build) still apply exactly as they do for
 every other push.
@@ -219,7 +219,7 @@ alone did not.
 /sprint-dev-done <N>                                                                            # Dev Team 1/2
 /sprint-ship <N> --commit <hash>                                                                # Pipeman
 /sprint-reship <N> --commit <hash>                                                              # Pipeman
-/sprint-groundtruth <N> --deployed-commit <sha> --verdict PASS|FAIL|CONDITIONAL --notes "..."   # GroundTruth
+/sprint-liveqa <N> --deployed-commit <sha> --verdict PASS|FAIL|CONDITIONAL --notes "..."        # LiveQA
 /sprint-complete <N> --user-said "..."                                                          # Dev Team 1/2
 /sprint-abort <N> --reason "..."                                                                # Dev Team 1/2
 ```
@@ -253,7 +253,7 @@ deliberate call, not an oversight:
   real independent review before anything non-trivial merges is still
   expected, just not mechanized through `/sprint-qa1` and a sprint file
   for this repo's own commits.
-- **GroundTruth's gate does not.** GroundTruth live-tests a deployed
+- **LiveQA's gate does not.** LiveQA live-tests a deployed
   product in a browser. This repository has no deployed product, it *is*
   the workflow definition a downstream project deploys against. Forcing a
   browser-testable live-test step onto a change to a Python script or a
@@ -271,7 +271,7 @@ deliberate call, not an oversight:
 
 If a change to this repo's own tooling ever turns out to need something
 sprint-shaped (recorded requirements, a documented audit trail across
-multiple rounds), that's a case for `/sprint-new` with GroundTruth's step
+multiple rounds), that's a case for `/sprint-new` with LiveQA's step
 explicitly skipped and noted why, not a case for forcing a live-test step
 that doesn't apply.
 

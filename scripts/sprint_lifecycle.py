@@ -29,24 +29,30 @@ Phases (in order, with the loops):
                        the commit it's pushing doesn't match. Ship (and
                        reship) also record the full SHA actually pushed,
                        as last_shipped_commit, an identity, not content,
-                       fact for groundtruth_live below to check against.
-  groundtruth_live -> GroundTruth is live-testing. GroundTruth must pass
-                       --deployed-commit, the SHA it actually tested;
-                       this has to match last_shipped_commit exactly, no
-                       tolerance for a differing SHA the way ship's
-                       content check tolerates a rebase, there's no
+                       fact for liveqa_live below to check against.
+  liveqa_live      -> LiveQA is live-testing (this role was named
+                       GroundTruth before this rename; the CLI subcommand
+                       and this phase string both still accept the old
+                       "groundtruth"/"groundtruth_live" names too, see
+                       LIVEQA_PHASES and the "groundtruth" subparser alias
+                       below — one transition period, so an in-flight
+                       sprint elsewhere isn't stranded mid-phase). LiveQA
+                       must pass --deployed-commit, the SHA it actually
+                       tested; this has to match last_shipped_commit
+                       exactly, no tolerance for a differing SHA the way
+                       ship's content check tolerates a rebase, there's no
                        legitimate reason a live test and what was shipped
                        would differ. FAIL/CONDITIONAL means fixes + a
-                       reship, then GroundTruth tests again. A recorded
-                       PASS here moves straight to complete_ready — there
-                       used to be a QA1 "final check" gate here (gate 2),
-                       but across ~13 real sprints it never once caught
-                       anything gate 1 + GroundTruth's live test hadn't
-                       already caught, so it was removed. The one real
-                       value it had — a fresh look after mid-build
-                       requirement changes — is now QA1's responsibility
-                       at gate 1 (see above).
-  complete_ready   -> Both gates (QA1 audit + GroundTruth live test) have
+                       reship, then LiveQA tests again. A recorded PASS
+                       here moves straight to complete_ready — there used
+                       to be a QA1 "final check" gate here (gate 2), but
+                       across ~13 real sprints it never once caught
+                       anything gate 1 + LiveQA's live test hadn't already
+                       caught, so it was removed. The one real value it
+                       had — a fresh look after mid-build requirement
+                       changes — is now QA1's responsibility at gate 1
+                       (see above).
+  complete_ready   -> Both gates (QA1 audit + LiveQA live test) have
                        passed. Waiting for /sprint-complete AND the user's
                        explicit, real-time go-ahead (--user-said) to
                        actually close the sprint.
@@ -58,7 +64,7 @@ reach: no flag on dev-done or ship bypasses either hash check, and neither
 is documented anywhere an agent reads. There is a separate `override`
 subcommand below (cmd_override) for the human running this project, not
 wired to any slash command, not mentioned in CLAUDE.md or any agent file
-on purpose, see docs/HUMAN_OVERRIDE.md before using it. groundtruth's
+on purpose, see docs/HUMAN_OVERRIDE.md before using it. LiveQA's
 deployed-commit check has no override at all, in cmd_override or anywhere
 else: unlike the QA1-to-ship content check, there's no legitimate
 transform (rebase, squash, whatever) that would make a live test and what
@@ -106,6 +112,17 @@ STATUS_FOLDERS = {
 }
 
 VALID_VERDICTS = {"PASS", "FAIL", "CONDITIONAL"}
+
+# GroundTruth was renamed LiveQA. New sprints reaching this phase always get
+# the new name (LIVEQA_PHASE); every phase-equality check against it accepts
+# LIVEQA_PHASES instead, so a sprint already sitting at the old phase string
+# somewhere else isn't stranded mid-phase by this rename. Same reasoning as
+# the "groundtruth" CLI subparser alias further down — one transition
+# period, remove both once no in-flight sprint anywhere still uses the old
+# name.
+LIVEQA_PHASE = "liveqa_live"
+_LEGACY_LIVEQA_PHASE = "groundtruth_live"
+LIVEQA_PHASES = (LIVEQA_PHASE, _LEGACY_LIVEQA_PHASE)
 
 
 def now() -> str:
@@ -267,11 +284,11 @@ def git_tree_hash(ref: str) -> Optional[str]:
 def git_commit_sha(ref: str) -> Optional[str]:
     """Resolve a git ref to its full commit SHA, not the tree hash. Used to
     record exactly which commit Pipeman shipped, and later to check that
-    GroundTruth's live test ran against that same commit. This is an
+    LiveQA's live test ran against that same commit. This is an
     identity check, not a content check like the QA1-to-ship tree-hash
     comparison: there's no legitimate rebase/squash/merge step between
     shipping and deploying that would need tolerating here, a mismatch
-    always means GroundTruth tested something other than what actually
+    always means LiveQA tested something other than what actually
     went out. Returns None if the ref doesn't resolve."""
     try:
         result = subprocess.run(  # nosec B603 B607
@@ -430,11 +447,11 @@ def cmd_status(args) -> None:
     print(f"Sprint {state['id']}: {state['title']}")
     print(f"Phase: {state['phase']}")
     print(f"QA1 audit result: {state['qa1_audit_result']} (rounds: {state['audit_rounds']})")
-    print(f"GroundTruth live result: {state['groundtruth_result']} (rounds: {state['live_test_rounds']})")
-    if state["phase"] == "groundtruth_live":
+    print(f"LiveQA live result: {state['groundtruth_result']} (rounds: {state['live_test_rounds']})")
+    if state["phase"] in LIVEQA_PHASES:
         # Pure observability, doesn't gate anything: a ship/reship that
         # landed after the last recorded live_test verdict means whatever
-        # verdict is on record was tested against older code. cmd_groundtruth
+        # verdict is on record was tested against older code. cmd_liveqa
         # already refuses a mismatched --deployed-commit when someone tries
         # to record a new verdict, this just makes that already-mechanically-
         # enforced fact legible to whoever reads status, instead of it only
@@ -443,7 +460,7 @@ def cmd_status(args) -> None:
         ship_indices = [i for i, h in enumerate(history) if h["event"] in ("shipped", "reshipped")]
         test_indices = [i for i, h in enumerate(history) if h["event"] == "live_test"]
         if ship_indices and test_indices and ship_indices[-1] > test_indices[-1]:
-            print("Code has changed since the last recorded GroundTruth verdict — not yet re-tested.")
+            print("Code has changed since the last recorded LiveQA verdict — not yet re-tested.")
     if args.verbose:
         print("\nHistory:")
         for h in state["history"]:
@@ -550,28 +567,28 @@ def cmd_ship(args) -> None:
             die(f"'{args.commit}' resolved a tree hash but not a full commit SHA — "
                 "unexpected, please investigate before shipping.")
 
-        state["phase"] = "groundtruth_live"
+        state["phase"] = LIVEQA_PHASE
         state["last_shipped_commit"] = shipped_commit
         log_event(state, "pipeman", "shipped", f"commit={args.commit or ''}")
         save_state(args.id, state)
-    print(f"Sprint {args.id}: shipped (commit {args.commit or '?'}). Phase: groundtruth_live.")
-    print("GroundTruth: run /sprint-groundtruth once you've live-tested the deploy.")
+    print(f"Sprint {args.id}: shipped (commit {args.commit or '?'}). Phase: {LIVEQA_PHASE}.")
+    print("LiveQA: run /sprint-liveqa once you've live-tested the deploy.")
 
 
 def cmd_reship(args) -> None:
     # No tree-hash check here, unlike cmd_ship: a reship's whole purpose is
-    # pushing a fix GroundTruth's live test found and QA1 never re-audited
-    # (that's intentional in this two-gate design, GroundTruth's retest
+    # pushing a fix LiveQA's live test found and QA1 never re-audited
+    # (that's intentional in this two-gate design, LiveQA's retest
     # after reship is the check for this code, not a fresh QA1 pass). So
     # this commit is *expected* to differ in content from what QA1 audited.
     # It still has to resolve to a real commit: last_shipped_commit is what
-    # cmd_groundtruth's --deployed-commit check compares against, and an
+    # cmd_liveqa's --deployed-commit check compares against, and an
     # unresolved ref would leave nothing real recorded to check.
     with locked(f"sprint-{args.id}"):
         state = load_state(args.id)
-        if state["phase"] != "groundtruth_live":
+        if state["phase"] not in LIVEQA_PHASES:
             die(f"Sprint {args.id} is in phase '{state['phase']}', reship only applies during "
-                "the GroundTruth live-test fix loop.")
+                "the LiveQA live-test fix loop.")
         reshipped_commit = git_commit_sha(args.commit) if args.commit else None
         if reshipped_commit is None:
             die(f"'{args.commit or ''}' does not resolve to a real commit in this repo. "
@@ -580,14 +597,17 @@ def cmd_reship(args) -> None:
         log_event(state, "pipeman", "reshipped", f"commit={args.commit or ''}")
         save_state(args.id, state)
     print(f"Sprint {args.id}: fix reshipped (commit {args.commit or '?'}). "
-          "GroundTruth: re-test and run /sprint-groundtruth again.")
+          "LiveQA: re-test and run /sprint-liveqa again.")
 
 
-def cmd_groundtruth(args) -> None:
+def cmd_liveqa(args) -> None:
+    if getattr(args, "_invoked_as", "liveqa") == "groundtruth":
+        print("[sprint_lifecycle] note: 'groundtruth' is a deprecated alias for 'liveqa', "
+              "kept for one transition period. Update your usage.", file=sys.stderr)
     with locked(f"sprint-{args.id}"):
         state = load_state(args.id)
-        if state["phase"] != "groundtruth_live":
-            die(f"Sprint {args.id} is in phase '{state['phase']}', not ready for a GroundTruth live test.")
+        if state["phase"] not in LIVEQA_PHASES:
+            die(f"Sprint {args.id} is in phase '{state['phase']}', not ready for a LiveQA live test.")
 
         # Identity check, not a content check: unlike the QA1-to-ship
         # tree-hash comparison, there's no legitimate rebase/squash step
@@ -621,17 +641,21 @@ def cmd_groundtruth(args) -> None:
         notes = resolve_text(args.notes, args.notes_file)
         state["groundtruth_result"] = verdict
         state["live_test_rounds"] += 1
-        log_event(state, "groundtruth", "live_test", f"{verdict}: {notes}")
+        # New recordings use the "liveqa" actor name going forward; a
+        # history[] entry logged under the old "groundtruth" actor before
+        # this rename is an audit trail of what actually happened and stays
+        # exactly as recorded, never rewritten.
+        log_event(state, "liveqa", "live_test", f"{verdict}: {notes}")
 
         if verdict == "PASS":
             state["phase"] = "complete_ready"
-            print(f"GroundTruth live test PASSED (round {state['live_test_rounds']}). "
+            print(f"LiveQA live test PASSED (round {state['live_test_rounds']}). "
                   f"Sprint {args.id} is complete-ready.")
             print("Dev Team: tell the user the sprint is ready and wait. "
                   "/sprint-complete requires the user's explicit, real-time "
                   "go-ahead (--user-said) — both gates passing is not that.")
         else:
-            print(f"GroundTruth live test {verdict} (round {state['live_test_rounds']}). "
+            print(f"LiveQA live test {verdict} (round {state['live_test_rounds']}). "
                   "Dev Team: fix, then Pipeman: /sprint-reship.")
 
         save_state(args.id, state)
@@ -651,7 +675,7 @@ def cmd_complete(args) -> None:
     if not user_said.strip():
         die("--user-said is required and must be non-empty. Quote what the "
             "user actually told you, in this session, that authorizes closing "
-            "this sprint right now. Both QA1 and GroundTruth passing means the "
+            "this sprint right now. Both QA1 and LiveQA passing means the "
             "code is ready to close, not that you're authorized to close it, "
             "don't infer authorization from gate status alone, wait for the "
             "user to actually say so.")
@@ -662,7 +686,7 @@ def cmd_complete(args) -> None:
         if state["qa1_audit_result"] != "PASS":
             missing.append("QA1 first audit has not passed")
         if state["groundtruth_result"] != "PASS":
-            missing.append("GroundTruth live test has not passed")
+            missing.append("LiveQA live test has not passed")
         if state["phase"] != "complete_ready" or missing:
             die("Sprint is not ready to close:\n  - " + "\n  - ".join(missing or [f"phase is '{state['phase']}'"]))
 
@@ -684,7 +708,7 @@ def cmd_complete(args) -> None:
         state["completed"] = now()
         log_event(state, "dev-team", "sprint_closed", f"user_said={user_said}")
         save_state(args.id, state)
-    print(f"Sprint {args.id} closed. Confirmed: QA1 audit, GroundTruth live test, user authorization.")
+    print(f"Sprint {args.id} closed. Confirmed: QA1 audit, LiveQA live test, user authorization.")
 
 
 def cmd_abort(args) -> None:
@@ -834,7 +858,7 @@ def cmd_gates(args) -> None:
 
     def verdict_of(event: dict) -> Optional[str]:
         # Matched against VALID_VERDICTS rather than trusting whatever sits
-        # before the first colon: if cmd_qa1/cmd_groundtruth's "{verdict}:
+        # before the first colon: if cmd_qa1/cmd_liveqa's "{verdict}:
         # {notes}" detail format ever changes, this returns None instead of
         # silently treating garbage as a real verdict.
         token = event["detail"].split(":", 1)[0].strip()
@@ -845,7 +869,7 @@ def cmd_gates(args) -> None:
         return ", ".join(f"{sid}(x{tally[sid]})" if tally[sid] > 1 else str(sid)
                           for sid in sorted(tally)) or "(none)"
 
-    # --- 1. Crossover: did GroundTruth catch something QA1's audit had
+    # --- 1. Crossover: did LiveQA catch something QA1's audit had
     # already passed, or something QA1 never got a second look at? Walk
     # each sprint's history in order; for every live_test FAIL/CONDITIONAL,
     # find the shipped/reshipped event immediately before it, then check
@@ -862,7 +886,7 @@ def cmd_gates(args) -> None:
     #
     # This assumes at most one "shipped" event per sprint, true for every
     # reachable state today (cmd_ship only fires from dev_agreed_done, and
-    # nothing currently routes groundtruth_live back to dev_agreed_done —
+    # nothing currently routes liveqa_live back to dev_agreed_done —
     # every ship after the first is necessarily a reship). If that ever
     # changes, this window math needs to change with it.
     audited_miss = []
@@ -907,8 +931,8 @@ def cmd_gates(args) -> None:
                 unclassified.append((sid, f"history[{i}] live_test followed a 'shipped' event "
                                           "with no qa1 audit PASS found in the preceding window"))
 
-    print("1. Crossover (GroundTruth catching what shipped, split by audit provenance):")
-    print(f"   Audited miss — QA1 passed fresh, GroundTruth still caught it: "
+    print("1. Crossover (LiveQA catching what shipped, split by audit provenance):")
+    print(f"   Audited miss — QA1 passed fresh, LiveQA still caught it: "
           f"{len(audited_miss)} — sprints: {counts_str(audited_miss)}")
     print(f"   Unaudited-fix miss — fix reshipped without a fresh QA1 re-audit, not evidence "
           f"QA1 missed anything: {len(unaudited_fix_miss)} — sprints: {counts_str(unaudited_fix_miss)}")
@@ -947,11 +971,11 @@ def cmd_gates(args) -> None:
         return result
 
     qa1_catch = sprints_with_non_pass("audit")
-    gt_catch = sprints_with_non_pass("live_test")
+    liveqa_catch = sprints_with_non_pass("live_test")
 
     print("2. Per-gate catch rate (completed sprints where the gate ever returned non-PASS):")
     print(f"   QA1: {len(qa1_catch)} of {n} — sprints: {qa1_catch or '(none)'}")
-    print(f"   GroundTruth: {len(gt_catch)} of {n} — sprints: {gt_catch or '(none)'}")
+    print(f"   LiveQA: {len(liveqa_catch)} of {n} — sprints: {liveqa_catch or '(none)'}")
     print("   Round-count distribution (audit_rounds / live_test_rounds), per completed sprint:")
     for state in completed:
         print(f"     sprint {state['id']}: audit_rounds={state.get('audit_rounds', 0)}, "
@@ -960,7 +984,7 @@ def cmd_gates(args) -> None:
 
     # --- 3. Hash-drift override frequency: how often did a human have to
     # clear the content-drift safety net (cmd_override), grouped by which
-    # gate's hash it re-stamped. This is not "QA1/GroundTruth overridden" —
+    # gate's hash it re-stamped. This is not "QA1/LiveQA overridden" —
     # no such override exists in this codebase, only the hash checks do.
     def override_event_sprints(event_name: str) -> list:
         return [s["id"] for s in completed for h in s.get("history", [])
@@ -970,7 +994,7 @@ def cmd_gates(args) -> None:
     ship_hash_events = override_event_sprints("ship_hash_override")
 
     print("3. Hash-drift override frequency (content-drift safety net manually cleared, "
-          "NOT a QA1/GroundTruth override — no such override exists):")
+          "NOT a QA1/LiveQA override — no such override exists):")
     print(f"   dev-done-hash overrides: {len(dev_done_hash_events)} — sprints: {counts_str(dev_done_hash_events)}")
     print(f"   ship-hash overrides: {len(ship_hash_events)} — sprints: {counts_str(ship_hash_events)}")
 
@@ -1003,15 +1027,31 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("reship"); s.add_argument("id", type=int); s.add_argument("--commit", default=""); s.set_defaults(func=cmd_reship)
 
-    s = sub.add_parser("groundtruth")
-    s.add_argument("id", type=int); s.add_argument("--verdict", required=True)
-    s.add_argument("--deployed-commit", required=True,
+    # LiveQA was named GroundTruth before this rename. "groundtruth" is kept
+    # as a deprecated alias for one transition period so an in-flight sprint
+    # elsewhere isn't stranded by this rename (same reasoning as
+    # LIVEQA_PHASES above). Both names route to the same handler through a
+    # shared parent parser so their arguments can never drift apart; args
+    # also carries which name was actually typed (_invoked_as), so cmd_liveqa
+    # can note the alias is deprecated without needing a second copy of the
+    # command logic.
+    liveqa_args = argparse.ArgumentParser(add_help=False)
+    liveqa_args.add_argument("id", type=int)
+    liveqa_args.add_argument("--verdict", required=True)
+    liveqa_args.add_argument("--deployed-commit", required=True,
                     help="The commit SHA you actually tested live. Must match the commit "
                     "Pipeman's most recent /sprint-ship or /sprint-reship recorded — an "
                     "exact identity match, not a content/tree-hash comparison.")
-    s.add_argument("--notes", default="")
-    s.add_argument("--notes-file", help="Read notes from this file instead of the command line.")
-    s.set_defaults(func=cmd_groundtruth)
+    liveqa_args.add_argument("--notes", default="")
+    liveqa_args.add_argument("--notes-file", help="Read notes from this file instead of the command line.")
+
+    s = sub.add_parser("liveqa", parents=[liveqa_args])
+    s.set_defaults(func=cmd_liveqa, _invoked_as="liveqa")
+
+    s = sub.add_parser("groundtruth", parents=[liveqa_args],
+                        help="Deprecated alias for 'liveqa', kept for one transition period "
+                        "so an in-flight sprint elsewhere isn't stranded by the rename.")
+    s.set_defaults(func=cmd_liveqa, _invoked_as="groundtruth")
 
     s = sub.add_parser("complete")
     s.add_argument("id", type=int)
