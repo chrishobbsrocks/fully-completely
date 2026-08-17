@@ -1,22 +1,40 @@
 #!/usr/bin/env node
 'use strict';
 // Copies the Fully Completely framework + VS Code launcher into an
-// existing project, non-destructively. Run it from inside the target
-// project:
+// existing project, and upgrades it cleanly on every re-run after that.
+// Run it from inside the target project:
 //
 //   node /path/to/fully-completely/scripts/install.js
 //
-// A plain file is only ever copied if the destination doesn't already have
-// it, or already has byte-identical content. Anything else is reported as
-// a conflict and left untouched — this never overwrites a customized
-// CLAUDE.md, an unrelated tasks.json, etc. .vscode/tasks.json,
-// .vscode/settings.json, and .gitignore get a real merge instead of a
-// copy/skip decision, since a real project is likely to already have its
-// own versions of all three.
+// This is also the shape `npx fully-completely` runs: source = the
+// package's own files, destination = wherever the user invoked it from.
 //
-// This is also the shape a future `npx fully-completely` would run: source
-// = the package's own files, destination = wherever the user invoked it
-// from.
+// Sprint 2's taxonomy (Req 1) replaces the single copy/skip/conflict
+// policy sprint 1 shipped with three explicit categories, each with its
+// own rule:
+//
+//   FRAMEWORK_OWNED — shipped and maintained upstream; the user is never
+//     expected to edit these. An upgrade OVERWRITES a changed file, always
+//     backing up what was there first (Req 2), and REMOVES any file under
+//     a framework-owned path that no longer exists upstream, also backed
+//     up first (Req 4) — state.js, deleted in sprint 1, is the file that
+//     motivated this: a stale install kept carrying it forever with no
+//     way to clean it up.
+//   USER_OWNED — designed to be customised (agent personas, this repo's
+//     own CLAUDE.md inviting you to extend its "Project standards"
+//     section). An upgrade NEVER overwrites these; a differing file is
+//     reported as a conflict, same as before, just louder about whose
+//     file it is (Req 3).
+//   MERGED — .vscode/settings.json, .vscode/tasks.json, .gitignore. Real
+//     merge logic, unchanged by this sprint except for one narrow
+//     addition (removing a specific dead .gitignore line, Req 4).
+//
+// A small version marker (Req 5) records which release is installed, so a
+// re-run can tell "first install" from "upgrade", name backups after the
+// version being replaced, and report `installed X -> Y`. It lives under
+// .claude/ (not .claude/agents or .claude/commands, so it never collides
+// with either taxonomy) and is never sprint state, so it doesn't live
+// under docs/sprints/.
 const fs = require('fs');
 const path = require('path');
 const { hasComments, parseJsonc } = require('./launcher/jsonc');
@@ -32,9 +50,17 @@ if (path.resolve(DEST_ROOT) === path.resolve(SOURCE_ROOT)) {
   process.exit(1);
 }
 
-// Framework files/directories that ship as-is.
-const COPY_PATHS = [
-  '.claude/agents',
+// Req 1: the taxonomy, as explicit data. Every path this installer
+// touches is listed in exactly one of FRAMEWORK_OWNED, USER_OWNED, or the
+// three MERGED_PATHS handled by mergeSettings/mergeTasks/mergeGitignore
+// below — nothing is classified by inference at call time.
+//
+// Framework-owned covers every script and template this repo ships and
+// maintains, including install.js itself (an upgrade replaces the
+// installer with the newer installer, so the *next* upgrade benefits too)
+// and docs/HUMAN_OVERRIDE.md (an operational doc, not a customisation
+// surface the way CLAUDE.md's "Project standards" section is).
+const FRAMEWORK_OWNED = [
   '.claude/commands',
   'scripts/sprint_lifecycle.py',
   'scripts/smoke_test.sh',
@@ -44,39 +70,171 @@ const COPY_PATHS = [
   'scripts/install.js',
   'templates/sprint-template.md',
   'docs/HUMAN_OVERRIDE.md',
-  'docs/sprints',
-  'CLAUDE.md',
 ];
+
+// User-owned: designed to be customised, or — in docs/sprints's case —
+// simply not ours to touch once installed. docs/sprints/ in a target
+// project is that *project's own* sprint data (its registry, its sprint
+// files, its state); this repo's copy of docs/sprints/ only ever supplies
+// the initial empty-folder skeleton on a genuine first install. Treating
+// it as framework-owned would mean a future upgrade tries to overwrite a
+// target's real sprint history with whatever this source repo's own
+// sprints happen to contain at install time — exactly the kind of
+// misclassification the sprint's Risks section warns about, just for a
+// directory instead of a single file.
+const USER_OWNED = ['.claude/agents', 'CLAUDE.md', 'docs/sprints'];
+
+const VERSION_MARKER_PATH = path.join(DEST_ROOT, '.claude', 'fully-completely-version');
+const CURRENT_VERSION = require(path.join(SOURCE_ROOT, 'package.json')).version;
 
 const copied = [];
 const skipped = [];
 const conflicts = [];
-
-function walkFiles(relPath, visit) {
-  const abs = path.join(SOURCE_ROOT, relPath);
-  if (fs.statSync(abs).isDirectory()) {
-    for (const entry of fs.readdirSync(abs)) {
-      walkFiles(path.join(relPath, entry), visit);
-    }
-  } else {
-    visit(relPath);
-  }
-}
+const replaced = [];
+const removed = [];
+const notes = [];
 
 function normalizeLineEndings(buf) {
   return buf.toString('utf8').replace(/\r\n/g, '\n');
 }
 
-function copyFile(relPath) {
+function sameContent(src, dest) {
+  return normalizeLineEndings(fs.readFileSync(src)) === normalizeLineEndings(fs.readFileSync(dest));
+}
+
+// Collects every plain file under relPath (a single file returns itself)
+// as an array of paths relative to `root`. Used on both SOURCE_ROOT (what
+// *should* exist) and DEST_ROOT (what currently *does* exist) for the
+// same framework-owned entry, so overwrite and removal can each work off
+// the right side of that comparison.
+function collectPaths(root, relPath) {
+  const abs = path.join(root, relPath);
+  if (!fs.existsSync(abs)) return [];
+  if (fs.statSync(abs).isDirectory()) {
+    const results = [];
+    for (const entry of fs.readdirSync(abs)) {
+      results.push(...collectPaths(root, path.join(relPath, entry)));
+    }
+    return results;
+  }
+  return [relPath];
+}
+
+// Req 5: a missing marker means "unknown previous version" and must
+// degrade to the upgrade path, not crash — readInstalledVersion() simply
+// returns null, which every caller below already treats as "unknown".
+function readInstalledVersion() {
+  try {
+    const raw = fs.readFileSync(VERSION_MARKER_PATH, 'utf8').trim();
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeInstalledVersion(version) {
+  fs.mkdirSync(path.dirname(VERSION_MARKER_PATH), { recursive: true });
+  fs.writeFileSync(VERSION_MARKER_PATH, `${version}\n`);
+}
+
+const installedVersion = readInstalledVersion();
+
+// Backups are named after the version being replaced, so several upgrades
+// over time don't collide and it's obvious from the filename what release
+// a backup came from. If that exact name is somehow already taken (e.g. a
+// previous run backed up this same file already) and holds *different*
+// content, a numeric suffix is appended rather than silently clobbering
+// someone's earlier backup; if it holds the *same* content, it's reused
+// rather than piling up identical duplicates.
+function backupPathFor(destPath) {
+  const versionTag = installedVersion || 'unknown';
+  const base = `${destPath}.bak-${versionTag}`;
+  if (!fs.existsSync(base)) return base;
+  if (sameContent(destPath, base)) return base;
+  let n = 2;
+  let candidate = `${base}-${n}`;
+  while (fs.existsSync(candidate) && !sameContent(destPath, candidate)) {
+    n += 1;
+    candidate = `${base}-${n}`;
+  }
+  return candidate;
+}
+
+// Req 2: framework-owned file, single-file granularity. Absent at the
+// destination -> plain copy (this is what makes a first install behave
+// identically to today's, since every branch below it is upgrade-only).
+// Present and identical -> skip. Present and different -> back up, then
+// overwrite.
+function overwriteFrameworkFile(relPath) {
+  const src = path.join(SOURCE_ROOT, relPath);
+  const dest = path.join(DEST_ROOT, relPath);
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    copied.push(relPath);
+    return;
+  }
+  if (sameContent(src, dest)) {
+    skipped.push(relPath);
+    return;
+  }
+  const backup = backupPathFor(dest);
+  fs.copyFileSync(dest, backup);
+  fs.copyFileSync(src, dest);
+  replaced.push(`${relPath} (upgraded, previous version backed up to ${path.relative(DEST_ROOT, backup)})`);
+}
+
+// Req 4: a file that exists under a framework-owned path at the
+// destination but no longer exists upstream at all — state.js is the
+// motivating example. Backed up (same naming as an overwrite) before
+// removal, and reported.
+function removeStaleFrameworkFile(relPath) {
+  const dest = path.join(DEST_ROOT, relPath);
+  const backup = backupPathFor(dest);
+  fs.copyFileSync(dest, backup);
+  fs.unlinkSync(dest);
+  removed.push(
+    `${relPath} (no longer part of the framework, backed up to ${path.relative(DEST_ROOT, backup)}, then removed)`
+  );
+}
+
+// Drives both halves of Req 2/4 for one FRAMEWORK_OWNED entry (a single
+// file or a whole directory): overwrite everything that should exist,
+// then remove anything at the destination that shouldn't. Deliberately
+// two full directory walks rather than one combined pass — overwrite must
+// finish (so "what does upstream currently look like" is unambiguous)
+// before removal decides what's stale, and the two operations have
+// different failure modes worth keeping visually separate in the code.
+function syncFrameworkPath(relPath) {
+  const sourceFiles = collectPaths(SOURCE_ROOT, relPath);
+  const destFilesBefore = collectPaths(DEST_ROOT, relPath);
+  const sourceSet = new Set(sourceFiles);
+
+  for (const file of sourceFiles) overwriteFrameworkFile(file);
+
+  for (const file of destFilesBefore) {
+    if (!sourceSet.has(file)) removeStaleFrameworkFile(file);
+  }
+}
+
+// Req 3: user-owned file. Same shape as sprint 1's original copyFile() —
+// never overwrite — but a differing file is now reported with an
+// explicit "this is yours" line instead of the old generic conflict
+// message, since silence here is exactly how a customised persona would
+// have been mistaken for a stale framework file before this sprint drew
+// the line between the two.
+function copyUserOwnedFile(relPath) {
   const src = path.join(SOURCE_ROOT, relPath);
   const dest = path.join(DEST_ROOT, relPath);
   if (fs.existsSync(dest)) {
-    // Compare with line endings normalized, not a raw byte compare — a
-    // Windows target with core.autocrlf=true has CRLF on disk against
-    // this repo's LF source, which would otherwise report every framework
-    // file as a conflict on every re-run even though nothing differs.
-    const same = normalizeLineEndings(fs.readFileSync(src)) === normalizeLineEndings(fs.readFileSync(dest));
-    (same ? skipped : conflicts).push(relPath);
+    if (sameContent(src, dest)) {
+      skipped.push(relPath);
+    } else {
+      conflicts.push(
+        `${relPath} (yours — this framework never overwrites a file in this category. ` +
+          'The upstream version has changed; review the difference and merge anything you want by hand.)'
+      );
+    }
     return;
   }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -180,7 +338,47 @@ function mergeTasks() {
   );
 }
 
+// Req 4's one narrow addition to otherwise-unchanged merge logic: drop a
+// specific, now-dead line this framework used to add but no longer needs
+// (.claude-launcher/, dead since sprint 1 deleted state.js). Only removed
+// when it appears as its own exact, standalone line — unambiguous to
+// strip regardless of surrounding content. If the reference survives in
+// any other form (folded into a broader pattern, edited by hand into
+// something else), this leaves it alone and reports it rather than
+// attempting a riskier rewrite.
+function removeDeadGitignoreLines() {
+  const relPath = '.gitignore';
+  const destPath = path.join(DEST_ROOT, relPath);
+  const deadLines = ['.claude-launcher/'];
+  if (!fs.existsSync(destPath)) return;
+  const raw = fs.readFileSync(destPath, 'utf8');
+  const lines = raw.split(/\r?\n/);
+  const kept = [];
+  const removedHere = [];
+  for (const line of lines) {
+    if (deadLines.includes(line.trim())) {
+      removedHere.push(line.trim());
+    } else {
+      kept.push(line);
+    }
+  }
+  if (removedHere.length > 0) {
+    fs.writeFileSync(destPath, kept.join('\n'));
+    removed.push(`${relPath} (removed now-dead line(s): ${removedHere.join(', ')})`);
+    return;
+  }
+  const stillPresent = deadLines.some((dead) => raw.includes(dead));
+  if (stillPresent) {
+    notes.push(
+      `${relPath} (found a reference to ${deadLines.join(', ')} that isn't a plain standalone line — ` +
+        'left untouched; remove it by hand if you no longer need it)'
+    );
+  }
+}
+
 function mergeGitignore() {
+  removeDeadGitignoreLines();
+
   const relPath = '.gitignore';
   const destPath = path.join(DEST_ROOT, relPath);
   const block = ['docs/sprints/.locks/'];
@@ -191,32 +389,34 @@ function mergeGitignore() {
   }
   const missing = block.filter((line) => !existingLines.includes(line));
   if (missing.length === 0) {
-    skipped.push(`${relPath} (already has the lines this framework needs)`);
+    if (existed) skipped.push(`${relPath} (already has the lines this framework needs)`);
     return;
   }
-  const addition = [
-    '',
-    '# Fully Completely (added by scripts/install.js)',
-    ...missing,
-    '',
-  ].join('\n');
+  const addition = ['', '# Fully Completely (added by scripts/install.js)', ...missing, ''].join('\n');
   fs.appendFileSync(destPath, existed ? addition : addition.trimStart());
   copied.push(existed ? `${relPath} (appended ${missing.length} line(s))` : relPath);
 }
 
-for (const p of COPY_PATHS) {
+for (const p of FRAMEWORK_OWNED) {
+  if (!fs.existsSync(path.join(SOURCE_ROOT, p))) continue;
+  syncFrameworkPath(p);
+}
+
+for (const p of USER_OWNED) {
   const abs = path.join(SOURCE_ROOT, p);
   if (!fs.existsSync(abs)) continue;
   if (fs.statSync(abs).isDirectory()) {
-    walkFiles(p, copyFile);
+    for (const relPath of collectPaths(SOURCE_ROOT, p)) copyUserOwnedFile(relPath);
   } else {
-    copyFile(p);
+    copyUserOwnedFile(p);
   }
 }
 
 mergeSettings();
 mergeTasks();
 mergeGitignore();
+
+writeInstalledVersion(CURRENT_VERSION);
 
 function section(title, items) {
   if (items.length === 0) return;
@@ -225,8 +425,18 @@ function section(title, items) {
 }
 
 console.log(`Fully Completely: installed into ${DEST_ROOT}`);
+if (installedVersion && installedVersion !== CURRENT_VERSION) {
+  console.log(`Upgraded ${installedVersion} -> ${CURRENT_VERSION}`);
+} else if (installedVersion) {
+  console.log(`Already at ${CURRENT_VERSION} (re-run, nothing to upgrade)`);
+} else {
+  console.log(`Installed ${CURRENT_VERSION} (first install)`);
+}
+section('Replaced (framework files upgraded, previous versions backed up)', replaced);
+section('Removed (no longer part of the framework, backed up first)', removed);
 section('Copied', copied);
 section('Already present, unchanged', skipped);
+section('Notes', notes);
 section('Conflicts — left untouched, review by hand', conflicts);
 console.log(
   '\nBefore first running the launcher: log in to Claude once, in a normal ' +

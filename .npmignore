@@ -1,0 +1,33 @@
+# IMPORTANT: once this file exists, npm uses it INSTEAD of .gitignore for
+# `npm pack`/`npm publish` — it does not merge the two. So this repeats
+# .gitignore's own exclusions below, rather than only adding new ones, to
+# avoid silently un-excluding docs/sprints/.locks/ and the usual OS/Python
+# cruft the moment this file was added (confirmed by hand: adding only the
+# new patterns below and re-running `npm pack --dry-run` brought
+# docs/sprints/.locks/*.lock back into the tarball).
+__pycache__/
+*.pyc
+.DS_Store
+docs/sprints/.locks/
+
+# Everything below is new for sprint 2. Without this file, `npm pack`
+# falls back to .gitignore, which deliberately does NOT exclude
+# docs/sprints/ (see CLAUDE.md's "Sprint data persistence" — that content
+# is meant to be tracked and committed for a downstream *project* using
+# this framework). But this repo IS the framework's own source, and its
+# own docs/sprints/ carries this repo's real, ongoing sprint history —
+# requirements, QA1 audit notes, LiveQA findings. Discovered via sprint
+# 2's Req 7 tarball verification: every `npm pack` was shipping that
+# history to every npm install, unnoticed since the very first publish,
+# because nothing had ever looked inside the tarball. install.js's own
+# docs/sprints handling only needs the empty skeleton (the phase folders'
+# .gitkeep placeholders) to seed a fresh target project — never this
+# repo's actual sprint content — so only the content is excluded here,
+# not the folders that hold it.
+docs/sprints/registry.json
+docs/sprints/state/*.json
+docs/sprints/*/*.md
+
+# Personal, repo-local Claude Code permission settings — not part of the
+# framework being installed, and install.js never reads this path either.
+.claude/settings.local.json

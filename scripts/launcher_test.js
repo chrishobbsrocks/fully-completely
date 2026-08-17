@@ -465,6 +465,147 @@ test('install.js: a genuinely different CLAUDE.md is reported as a conflict', ()
   });
 });
 
+// -------------------------------------------------------------------------
+// install.js: sprint 2's upgrade taxonomy — framework-owned overwrite +
+// backup, user-owned protection, stale-file removal, the version marker,
+// and the one narrow .gitignore addition. Same throwaway-fixture
+// discipline as above: never against this repo, real content read from
+// REPO_ROOT rather than hardcoded, so these track the real files instead
+// of a stale copy of them.
+// -------------------------------------------------------------------------
+const REAL_RUN_ROLE_JS = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'launcher', 'run-role.js'), 'utf8');
+const REAL_QA1_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'qa1.md'), 'utf8');
+
+function writeVersionMarker(dir, version) {
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.claude', 'fully-completely-version'), `${version}\n`);
+}
+
+test('install.js: a changed framework-owned file is overwritten and the old version backed up', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    fs.mkdirSync(path.join(dir, 'scripts', 'launcher'), { recursive: true });
+    const runRolePath = path.join(dir, 'scripts', 'launcher', 'run-role.js');
+    fs.writeFileSync(runRolePath, '// old placeholder content, not the real file\n');
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Replaced[\s\S]*scripts\/launcher\/run-role\.js/);
+    assert.strictEqual(fs.readFileSync(runRolePath, 'utf8'), REAL_RUN_ROLE_JS);
+    const backupPath = `${runRolePath}.bak-0.1.0`;
+    assert.ok(fs.existsSync(backupPath), 'backup of the old version should exist');
+    assert.strictEqual(fs.readFileSync(backupPath, 'utf8'), '// old placeholder content, not the real file\n');
+  });
+});
+
+test('install.js: a user-owned file (an agent persona) is left untouched and reported as a conflict, not overwritten', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    fs.mkdirSync(path.join(dir, '.claude', 'agents'), { recursive: true });
+    const qa1Path = path.join(dir, '.claude', 'agents', 'qa1.md');
+    const customized = '---\nname: qa1\n---\nMy customised QA1 persona, do not overwrite.\n';
+    fs.writeFileSync(qa1Path, customized);
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Conflicts[\s\S]*qa1\.md \(yours/);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), customized, 'a customised persona must never be overwritten');
+    assert.ok(!fs.existsSync(`${qa1Path}.bak-0.1.0`), 'user-owned files are never backed up either, since they are never touched');
+  });
+});
+
+test('install.js: a framework file removed upstream (state.js) is removed from an existing install, backed up first', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    fs.mkdirSync(path.join(dir, 'scripts', 'launcher'), { recursive: true });
+    const stateJsPath = path.join(dir, 'scripts', 'launcher', 'state.js');
+    fs.writeFileSync(stateJsPath, "'use strict';\nmodule.exports = { wasLaunched: () => false };\n");
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Removed[\s\S]*scripts\/launcher\/state\.js/);
+    assert.ok(!fs.existsSync(stateJsPath), 'state.js should be removed — it is not part of the framework anymore');
+    const backupPath = `${stateJsPath}.bak-0.1.0`;
+    assert.ok(fs.existsSync(backupPath), 'the removed file should be backed up first');
+    assert.match(fs.readFileSync(backupPath, 'utf8'), /wasLaunched/);
+  });
+});
+
+test('install.js: a file outside the framework-owned set is never deleted, even during an upgrade', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const unrelatedPath = path.join(dir, 'src', 'my-own-app.js');
+    fs.mkdirSync(path.dirname(unrelatedPath), { recursive: true });
+    fs.writeFileSync(unrelatedPath, 'console.log("my own project code");\n');
+    // Also plant a random file directly at the project root.
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'unrelated notes\n');
+
+    runInstall(dir);
+
+    assert.strictEqual(fs.readFileSync(unrelatedPath, 'utf8'), 'console.log("my own project code");\n');
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'notes.txt'), 'utf8'), 'unrelated notes\n');
+  });
+});
+
+test('install.js: a missing version marker degrades to the upgrade path instead of crashing', () => {
+  withFixture((dir) => {
+    // No writeVersionMarker() call here on purpose — this simulates an
+    // install from before Req 5 existed, or one where the marker was
+    // deleted by hand.
+    fs.mkdirSync(path.join(dir, 'scripts', 'launcher'), { recursive: true });
+    const runRolePath = path.join(dir, 'scripts', 'launcher', 'run-role.js');
+    fs.writeFileSync(runRolePath, '// old placeholder, unknown prior version\n');
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Replaced[\s\S]*scripts\/launcher\/run-role\.js/);
+    assert.strictEqual(fs.readFileSync(runRolePath, 'utf8'), REAL_RUN_ROLE_JS);
+    assert.ok(fs.existsSync(`${runRolePath}.bak-unknown`), 'an unversioned prior install backs up under .bak-unknown');
+  });
+});
+
+test('install.js: the version marker is written after install and reports installed -> upgraded transitions', () => {
+  withFixture((dir) => {
+    const first = runInstall(dir);
+    assert.match(first, /Installed \d+\.\d+\.\d+ \(first install\)/);
+    const markerPath = path.join(dir, '.claude', 'fully-completely-version');
+    assert.ok(fs.existsSync(markerPath));
+    const version = fs.readFileSync(markerPath, 'utf8').trim();
+    assert.ok(/^\d+\.\d+\.\d+$/.test(version));
+    assert.ok(!markerPath.includes(`${path.sep}docs${path.sep}sprints${path.sep}`), 'the marker must not live under docs/sprints/');
+
+    const second = runInstall(dir);
+    assert.match(second, /Already at \d+\.\d+\.\d+ \(re-run, nothing to upgrade\)/);
+  });
+});
+
+test('install.js: an old, exact .claude-launcher/ gitignore line is removed on upgrade; the new merged line is still added', () => {
+  withFixture((dir) => {
+    const oldGitignore =
+      '__pycache__/\n*.pyc\n.DS_Store\n\n# Fully Completely (added by scripts/install.js)\n.claude-launcher/\n';
+    fs.writeFileSync(path.join(dir, '.gitignore'), oldGitignore);
+
+    const output = runInstall(dir);
+
+    const finalGitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
+    assert.ok(!finalGitignore.split(/\r?\n/).includes('.claude-launcher/'), 'the dead line must be gone');
+    assert.match(finalGitignore, /docs\/sprints\/\.locks\//);
+    assert.match(output, /removed now-dead line\(s\): \.claude-launcher\//);
+  });
+});
+
+test('install.js: a .claude-launcher/ reference folded into a non-standalone line is reported, not rewritten', () => {
+  withFixture((dir) => {
+    fs.writeFileSync(path.join(dir, '.gitignore'), '__pycache__/\n!.claude-launcher/keep-this-one\n');
+
+    const output = runInstall(dir);
+
+    const finalGitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
+    assert.match(finalGitignore, /!\.claude-launcher\/keep-this-one/, 'a non-standalone reference must be left alone');
+    assert.match(output, /Notes[\s\S]*isn't a plain standalone line/);
+  });
+});
+
 if (failures > 0) {
   console.error(`\n${failures} test(s) failed.`);
   process.exit(1);

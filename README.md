@@ -29,10 +29,14 @@ scripts/dev2_worktree.sh       Creates Dev Team 2's isolated git worktree
 scripts/smoke_test.sh          Full lifecycle test, runs in a sandbox
 scripts/worktree_test.sh       Tests dev2_worktree.sh, also sandboxed
 scripts/launcher_test.js       Tests the launcher's JSONC parser, task
-                                generation, and install.js's merge logic
+                                generation, and install.js's taxonomy +
+                                merge logic
 scripts/launcher/               VS Code launcher: run-role.js, generate-tasks.js
-scripts/install.js             Copies this framework into another project,
-                                non-destructively
+scripts/install.js             Installs/upgrades this framework into
+                                another project — see "Install" below
+scripts/verify-tarball.sh      Installs from a real `npm pack` tarball
+                                into a throwaway project before a release
+                                ships
 .vscode/tasks.json             Generated — one task per role, plus Shell
                                 (don't hand-edit)
 .vscode/settings.json          fullyCompletely.autoLaunch toggle (off by default)
@@ -50,8 +54,9 @@ docs/sprints/                  Where sprint files and state live
 1. Copy this whole folder into your project, or run
    `node /path/to/fully-completely/scripts/install.js` from inside your
    project (see [`scripts/install.js`](#launching-the-agents) below) —
-   non-destructive either way, it never overwrites a file that already
-   exists with different content, and reports anything it skipped.
+   re-running it later cleanly upgrades the framework files it owns
+   (backing up what was there first) while never touching files you're
+   meant to customise, reporting anything it skipped either way.
 2. Requires only Python 3 and Node.js, no packages to install for either.
    Runs on macOS, Linux, and Windows. The shell scripts (`smoke_test.sh`,
    `worktree_test.sh`, `dev2_worktree.sh`) need a POSIX-style shell, which
@@ -163,20 +168,47 @@ which and exits, rather than silently doing nothing.
 
 **`scripts/install.js`** copies `.claude/`, `scripts/` (including the
 launcher), `templates/`, `docs/sprints/`, `docs/HUMAN_OVERRIDE.md`, and
-`CLAUDE.md` into an existing project, run from inside it:
+`CLAUDE.md` into an existing project, run from inside it — and, from
+sprint 2 on, upgrades cleanly on every later re-run instead of just
+flagging drift:
 
 ```bash
 node /path/to/fully-completely/scripts/install.js
 ```
 
-It never overwrites a file that already exists with different content —
-those are reported as conflicts for you to reconcile by hand.
-`.vscode/tasks.json`, `.vscode/settings.json`, and `.gitignore` get a real
-merge instead (your own unrelated tasks/settings/ignore rules are left
-alone; only this framework's own tasks and the two `.gitignore` entries it
-needs are added). This is also the shape a future `npx fully-completely`
-would run. `scripts/launcher_test.js` covers this merge logic (comments
-present, colliding task labels, CRLF vs LF) along with the JSONC parser
+Every path it touches falls into exactly one of three categories:
+
+- **Framework-owned** (`.claude/commands/`, every `scripts/` file
+  including `scripts/launcher/**` and `install.js` itself, `templates/`,
+  `docs/HUMAN_OVERRIDE.md`) — files this project ships and maintains, that
+  you're never expected to hand-edit. On an upgrade these are **overwritten
+  when they've changed**, with the previous version backed up first
+  (`<name>.bak-<version you had installed>`), and any file that's no
+  longer part of the framework at all (`state.js`, deleted in sprint 1, is
+  the file that motivated this) is backed up and removed the same way.
+- **User-owned** (`.claude/agents/`, `CLAUDE.md`, `docs/sprints/` — this
+  project's own sprint data once installed) — designed to be customised,
+  or simply not this tool's to touch. These are **never** overwritten; a
+  file that differs from upstream is reported as a conflict for you to
+  reconcile by hand, same as before.
+- **Merged** — `.vscode/tasks.json`, `.vscode/settings.json`, and
+  `.gitignore` get a real merge (your own unrelated tasks/settings/ignore
+  rules are left alone; only this framework's own entries are added, and a
+  couple of specific dead `.gitignore` lines from old releases are removed
+  if present in exactly that form).
+
+A small marker at `.claude/fully-completely-version` (not sprint state,
+never under `docs/sprints/`) records which release is installed, so a
+re-run can tell a first install from an upgrade, name backups after the
+version being replaced, and report `Installed X (first install)` /
+`Upgraded X -> Y` / `Already at X`. This is also the shape
+`npx fully-completely` runs — before any release ships, `npm pack` is
+verified for real via `scripts/verify-tarball.sh`, which installs from the
+actual packed tarball into a throwaway project and confirms the result
+matches source. `scripts/launcher_test.js` covers the taxonomy (overwrite
++ backup, removal, user-owned protection, a missing version marker
+degrading to upgrade rather than crashing) alongside the merge logic
+(comments present, colliding task labels, CRLF vs LF), the JSONC parser,
 and generated task shapes, and runs in CI alongside `smoke_test.sh` and
 `worktree_test.sh`.
 
