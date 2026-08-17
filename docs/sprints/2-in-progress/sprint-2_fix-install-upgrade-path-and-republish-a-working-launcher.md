@@ -51,7 +51,9 @@ Sequencing matters: fix the upgrade path first, then publish. Publishing a versi
 **LiveQA Part A — macOS, run by LiveQA against the real installer:**
 
 - **First install** into an empty throwaway project from the packed tarball. Confirm the launcher files land, and that a role actually launches — reuse Sprint 1's load-bearing check (independently predict the UUID, confirm `<uuid>.jsonl` appears).
-- **Upgrade over a simulated stale install.** Construct a project containing the *old* launcher (`state.js` present, old `run-role.js`), run the installer, and confirm: `run-role.js` is replaced with the fixed version, `state.js` is gone, backups exist, and the summary reports all three accurately. **A stale `run-role.js` surviving is the exact Sprint 1 Part B failure and is an automatic FAIL.**
+- **Upgrade over a simulated stale install, run at least TWICE in a row.** Construct a project containing the *old* launcher (`state.js` present, old `run-role.js`), run the installer, and confirm: `run-role.js` is replaced with the fixed version, `state.js` is gone, backups exist, and the summary reports all three accurately. **A stale `run-role.js` surviving is the exact Sprint 1 Part B failure and is an automatic FAIL.**
+
+  **The second run is not optional, and this is QA1's instruction, not a suggestion.** A single run passed even *before* the round-2 fix — the backup-compounding defect lived entirely in the second run (nesting backups, growing filenames, and falsely reporting files as "no longer part of the framework"). A one-shot check would have shipped it. On run two, expect: the same backup filenames as run one, no new nesting, and no "Removed" section. Run three should be identical to run two.
 - **Customisation survives.** Edit an agent persona and a CLAUDE.md project-standards line, run the upgrade, confirm both are intact and reported as conflicts rather than silently replaced.
 - **Nothing outside the framework set is deleted.** Put an unrelated file in the project, upgrade, confirm it is untouched.
 
