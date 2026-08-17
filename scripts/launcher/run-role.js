@@ -3,21 +3,26 @@
 // Invoked by .vscode/tasks.json, one process per role terminal:
 //   node scripts/launcher/run-role.js <role-id> [--restart]
 //
-// Default (smart): if this launcher has a local record of a prior session
-// for this role, try to resume it (`claude --agent <id> --resume <title>`);
-// otherwise, or if the resume attempt exits almost immediately (most
-// likely: the recorded session no longer exists), launch fresh
-// (`claude --agent <id> --name <title> "<initial prompt>"`). This is the
-// task actually named after the role ("Master Controller", "QA1", ...),
-// since it's the one people run day to day.
+// Default (smart): resumes the highest existing session generation for
+// this (role, repo) pair if one exists on disk (`claude --agent <id>
+// --resume <uuid>`); otherwise launches fresh at generation 0 (`claude
+// --agent <id> --session-id <uuid> --name <title> "<initial prompt>"`).
+// Both the session ID and the resume-vs-fresh decision come from
+// scripts/launcher/session.js, which derives everything from the
+// filesystem — there is no local state file. This is the task actually
+// named after the role ("Master Controller", "QA1", ...), since it's the
+// one people run day to day.
 //
 // --restart: skip resume entirely and always start a brand-new named
-// session, even if one is already recorded. Previous history isn't
-// deleted, just not reconnected to. Not wired into any VS Code task —
-// VS Code ties a dedicated terminal's identity to the task's label, so a
-// second task for the same role would open a second terminal alongside
-// the first rather than replacing it. Run this by hand instead (e.g. from
-// Shell) when you actually want to abandon a session.
+// session at the next generation, even if one is already recorded.
+// Previous history isn't deleted, just not reconnected to — but the new
+// session becomes the one the *next* normal launch resumes, since that's
+// just whatever the filesystem scan finds as the new highest generation.
+// Not wired into any VS Code task — VS Code ties a dedicated terminal's
+// identity to the task's label, so a second task for the same role would
+// open a second terminal alongside the first rather than replacing it.
+// Run this by hand instead (e.g. from Shell) when you actually want to
+// abandon a session.
 //
 // Model is never passed here — `--agent <id>` alone puts the agent file's
 // own frontmatter `model:` in charge (confirmed to win even over an
@@ -27,31 +32,13 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { ROOT, ROLES, agentFilePath } = require('./agents');
 const { initialPrompt, devTeam2ResumePrompt } = require('./prompts');
-const { wasLaunched, markLaunched } = require('./state');
-
-const FAST_FAILURE_MS = 5000;
+const { resolveSession } = require('./session');
+const { checkAuth } = require('./auth');
+const { claudeCommand } = require('./claude-cmd');
 
 function fail(message) {
   console.error(`ERROR: ${message}`);
   process.exit(1);
-}
-
-// On Windows, a global npm install of claude is typically a .cmd shim,
-// which can't be exec'd directly the way a real macOS/Linux binary can.
-// The tempting fix is spawn(..., {shell: true}), but that's actively
-// unsafe: Node's shell:true mode does NOT escape array args, it just
-// concatenates them (see the DEP0190 deprecation warning) — confirmed by
-// hand, a prompt string containing parentheses breaks the shell outright,
-// silently mangling every argument after it into separate shell tokens.
-// Node's own docs recommend the alternative used here instead: spawn
-// cmd.exe directly (shell: false, the safe default) with /c plus the
-// target and its args as a normal array — Node's already-safe non-shell
-// Windows argv quoting does the escaping, so there's nothing to hand-roll.
-function claudeCommand(args) {
-  if (process.platform === 'win32') {
-    return ['cmd.exe', ['/c', 'claude', ...args]];
-  }
-  return ['claude', args];
 }
 
 function claudeOnPath() {
@@ -64,37 +51,21 @@ function claudeOnPath() {
   return probe.status === 0;
 }
 
-function spawnClaude(args, { onSpawned } = {}) {
+function spawnClaude(args) {
   return new Promise((resolve) => {
-    const startedAt = Date.now();
     const [cmd, fullArgs] = claudeCommand(args);
     const child = spawn(cmd, fullArgs, { stdio: 'inherit', cwd: ROOT });
-    // Fires once the OS confirms the process actually started — the
-    // earliest reliable "this happened" signal, well before markLaunched()
-    // would ever race a user closing the terminal.
-    child.on('spawn', () => {
-      if (onSpawned) onSpawned();
-    });
     child.on('error', (err) => {
       fail(`Failed to start claude: ${err.message}`);
     });
     child.on('exit', (code) => {
-      resolve({ code, elapsedMs: Date.now() - startedAt });
+      resolve({ code });
     });
   });
 }
 
-async function launchFresh(role, sessionTitle) {
-  // Record the launch at spawn time, not after the process exits.
-  // Recording on exit meant closing the terminal tab (the normal way
-  // people end these sessions, and the normal way VS Code kills the
-  // whole process tree on window close) killed this script before it
-  // ever reached the exit handler — the record never got written, and
-  // "resume" silently degraded to always-fresh with no sign anything
-  // was wrong.
-  return spawnClaude(['--agent', role.id, '--name', sessionTitle, initialPrompt(role.label)], {
-    onSpawned: () => markLaunched(role.id),
-  });
+async function launchFresh(role, sessionTitle, uuid) {
+  return spawnClaude(['--agent', role.id, '--session-id', uuid, '--name', sessionTitle, initialPrompt(role.label)]);
 }
 
 async function main() {
@@ -119,6 +90,18 @@ async function main() {
     );
   }
 
+  // Req 6: deliberately worded differently from the not-on-PATH failure
+  // above so the two are never mistaken for each other. Req 6b: only a
+  // *confident* "not logged in" blocks here — an inconclusive probe
+  // proceeds with the launch rather than locking out a setup that might
+  // work fine.
+  if (checkAuth() === 'unauthenticated') {
+    fail(
+      "You're not logged in to Claude. Open a normal terminal, run 'claude', " +
+        'log in, then re-run this task.'
+    );
+  }
+
   const agentFile = agentFilePath(role.id);
   if (!fs.existsSync(agentFile)) {
     fail(
@@ -129,34 +112,26 @@ async function main() {
 
   const repoName = path.basename(ROOT);
   const sessionTitle = `fc:${role.id}:${repoName}`;
+  const { resume, sessionId: uuid } = resolveSession(role.id, ROOT, { restart: forceRestart });
 
   if (forceRestart) {
     console.log(`Restarting ${role.label}: starting a brand-new session (any prior one is left alone).`);
-    const result = await launchFresh(role, sessionTitle);
+    const result = await launchFresh(role, sessionTitle, uuid);
     process.exitCode = result.code === null ? 0 : result.code;
     return;
   }
 
-  if (!wasLaunched(role.id)) {
-    const result = await launchFresh(role, sessionTitle);
+  if (!resume) {
+    const result = await launchFresh(role, sessionTitle, uuid);
     process.exitCode = result.code === null ? 0 : result.code;
     return;
   }
 
-  const resumeArgs = ['--agent', role.id, '--resume', sessionTitle];
+  const resumeArgs = ['--agent', role.id, '--resume', uuid];
   if (role.id === 'dev-team-2') {
     resumeArgs.push(devTeam2ResumePrompt(repoName));
   }
   const result = await spawnClaude(resumeArgs);
-  if (result.code && result.elapsedMs < FAST_FAILURE_MS) {
-    console.log(
-      `Resume of ${role.label} exited almost immediately (code ${result.code}), ` +
-        `the recorded session probably no longer exists. Starting fresh instead.`
-    );
-    const fresh = await launchFresh(role, sessionTitle);
-    process.exitCode = fresh.code === null ? 0 : fresh.code;
-    return;
-  }
   process.exitCode = result.code === null ? 0 : result.code;
 }
 

@@ -1,0 +1,11 @@
+{
+  "next_id": 2,
+  "sprints": {
+    "1": {
+      "title": "Fix launcher session resume and first-run auth",
+      "epic": "Launcher reliability",
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-1_fix-launcher-session-resume-and-first-run-auth.md"
+    }
+  }
+}

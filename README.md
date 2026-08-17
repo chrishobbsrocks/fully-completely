@@ -57,7 +57,12 @@ docs/sprints/                  Where sprint files and state live
    `worktree_test.sh`, `dev2_worktree.sh`) need a POSIX-style shell, which
    Windows users typically already have via Git Bash or WSL; they aren't
    required to use `sprint_lifecycle.py` itself.
-3. See "Launching the agents" below for both the VS Code launcher and the
+3. **Log in to Claude once before first running the launcher.** Open a
+   normal terminal, run `claude`, complete login, then exit. The launcher's
+   preflight check refuses to start any role session until this is done —
+   it fails fast with a clear message instead of leaving terminals stuck at
+   a login prompt.
+4. See "Launching the agents" below for both the VS Code launcher and the
    fully manual fallback (open a terminal tab per role yourself).
 
 ## Launching the agents
@@ -79,13 +84,15 @@ Nothing in this launcher passes `--model`.
 each role a task named exactly after it — `Master Controller`, `Dev Team
 1`, `Dev Team 2`, `QA1`, `Pipeman`, `LiveQA` — since a task's label is also
 its terminal's tab name. Every one of those is "smart": it resumes a prior
-session automatically if this launcher has a local record of having
-started one before (`.claude-launcher/state.json`, gitignored,
-machine-specific), or if the resume attempt exits almost immediately (the
-recorded session most likely no longer exists), or launches fresh with a
-short first message confirming the role and telling it to check
-`docs/sprints/registry.json` and wait for instructions. There's also
-**Shell**, a plain login shell with no `claude` in it at all (your own
+session automatically if one exists for that role in this repo, or
+launches fresh with a short first message confirming the role and telling
+it to check `docs/sprints/registry.json` and wait for instructions. There's
+no local record file involved — each role's session ID is a UUID derived
+deterministically from (role, repo path), so it can always be recomputed
+rather than remembered, and "does a prior session exist" is answered by
+checking whether `~/.claude/projects/<encoded repo path>/<uuid>.jsonl`
+exists, not by trusting anything the launcher wrote down earlier. There's
+also **Shell**, a plain login shell with no `claude` in it at all (your own
 `$SHELL` on macOS/Linux, PowerShell on Windows) — for
 `docs/HUMAN_OVERRIDE.md`'s override command (which must never be run from
 inside an agent session, see that file) and any raw git you want to do
@@ -114,9 +121,11 @@ node scripts/launcher/run-role.js qa1 --restart
 
 That starts a brand-new named session for that role right there in
 whatever terminal you ran it from (previous history isn't deleted, just
-not reconnected to), and records it, so the next time you run that role's
-own task it resumes this new session. Close the role's stale existing
-terminal tab yourself once you're done with it.
+not reconnected to). It becomes the current session for that role purely
+because it's now the newest one on disk — the next time you run that
+role's own task, the resume check finds it as the latest and reconnects to
+it. Close the role's stale existing terminal tab yourself once you're done
+with it.
 
 Dev Team 2 is the one role whose working directory can legitimately move
 mid-sprint (into a separate git worktree, see "Customizing" below) — the

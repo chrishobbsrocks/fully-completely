@@ -6,8 +6,3 @@ __pycache__/
 # to serialize concurrent sprint_lifecycle.py invocations, never meant to
 # be committed.
 docs/sprints/.locks/
-
-# VS Code launcher: local record of which role sessions have been started,
-# so Resume can tell a fresh install apart from "try to resume." Machine-
-# specific, never meant to be committed.
-.claude-launcher/

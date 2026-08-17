@@ -183,7 +183,7 @@ function mergeTasks() {
 function mergeGitignore() {
   const relPath = '.gitignore';
   const destPath = path.join(DEST_ROOT, relPath);
-  const block = ['.claude-launcher/', 'docs/sprints/.locks/'];
+  const block = ['docs/sprints/.locks/'];
   let existingLines = [];
   let existed = fs.existsSync(destPath);
   if (existed) {
@@ -228,6 +228,11 @@ console.log(`Fully Completely: installed into ${DEST_ROOT}`);
 section('Copied', copied);
 section('Already present, unchanged', skipped);
 section('Conflicts — left untouched, review by hand', conflicts);
+console.log(
+  '\nBefore first running the launcher: log in to Claude once, in a normal ' +
+    "terminal — run 'claude', complete login, then exit. The launcher's " +
+    'preflight check will refuse to start any role session until this is done.'
+);
 
 if (conflicts.length > 0) {
   console.log(
