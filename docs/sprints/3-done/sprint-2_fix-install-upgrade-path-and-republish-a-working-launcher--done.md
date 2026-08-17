@@ -2,7 +2,7 @@
 id: 2
 title: "Fix install upgrade path and republish a working launcher"
 epic: "Launcher reliability"
-status: in_progress
+status: done
 created: 2026-08-17T00:00:00+00:00
 ---
 

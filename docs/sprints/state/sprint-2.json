@@ -1,16 +1,16 @@
 {
   "id": 2,
   "title": "Fix install upgrade path and republish a working launcher",
-  "phase": "liveqa_live",
+  "phase": "complete",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "66b1ab5aaf32d55033e458b52ed72b70404624695b21098659481d1119f3fc5f",
   "qa1_audited_tree_hash": "e51e58cc2034bde59e808b23fef1879b829eef1f",
   "last_shipped_commit": "f2557d4b031c32f555199f3e882179457ad8608b",
-  "groundtruth_result": "CONDITIONAL",
+  "groundtruth_result": "PASS",
   "audit_rounds": 2,
-  "live_test_rounds": 1,
+  "live_test_rounds": 2,
   "started": "2026-08-17T18:49:56+00:00",
-  "completed": null,
+  "completed": "2026-08-17T20:59:39+00:00",
   "history": [
     {
       "ts": "2026-08-17T18:49:56+00:00",
@@ -53,6 +53,18 @@
       "actor": "pipeman",
       "event": "reshipped",
       "detail": "commit=f2557d4"
+    },
+    {
+      "ts": "2026-08-17T20:46:35+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: PASS \u2014 Round 2, live-tested commit f2557d4 (published as fully-completely@0.1.2). The round-1 CONDITIONAL defect is fixed, its sibling branch is fixed, and the O3 wording item is fixed.\n\nWHAT I OBSERVED DIRECTLY vs ACCEPTED ON REPORT: everything below I executed and observed directly on macOS 26.6 / arm64 / CLI 2.1.233. Windows Part B was NOT repeated this round and did not need to be: the diff from the round-1 PASS-level code is message-only, and I verified the file-handling paths are unchanged. Part B's evidence from round 1 (headline npx check, six terminals, six predicted UUIDs, stale upgrade with state.js deletion on a real Windows path) stands and is not re-claimed here as fresh observation.\n\n=== CORRECTION I OWE THE RECORD, STATED FIRST ===\n\nIn my previous message I told the team that QA1's informational sibling-branch finding \"does not reproduce against the committed code\" and that \"no extra work is needed.\" THAT WAS WRONG, and QA1 was right.\n\nI ran my reproduction against the WORKING TREE, which at that moment already contained Dev Team's uncommitted fix, and then asserted it was the state of commit 64e40c6. I also wrote \"the working tree matches it\" without re-running git status at that moment. Verified now from git objects rather than the filesystem:\n  - 64e40c6 scripts/install.js: `} else if (installedVersion) { \"Already at X (re-run, nothing to upgrade)\" }` \u2014 no didUpgradeWork guard on branch 2, exactly the defect QA1 quoted.\n  - 64e40c6 scripts/launcher_test.js: zero matches for 'drifted from it' \u2014 the test I cited as already covering it did not exist at that commit.\n  - f2557d4 adds both the `installedVersion && didUpgradeWork` guard and the drift test (2 matches).\n\nThis is the precise failure CLAUDE.md warns about \u2014 treating a working-tree diff as a claim about committed code \u2014 and I compounded it by using it to contradict a correct finding from another role and to tell the team work wasn't needed. No harm resulted only because Dev Team committed the fix regardless. QA1's catch was real, correctly scoped as informational rather than gating, and should be credited as such.\n\n=== RELEASE VERIFIED INDEPENDENTLY ===\n\n  - last_shipped_commit = f2557d4b031c32f555199f3e882179457ad8608b; f2557d4 confirmed on origin/main.\n  - npm latest = 0.1.2.\n  - Tags: v0.1.2 -> f2557d4, and v0.1.1 still -> 5628f95. The published 0.1.1 tag was not moved, which is correct; v0.1.2 pointing at f2557d4 rather than 64e40c6 is legitimate because 0.1.2 had not been published at 64e40c6.\n  - `npm pack fully-completely@0.1.2` from the live registry is BYTE-IDENTICAL (diff -r) to a local pack of f2557d4. Every check below was run from the PUBLISHED package, so this evidence covers what users actually download.\n  - Published package sanity: version 0.1.2, state.js absent, run-role.js:133 `['--agent', role.id, '--resume', uuid]`.\n\n=== ALL FIVE VERSION-REPORTING BRANCHES, DRIVEN LIVE FROM THE PUBLISHED PACKAGE ===\n\nThe round-1 CONDITIONAL was branch 4; QA1's informational finding was branch 2. Both fixed, and I exercised all five rather than only the two known-bad ones:\n\n  1. older marker -> current (0.1.1 install, then 0.1.2):\n       \"Upgraded 0.1.1 -> 0.1.2\"                                                  correct\n  2. marker matches, but a framework file drifted (hand-replaced run-role.js):\n       \"Already at 0.1.2, but repaired 1 file(s) that had drifted from it \u2014 see below\"\n       printed directly above a Replaced section listing that same file            correct, and consistent\n  3. marker matches, genuinely nothing to do:\n       \"Already at 0.1.2 (re-run, nothing to upgrade)\"                             correct\n  4. no marker + real work (0.1.0 install, then 0.1.2):\n       \"Upgraded unknown -> 0.1.2\"                                                 correct \u2014 round-1 defect fixed\n  5. no marker + no work (empty directory):\n       \"Installed 0.1.2 (first install)\"                                           correct \u2014 genuinely a first install\n\nNo branch now claims nothing changed above a section listing what changed. That was the whole substance of the CONDITIONAL.\n\n=== O3 WORDING FIX (raised in round 1, non-gating) ===\n\nOld text claimed the preflight \"will refuse to start any role session until this is done,\" which contradicted Sprint 1's Req 6b inconclusive-proceeds branch. New text, verbatim from the published package:\n  \"The launcher's preflight check blocks only when Claude reports no usable credentials \u2014 it otherwise proceeds, so this is a courtesy check, not a hard requirement this script can verify.\"\nThat matches auth.js's actual three-outcome behaviour rather than overclaiming.\n\n=== REGRESSION \u2014 FILE HANDLING UNCHANGED ===\n\nOn the 0.1.0 -> 0.1.2 upgrade run: state.js absent (removed), run-role.js carries the fixed '--resume', uuid form, three backups present (install.js.fc-bak-unknown, run-role.js.fc-bak-unknown, state.js.fc-bak-unknown), marker written as 0.1.2. Identical in shape to what I verified in round 1, so the message-only change did not disturb the delivery logic.\n\nLoad-bearing check repeated from the upgraded install: predicted e1d79468-178a-5bda-903e-75f4f6d54dd8 in Python BEFORE launching; that exact file was created. Correct files on disk are not proof of a working launcher; this is.\n\n=== PROCESS ===\n\nI modified no code. Working tree checked at test time this round (only the pre-existing, correctly-uncommitted .vscode/settings.json), specifically because failing to check it is what produced the error at the top of these notes.\n\nSprint 1's inherited Dependencies line was discharged in round 1 and is unaffected by this round.\n\nSTILL OPEN, not gating and not mine to action:\n  - Two handoff reports have now arrived corrupted in transit between sessions (Pipeman's pre-release report, then QA1's sibling-branch report). Pipeman independently flagged the same thing. Two data points across two different roles; worth someone looking at what mangles text between sessions, since this project's premise is that handoff reports can be trusted. Master Controller's call.\n  - mergeGitignore()'s CRLF handling, already backlogged by Master Controller as cosmetic, to bundle with future merge-logic work."
+    },
+    {
+      "ts": "2026-08-17T20:59:39+00:00",
+      "actor": "dev-team",
+      "event": "sprint_closed",
+      "detail": "user_said=/sprint-complete 2"
     }
   ]
 }

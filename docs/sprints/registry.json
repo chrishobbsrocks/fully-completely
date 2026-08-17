@@ -10,8 +10,8 @@
     "2": {
       "title": "Fix install upgrade path and republish a working launcher",
       "epic": "Launcher reliability",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-2_fix-install-upgrade-path-and-republish-a-working-launcher.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-2_fix-install-upgrade-path-and-republish-a-working-launcher--done.md"
     }
   }
 }
