@@ -252,34 +252,94 @@ test('session: restart round trip — the next normal launch resumes the restart
 });
 
 // -------------------------------------------------------------------------
-// auth.js: login preflight classification (Req 6a/6b)
+// auth.js: login preflight classification (Req 6, 6a-revised, 6b,
+// 6b-clarified, 6c)
+//
+// Every stdout fixture below was captured from the real Claude CLI
+// (2.1.233) via `claude auth status --json`, in an isolated
+// CLAUDE_CONFIG_DIR that never touched a real login, not guessed. See the
+// sprint 1 handoff notes for the exact repro of each.
 // -------------------------------------------------------------------------
-const { classify } = require('./launcher/auth');
+const { classify, parseLoggedIn } = require('./launcher/auth');
 
-test('auth: a clean exit 0 classifies as authenticated', () => {
-  assert.strictEqual(classify({ status: 0, error: null, signal: null }), 'authenticated');
+const REAL_LOGGED_IN_JSON = '{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "apiProvider": "firstParty"\n}\n';
+const REAL_LOGGED_OUT_JSON = '{\n  "loggedIn": false,\n  "authMethod": "none",\n  "apiProvider": "firstParty"\n}\n';
+const REAL_UNKNOWN_SUBCOMMAND_STDERR = "error: unknown command 'bogussubcommand'\n";
+const REAL_UNKNOWN_FLAG_STDERR = "error: unknown option '--bogusflag'\n";
+
+test('auth: loggedIn: true, exit 0 (real logged-in output) classifies as authenticated', () => {
+  assert.strictEqual(classify({ status: 0, stdout: REAL_LOGGED_IN_JSON, error: null, signal: null }), 'authenticated');
 });
 
-test('auth: a clean non-zero exit classifies as unauthenticated', () => {
-  assert.strictEqual(classify({ status: 1, error: null, signal: null }), 'unauthenticated');
+test('auth: a clean exit 0 with no parseable JSON still classifies as authenticated', () => {
+  assert.strictEqual(classify({ status: 0, stdout: '', error: null, signal: null }), 'authenticated');
+});
+
+test('auth: loggedIn: false, exit 1 (genuine logout) classifies as unauthenticated', () => {
+  assert.strictEqual(classify({ status: 1, stdout: REAL_LOGGED_OUT_JSON, error: null, signal: null }), 'unauthenticated');
+});
+
+// Req 6b-clarified: a chmod-000 config dir and a genuine logout print the
+// exact same well-formed JSON on this CLI — verified by hand, not assumed
+// — so both must block. There is no field to read that distinguishes them
+// (and Req 6b-clarified forbids trying via authMethod).
+test('auth: loggedIn: false from a chmod-000 config dir classifies as unauthenticated, not inconclusive', () => {
+  assert.strictEqual(classify({ status: 1, stdout: REAL_LOGGED_OUT_JSON, error: null, signal: null }), 'unauthenticated');
+});
+
+test('auth: loggedIn: false from a config dir that is a file, not a directory, classifies as unauthenticated', () => {
+  assert.strictEqual(classify({ status: 1, stdout: REAL_LOGGED_OUT_JSON, error: null, signal: null }), 'unauthenticated');
+});
+
+// Req 6b: the probe itself failing to produce an answer must proceed, not
+// block. Unrecognised subcommand/flag both print non-JSON error text on
+// the real CLI, so loggedIn is unreadable — the probe broke, not auth.
+test('auth: an unrecognised auth subcommand (non-JSON stderr) classifies as inconclusive', () => {
+  assert.strictEqual(
+    classify({ status: 1, stdout: REAL_UNKNOWN_SUBCOMMAND_STDERR, error: null, signal: null }),
+    'inconclusive'
+  );
+});
+
+test('auth: an unrecognised flag (non-JSON stderr) classifies as inconclusive', () => {
+  assert.strictEqual(classify({ status: 1, stdout: REAL_UNKNOWN_FLAG_STDERR, error: null, signal: null }), 'inconclusive');
+});
+
+test('auth: malformed JSON classifies as inconclusive', () => {
+  assert.strictEqual(classify({ status: 1, stdout: '{"loggedIn": tru', error: null, signal: null }), 'inconclusive');
+});
+
+test('auth: absent/empty stdout with a non-zero exit classifies as inconclusive', () => {
+  assert.strictEqual(classify({ status: 1, stdout: '', error: null, signal: null }), 'inconclusive');
+});
+
+test('auth: valid JSON missing the loggedIn field classifies as inconclusive', () => {
+  assert.strictEqual(
+    classify({ status: 1, stdout: '{"authMethod": "none"}', error: null, signal: null }),
+    'inconclusive'
+  );
 });
 
 test('auth: a spawn error classifies as inconclusive, not unauthenticated', () => {
   assert.strictEqual(
-    classify({ status: null, error: new Error('spawn claude ENOENT'), signal: null }),
+    classify({ status: null, stdout: null, error: new Error('spawn claude ENOENT'), signal: null }),
     'inconclusive'
   );
 });
 
 test('auth: a killed/timed-out probe classifies as inconclusive, not unauthenticated', () => {
-  assert.strictEqual(classify({ status: null, error: null, signal: 'SIGTERM' }), 'inconclusive');
+  assert.strictEqual(classify({ status: null, stdout: null, error: null, signal: 'SIGTERM' }), 'inconclusive');
 });
 
-test('auth: a null status with no error and no signal classifies as inconclusive, not unauthenticated', () => {
-  // Guards against a bare "wasn't 0" default: unauthenticated requires
-  // positive evidence (a real, completed, non-zero numeric status), not
-  // just the absence of the other two branches.
-  assert.strictEqual(classify({ status: null, error: null, signal: null }), 'inconclusive');
+test('auth: parseLoggedIn reads only the loggedIn field, ignoring authMethod entirely', () => {
+  assert.strictEqual(parseLoggedIn(REAL_LOGGED_OUT_JSON), false);
+  assert.strictEqual(parseLoggedIn(REAL_LOGGED_IN_JSON), true);
+  assert.strictEqual(parseLoggedIn('not json at all'), undefined);
+  assert.strictEqual(parseLoggedIn(''), undefined);
+  assert.strictEqual(parseLoggedIn(null), undefined);
+  assert.strictEqual(parseLoggedIn('null'), undefined);
+  assert.strictEqual(parseLoggedIn('[1,2,3]'), undefined);
+  assert.strictEqual(parseLoggedIn('{"loggedIn": "true"}'), undefined); // string, not boolean
 });
 
 // -------------------------------------------------------------------------

@@ -59,10 +59,12 @@ docs/sprints/                  Where sprint files and state live
    required to use `sprint_lifecycle.py` itself.
 3. **Log in to Claude once before first running the launcher.** Open a
    normal terminal, run `claude`, complete login, then exit. The launcher's
-   preflight check blocks a *confidently* logged-out run with a clear
-   message instead of leaving terminals stuck at a login prompt — it
-   otherwise proceeds (a probe it can't get a confident answer from, e.g.
-   an older CLI, is never treated as "logged out").
+   preflight check blocks with a clear message when Claude reports no
+   usable credentials — a genuine logout or a broken config directory both
+   land here, since either way no role could authenticate — instead of
+   leaving terminals stuck at a login prompt. It otherwise proceeds (a
+   probe it can't get a confident answer from at all, e.g. an older CLI,
+   is never treated as "no usable credentials").
 4. See "Launching the agents" below for both the VS Code launcher and the
    fully manual fallback (open a terminal tab per role yourself).
 

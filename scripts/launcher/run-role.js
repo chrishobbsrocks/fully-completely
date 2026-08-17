@@ -92,13 +92,16 @@ async function main() {
 
   // Req 6: deliberately worded differently from the not-on-PATH failure
   // above so the two are never mistaken for each other. Req 6b: only a
-  // *confident* "not logged in" blocks here — an inconclusive probe
-  // proceeds with the launch rather than locking out a setup that might
-  // work fine.
+  // *confident* "credentials unusable" blocks here — an inconclusive
+  // probe proceeds with the launch rather than locking out a setup that
+  // might work fine. Req 6c: the block can legitimately come from either
+  // a genuine logout or a broken config directory (see auth.js), and this
+  // message can't tell which — so it states the observation and the
+  // remedy, not a cause it doesn't actually know.
   if (checkAuth() === 'unauthenticated') {
     fail(
-      "You're not logged in to Claude. Open a normal terminal, run 'claude', " +
-        'log in, then re-run this task.'
+      "Claude reports no usable credentials. Open a normal terminal, run " +
+        "'claude', sign in, then re-run this task."
     );
   }
 
