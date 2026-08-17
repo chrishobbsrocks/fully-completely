@@ -2,7 +2,7 @@
 id: 1
 title: "Fix launcher session resume and first-run auth"
 epic: "Launcher reliability"
-status: in_progress
+status: done
 created: 2026-08-17T02:59:56+00:00
 ---
 
