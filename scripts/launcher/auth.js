@@ -31,7 +31,15 @@ function classify(probe) {
   if (probe.error) return 'inconclusive';
   if (probe.signal) return 'inconclusive';
   if (probe.status === 0) return 'authenticated';
-  return 'unauthenticated';
+  // 'unauthenticated' requires positive evidence — a real, completed,
+  // non-zero exit code — not just "wasn't 0 and wasn't caught above".
+  // spawnSync's status is null when the process was killed by a signal
+  // without a captured signal name reaching here, or in any other shape
+  // this probe wasn't designed around; that's exactly the "probe fails
+  // for a reason unrelated to auth" case Req 6b names, so it must not
+  // fall through to a block.
+  if (typeof probe.status === 'number' && probe.status !== 0) return 'unauthenticated';
+  return 'inconclusive';
 }
 
 function checkAuth() {

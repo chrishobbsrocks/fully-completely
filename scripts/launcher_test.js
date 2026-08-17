@@ -130,11 +130,44 @@ test('session: directory derivation replaces POSIX separators, no hardcoded -Use
   });
 });
 
-test('session: directory derivation replaces Windows-style separators too', () => {
+// This exact case is what an earlier version of sessionsDir() (replacing
+// only path separators) got wrong, and QA1 caught: a real repo path
+// containing a space or a dot encodes those characters too, not just
+// slashes. Values here are the CLI's actual observed encoding (checked by
+// hand against ~/.claude/projects/ for a throwaway repo path containing a
+// space, two consecutive spaces, a dot, parentheses, and underscores —
+// each non-alphanumeric character maps to its own '-', with no collapsing
+// of runs), not a guess.
+test('session: directory derivation replaces spaces, dots, and other non-alphanumerics, one dash per character', () => {
   withTmpHome((home) => {
-    const dir = sessionsDir('C:\\Users\\chris\\Programming\\fully-completely', home);
-    assert.strictEqual(dir, path.join(home, '.claude', 'projects', 'C:-Users-chris-Programming-fully-completely'));
-    assert.ok(!dir.includes('\\Users\\'), 'backslash separators must not survive encoding');
+    const dir = sessionsDir('/private/tmp/fc test.dir/sub proj', home);
+    assert.strictEqual(dir, path.join(home, '.claude', 'projects', '-private-tmp-fc-test-dir-sub-proj'));
+  });
+});
+
+test('session: directory derivation does not collapse consecutive non-alphanumerics into one dash', () => {
+  withTmpHome((home) => {
+    const dir = sessionsDir('/private/tmp/fc2 (paren)_under__score/a  b/x.y.z', home);
+    assert.strictEqual(
+      dir,
+      path.join(home, '.claude', 'projects', '-private-tmp-fc2--paren--under--score-a--b-x-y-z')
+    );
+  });
+});
+
+// Windows itself is NOT independently verified (see Risks in the sprint
+// file — that's the user's Windows acceptance gate, not this suite). This
+// asserts our code applies the same "replace every non-alphanumeric
+// character with '-', one-for-one" rule uniformly rather than special-
+// casing backslash vs forward slash — i.e. it locks in the derivation
+// logic's consistency, not a claim about the real Windows CLI's behavior.
+test('session: directory derivation applies the same non-alphanumeric rule to a Windows-style path', () => {
+  withTmpHome((home) => {
+    const dir = sessionsDir('C:\\Users\\Chris Hobbs\\Programming\\fully-completely', home);
+    assert.strictEqual(
+      dir,
+      path.join(home, '.claude', 'projects', 'C--Users-Chris-Hobbs-Programming-fully-completely')
+    );
   });
 });
 
@@ -240,6 +273,13 @@ test('auth: a spawn error classifies as inconclusive, not unauthenticated', () =
 
 test('auth: a killed/timed-out probe classifies as inconclusive, not unauthenticated', () => {
   assert.strictEqual(classify({ status: null, error: null, signal: 'SIGTERM' }), 'inconclusive');
+});
+
+test('auth: a null status with no error and no signal classifies as inconclusive, not unauthenticated', () => {
+  // Guards against a bare "wasn't 0" default: unauthenticated requires
+  // positive evidence (a real, completed, non-zero numeric status), not
+  // just the absence of the other two branches.
+  assert.strictEqual(classify({ status: null, error: null, signal: null }), 'inconclusive');
 });
 
 // -------------------------------------------------------------------------

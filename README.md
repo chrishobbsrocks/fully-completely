@@ -59,9 +59,10 @@ docs/sprints/                  Where sprint files and state live
    required to use `sprint_lifecycle.py` itself.
 3. **Log in to Claude once before first running the launcher.** Open a
    normal terminal, run `claude`, complete login, then exit. The launcher's
-   preflight check refuses to start any role session until this is done —
-   it fails fast with a clear message instead of leaving terminals stuck at
-   a login prompt.
+   preflight check blocks a *confidently* logged-out run with a clear
+   message instead of leaving terminals stuck at a login prompt — it
+   otherwise proceeds (a probe it can't get a confident answer from, e.g.
+   an older CLI, is never treated as "logged out").
 4. See "Launching the agents" below for both the VS Code launcher and the
    fully manual fallback (open a terminal tab per role yourself).
 
@@ -88,11 +89,14 @@ session automatically if one exists for that role in this repo, or
 launches fresh with a short first message confirming the role and telling
 it to check `docs/sprints/registry.json` and wait for instructions. There's
 no local record file involved — each role's session ID is a UUID derived
-deterministically from (role, repo path), so it can always be recomputed
-rather than remembered, and "does a prior session exist" is answered by
-checking whether `~/.claude/projects/<encoded repo path>/<uuid>.jsonl`
-exists, not by trusting anything the launcher wrote down earlier. There's
-also **Shell**, a plain login shell with no `claude` in it at all (your own
+deterministically from (role, repo path, generation), a generation being a
+zero-based counter that only advances on `--restart` (see below), so it
+can always be recomputed rather than remembered. "Does a prior session
+exist" is answered by checking, for each generation in turn, whether
+`~/.claude/projects/<encoded repo path>/<uuid>.jsonl` exists on disk — the
+highest generation found is the one resumed — not by trusting anything the
+launcher wrote down earlier. There's also **Shell**, a plain login shell
+with no `claude` in it at all (your own
 `$SHELL` on macOS/Linux, PowerShell on Windows) — for
 `docs/HUMAN_OVERRIDE.md`'s override command (which must never be run from
 inside an agent session, see that file) and any raw git you want to do

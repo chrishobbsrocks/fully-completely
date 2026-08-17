@@ -58,17 +58,30 @@ function sessionId(roleId, repoRoot, generation) {
 }
 
 // Mirrors how the Claude CLI encodes a project's session directory under
-// ~/.claude/projects/: the absolute repo path with every path separator —
-// forward or backward slash, so this derives correctly for a Windows-style
-// path even when computed on macOS/Linux, e.g. in tests — replaced with
-// '-'. Verified by hand against a real macOS session directory while
-// building this; Windows encoding specifically is unverified until this
-// sprint's Windows gate runs (see Risks in the sprint file). homeDir is a
-// parameter rather than an os.homedir() call buried inside the function so
-// tests can point it at a throwaway fixture directory instead of the real
-// one.
+// ~/.claude/projects/: every character in the absolute repo path that
+// isn't an ASCII letter or digit is replaced with '-', one-for-one, no
+// collapsing of runs. This was verified by hand against real macOS session
+// directories while building this — first against a plain path (only
+// slashes), which is what an earlier version of this function assumed and
+// QA1 correctly failed: a real repo path containing a space or a dot
+// (`~/Programming/Licenseprofessor Edits and fixes`, seven such
+// directories on this machine alone) encodes those characters too, not
+// just separators. Re-verified against a path containing a space, two
+// consecutive spaces, a dot, parentheses, and single/double underscores —
+// each individual non-alnum character maps to its own '-', confirming
+// "any non-alnum -> '-'" rather than "separators only" or "collapse runs
+// of specials into one dash". Applying the same uniform rule to a
+// Windows-style path (colons, backslashes, a space in `C:\Users\Chris
+// Hobbs\...`) is the reasonable extrapolation, but Windows itself remains
+// unverified until this sprint's Windows gate runs (see Risks in the
+// sprint file) — the character-class approach is chosen specifically
+// because it doesn't need a separate, unverified special case for
+// backslash vs forward slash the way the slash-only version did. homeDir
+// is a parameter rather than an os.homedir() call buried inside the
+// function so tests can point it at a throwaway fixture directory instead
+// of the real one.
 function sessionsDir(repoRoot, homeDir = os.homedir()) {
-  const encoded = repoRoot.replace(/[\\/]/g, '-');
+  const encoded = repoRoot.replace(/[^a-zA-Z0-9]/g, '-');
   return path.join(homeDir, '.claude', 'projects', encoded);
 }
 
