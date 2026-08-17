@@ -11,12 +11,43 @@ created: 2026-08-17T02:59:56+00:00
 **Epic:** Launcher reliability — the VS Code six-terminal launcher must survive first run and restart on both macOS and Windows.
 **Sprint Objective:** Make `FC: Start All` reliably open six working agent terminals on a fresh machine, by resuming sessions via real session IDs instead of display names, and by failing clearly when the user isn't logged in.
 
-> **LiveQA's gate is explicitly skipped for this sprint.** Per CLAUDE.md's
-> `## Changes to this repo's own tooling`, LiveQA live-tests a deployed
-> product in a browser; this repository has no deployed product and this
-> change is a Node launcher script. Its place in the lifecycle is taken by
-> the **Windows verification** step in Acceptance Criteria below, which
-> only the user can perform. QA1's static gate applies unchanged.
+> **LiveQA's gate is REDEFINED for this sprint, not skipped.** *(Corrected
+> mid-sprint — the original wording said "skipped," which was wrong and
+> would have deadlocked this sprint. `/sprint-complete` hard-requires a
+> LiveQA PASS at `sprint_lifecycle.py:688`, with no skip flag and no
+> override, and editing state by hand to get around it is forbidden.)*
+>
+> Per CLAUDE.md's `## Changes to this repo's own tooling`, LiveQA normally
+> live-tests a deployed product in a browser. This repository has no
+> deployed product and this change is a Node launcher script, so **there is
+> no browser in this sprint's live test** — but there is still a real live
+> test: running the actual launcher on a real Windows machine.
+>
+> **"Live" here means the real launcher actually running, not a browser.**
+> The launcher is the product, and it is executable. LiveQA's live test has
+> two parts:
+>
+> **Part A — macOS end-to-end, executed by LiveQA itself.** This is the
+> larger part and the higher-value one. QA1's 38 tests ran against *fixture*
+> session files, which encode our own assumption about where the CLI writes
+> sessions — the tests and the code share that assumption, so no static
+> audit can falsify it. **Nobody has yet observed the real Claude CLI,
+> given `--session-id <derived-uuid>`, actually create `<derived-uuid>.jsonl`
+> where we predict.** That unobserved fact is what the whole design rests
+> on. See Part A steps in Acceptance Criteria.
+>
+> **Part B — Windows, executed by the user.** LiveQA cannot run this; no one
+> on the team has Windows hardware. The user runs the Windows steps and
+> reports results; **LiveQA evaluates those results** and folds them into
+> its verdict, with notes stating plainly which parts it observed directly
+> and which it is accepting on the user's report. That keeps the audit trail
+> honest about who actually saw what.
+>
+> **LiveQA owns the gate and records the verdict** via
+> `/sprint-liveqa 1 --deployed-commit <sha> --verdict ...`. A PASS requires
+> both parts.
+>
+> QA1's static gate applies unchanged.
 
 ### Context
 
@@ -75,12 +106,21 @@ The fix is available and cheap: `claude --session-id <uuid>` lets us **assign** 
 - Req 7: both README and `install.js` output state the login prerequisite.
 - Req 8: `node scripts/launcher_test.js` passes and covers every case listed in Req 8. QA1 runs it, not just reads it.
 
-**Windows verification (the user, standing in for LiveQA — this sprint cannot close without it):**
+**LiveQA Part A — macOS end-to-end, run by LiveQA against the real CLI (no browser, no fixtures):**
+
+- **The load-bearing check.** Launch one role fresh. Independently compute the expected UUID for (role, repo, generation 0), then confirm a file named exactly `<that-uuid>.jsonl` now exists in the derived session directory. Compute the expectation *separately* from the launcher's own output — if you only read back what the launcher reports, you've verified nothing. This is the assumption QA1's fixtures could not falsify.
+- **Resume actually resumes.** Launch a role, tell it a specific fact it could not otherwise know, exit. Relaunch normally. Ask for that fact back. A terminal opening is not a pass; the answer is the pass.
+- **Restart round trip, for real.** Run with `--restart`. Confirm a new generation file appears and the prior one is untouched on disk. Then launch *normally* and confirm it resumes the **restarted** session, not the abandoned one (Req 5a) — verified by content, as above.
+- **No orphan accumulation.** Record the session-file count before and after a full `FC: Start All`. Expect exactly the six new sessions, no strays. This is the regression that started the sprint.
+- **Auth preflight, all three branches.** Verify the logged-out message is clear and spawns nothing. Verify the inconclusive branch **proceeds** rather than blocking (simulate by making the probe fail in a way unrelated to auth) — Req 6b, the branch most likely to be implemented backwards.
+
+**LiveQA Part B — Windows, executed by the user, evaluated by LiveQA (this sprint cannot close without it):**
 
 - On a Windows machine, **logged out**: run `FC: Start All`. Expect a clear "log in first" message, and **no** terminals left sitting at a picker or prompt.
 - Log in via a normal terminal, close it, re-run `FC: Start All`. Expect **all six** agent terminals to come up working, each announcing its own role.
 - Close VS Code, reopen, run `FC: Start All` again. Expect all six to **resume** their prior conversations — verified by asking one of them something only the earlier conversation would know, not by the terminal merely opening.
 - Confirm no new orphan `.jsonl` files accumulate per launch beyond the six expected sessions.
+- **The drive-letter colon, flagged by QA1 in round 2.** `C:\Users\Chris Hobbs\...` should derive to `C--Users-Chris-Hobbs-...` — the colon and the backslash each becoming their own dash, producing a genuine double dash. This is the one character class with **no macOS evidence behind it**; the encoding rule was verified only against POSIX paths. Confirm the derived directory matches the one the CLI actually creates. If it doesn't, that is a real Windows failure, not a labelling problem.
 
 ### Out of Scope
 
