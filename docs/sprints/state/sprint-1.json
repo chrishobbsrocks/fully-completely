@@ -1,11 +1,11 @@
 {
   "id": 1,
   "title": "Fix launcher session resume and first-run auth",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "14cbf6c343254ccc0e7e2c79bbc23ef6aaa053e5d5a6e4b01a8abb340075d55c",
   "qa1_audited_tree_hash": "655b7d3d4fff790fedf04655a149b3e9dd11d893",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "896cac37ef4ff94ddf9e5ed3ebdaf64706fa1477",
   "groundtruth_result": null,
   "audit_rounds": 2,
   "live_test_rounds": 0,
@@ -35,6 +35,12 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-08-17T04:14:31+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=896cac3"
     }
   ]
 }
