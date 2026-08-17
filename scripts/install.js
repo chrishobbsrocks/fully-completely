@@ -485,19 +485,29 @@ function section(title, items) {
 }
 
 // Req 5's own first clause is "distinguish a first install from an
-// upgrade" — a missing marker on its own doesn't settle that: it also
-// covers a pre-marker install (everything before this sprint) that is
-// very much an upgrade, and the only way to tell the two apart at this
-// point is whether any framework-owned files actually got replaced or
-// removed. Caught by LiveQA: an unversioned upgrade was reporting
-// "Installed X (first install)" while it simultaneously replaced and
-// removed real files underneath that claim — a lie about what had just
-// happened, printed at the exact moment files were changing.
+// upgrade" — the version marker alone doesn't settle that in every case,
+// only whether any framework-owned files actually got replaced or
+// removed does. Two cases caught this the same way, one round apart:
+//   - LiveQA: no marker (a pre-marker install) reported "Installed X
+//     (first install)" while replacing and removing real files
+//     underneath that claim.
+//   - QA1, checking the sibling branch: a marker that already says
+//     CURRENT_VERSION reported "Already at X, nothing to upgrade" while
+//     doing exactly that below it — reachable for real, not just in
+//     theory, by anyone who did sprint 1's Part B workaround (hand-
+//     replacing the launcher folder) without the marker ever moving.
+// Both are the same lie: claiming nothing changed, directly above a
+// section listing what changed.
 const didUpgradeWork = replaced.length > 0 || removed.length > 0;
 
 console.log(`Fully Completely: installed into ${DEST_ROOT}`);
 if (installedVersion && installedVersion !== CURRENT_VERSION) {
   console.log(`Upgraded ${installedVersion} -> ${CURRENT_VERSION}`);
+} else if (installedVersion && didUpgradeWork) {
+  const repairedCount = replaced.length + removed.length;
+  console.log(
+    `Already at ${CURRENT_VERSION}, but repaired ${repairedCount} file(s) that had drifted from it — see below`
+  );
 } else if (installedVersion) {
   console.log(`Already at ${CURRENT_VERSION} (re-run, nothing to upgrade)`);
 } else if (didUpgradeWork) {

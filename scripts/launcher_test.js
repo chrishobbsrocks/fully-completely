@@ -475,6 +475,7 @@ test('install.js: a genuinely different CLAUDE.md is reported as a conflict', ()
 // -------------------------------------------------------------------------
 const REAL_RUN_ROLE_JS = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'launcher', 'run-role.js'), 'utf8');
 const REAL_QA1_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'qa1.md'), 'utf8');
+const REAL_CURRENT_VERSION = require(path.join(REPO_ROOT, 'package.json')).version;
 
 function writeVersionMarker(dir, version) {
   fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
@@ -566,6 +567,30 @@ test('install.js: a missing version marker degrades to the upgrade path instead 
     // printed at the exact moment files are being changed underneath it.
     assert.match(output, /Upgraded unknown -> \d+\.\d+\.\d+/);
     assert.doesNotMatch(output, /first install/);
+  });
+});
+
+test('install.js: a marker already at the current version, but a drifted file underneath it, is reported as repaired, not "nothing to upgrade"', () => {
+  // QA1's finding, checking the sibling branch to LiveQA's: the marker
+  // says CURRENT_VERSION already, but a framework file on disk doesn't
+  // actually match that version's source — reachable for real by anyone
+  // who did sprint 1's Part B workaround (hand-replacing the launcher
+  // folder) without the marker ever moving.
+  withFixture((dir) => {
+    writeVersionMarker(dir, REAL_CURRENT_VERSION);
+    fs.mkdirSync(path.join(dir, 'scripts', 'launcher'), { recursive: true });
+    const runRolePath = path.join(dir, 'scripts', 'launcher', 'run-role.js');
+    fs.writeFileSync(runRolePath, '// drifted content, marker claims current version anyway\n');
+
+    const output = runInstall(dir);
+
+    assert.strictEqual(fs.readFileSync(runRolePath, 'utf8'), REAL_RUN_ROLE_JS);
+    assert.match(output, /Replaced[\s\S]*scripts\/launcher\/run-role\.js/);
+    // The bug: this exact scenario used to print "Already at X (re-run,
+    // nothing to upgrade)" directly above the Replaced section listing
+    // the file it just replaced.
+    assert.doesNotMatch(output, /nothing to upgrade/);
+    assert.match(output, /Already at \d+\.\d+\.\d+, but repaired 1 file\(s\) that had drifted from it/);
   });
 });
 
