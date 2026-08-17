@@ -547,7 +547,7 @@ test('install.js: a file outside the framework-owned set is never deleted, even 
   });
 });
 
-test('install.js: a missing version marker degrades to the upgrade path instead of crashing', () => {
+test('install.js: a missing version marker degrades to the upgrade path instead of crashing, and reports it as an upgrade, not a first install', () => {
   withFixture((dir) => {
     // No writeVersionMarker() call here on purpose — this simulates an
     // install from before Req 5 existed, or one where the marker was
@@ -561,6 +561,11 @@ test('install.js: a missing version marker degrades to the upgrade path instead 
     assert.match(output, /Replaced[\s\S]*scripts\/launcher\/run-role\.js/);
     assert.strictEqual(fs.readFileSync(runRolePath, 'utf8'), REAL_RUN_ROLE_JS);
     assert.ok(fs.existsSync(`${runRolePath}.fc-bak-unknown`), 'an unversioned prior install backs up under .fc-bak-unknown');
+    // LiveQA's finding: this run genuinely replaced a file, so it must
+    // never be reported as "first install" — that's a false statement
+    // printed at the exact moment files are being changed underneath it.
+    assert.match(output, /Upgraded unknown -> \d+\.\d+\.\d+/);
+    assert.doesNotMatch(output, /first install/);
   });
 });
 

@@ -484,11 +484,24 @@ function section(title, items) {
   for (const item of items) console.log(`  ${item}`);
 }
 
+// Req 5's own first clause is "distinguish a first install from an
+// upgrade" — a missing marker on its own doesn't settle that: it also
+// covers a pre-marker install (everything before this sprint) that is
+// very much an upgrade, and the only way to tell the two apart at this
+// point is whether any framework-owned files actually got replaced or
+// removed. Caught by LiveQA: an unversioned upgrade was reporting
+// "Installed X (first install)" while it simultaneously replaced and
+// removed real files underneath that claim — a lie about what had just
+// happened, printed at the exact moment files were changing.
+const didUpgradeWork = replaced.length > 0 || removed.length > 0;
+
 console.log(`Fully Completely: installed into ${DEST_ROOT}`);
 if (installedVersion && installedVersion !== CURRENT_VERSION) {
   console.log(`Upgraded ${installedVersion} -> ${CURRENT_VERSION}`);
 } else if (installedVersion) {
   console.log(`Already at ${CURRENT_VERSION} (re-run, nothing to upgrade)`);
+} else if (didUpgradeWork) {
+  console.log(`Upgraded unknown -> ${CURRENT_VERSION}`);
 } else {
   console.log(`Installed ${CURRENT_VERSION} (first install)`);
 }
@@ -501,7 +514,9 @@ section('Conflicts — left untouched, review by hand', conflicts);
 console.log(
   '\nBefore first running the launcher: log in to Claude once, in a normal ' +
     "terminal — run 'claude', complete login, then exit. The launcher's " +
-    'preflight check will refuse to start any role session until this is done.'
+    'preflight check blocks only when Claude reports no usable credentials — ' +
+    'it otherwise proceeds, so this is a courtesy check, not a hard requirement ' +
+    'this script can verify.'
 );
 
 if (conflicts.length > 0) {
