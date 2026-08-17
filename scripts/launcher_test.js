@@ -492,7 +492,7 @@ test('install.js: a changed framework-owned file is overwritten and the old vers
 
     assert.match(output, /Replaced[\s\S]*scripts\/launcher\/run-role\.js/);
     assert.strictEqual(fs.readFileSync(runRolePath, 'utf8'), REAL_RUN_ROLE_JS);
-    const backupPath = `${runRolePath}.bak-0.1.0`;
+    const backupPath = `${runRolePath}.fc-bak-0.1.0`;
     assert.ok(fs.existsSync(backupPath), 'backup of the old version should exist');
     assert.strictEqual(fs.readFileSync(backupPath, 'utf8'), '// old placeholder content, not the real file\n');
   });
@@ -510,7 +510,7 @@ test('install.js: a user-owned file (an agent persona) is left untouched and rep
 
     assert.match(output, /Conflicts[\s\S]*qa1\.md \(yours/);
     assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), customized, 'a customised persona must never be overwritten');
-    assert.ok(!fs.existsSync(`${qa1Path}.bak-0.1.0`), 'user-owned files are never backed up either, since they are never touched');
+    assert.ok(!fs.existsSync(`${qa1Path}.fc-bak-0.1.0`), 'user-owned files are never backed up either, since they are never touched');
   });
 });
 
@@ -525,7 +525,7 @@ test('install.js: a framework file removed upstream (state.js) is removed from a
 
     assert.match(output, /Removed[\s\S]*scripts\/launcher\/state\.js/);
     assert.ok(!fs.existsSync(stateJsPath), 'state.js should be removed — it is not part of the framework anymore');
-    const backupPath = `${stateJsPath}.bak-0.1.0`;
+    const backupPath = `${stateJsPath}.fc-bak-0.1.0`;
     assert.ok(fs.existsSync(backupPath), 'the removed file should be backed up first');
     assert.match(fs.readFileSync(backupPath, 'utf8'), /wasLaunched/);
   });
@@ -560,7 +560,7 @@ test('install.js: a missing version marker degrades to the upgrade path instead 
 
     assert.match(output, /Replaced[\s\S]*scripts\/launcher\/run-role\.js/);
     assert.strictEqual(fs.readFileSync(runRolePath, 'utf8'), REAL_RUN_ROLE_JS);
-    assert.ok(fs.existsSync(`${runRolePath}.bak-unknown`), 'an unversioned prior install backs up under .bak-unknown');
+    assert.ok(fs.existsSync(`${runRolePath}.fc-bak-unknown`), 'an unversioned prior install backs up under .fc-bak-unknown');
   });
 });
 
@@ -603,6 +603,107 @@ test('install.js: a .claude-launcher/ reference folded into a non-standalone lin
     const finalGitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
     assert.match(finalGitignore, /!\.claude-launcher\/keep-this-one/, 'a non-standalone reference must be left alone');
     assert.match(output, /Notes[\s\S]*isn't a plain standalone line/);
+  });
+});
+
+// -------------------------------------------------------------------------
+// install.js: QA1 round 2's four findings — backup compounding on a
+// second run, docs/sprints leaking this repo's own real sprint data,
+// symlink-unsafe removal, and CRLF loss on gitignore rewrite. Each test
+// below reproduces the exact scenario QA1 used, not a weaker stand-in.
+// -------------------------------------------------------------------------
+test('install.js: a second run does not re-flag its own backup as stale, and does not nest backup suffixes', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    fs.mkdirSync(path.join(dir, 'scripts', 'launcher'), { recursive: true });
+    const runRolePath = path.join(dir, 'scripts', 'launcher', 'run-role.js');
+    fs.writeFileSync(runRolePath, '// old placeholder content, not the real file\n');
+
+    const first = runInstall(dir);
+    assert.match(first, /Replaced[\s\S]*scripts\/launcher\/run-role\.js/);
+    const backupPath = `${runRolePath}.fc-bak-0.1.0`;
+    assert.ok(fs.existsSync(backupPath));
+
+    // Second run: nothing upstream changed since run 1, and the file is
+    // now at CURRENT_VERSION, so this should be a true no-op — QA1's
+    // round-2 bug was that the backup itself got collected, found absent
+    // from source, and "removed" (re-backed-up under a nested suffix).
+    const second = runInstall(dir);
+    assert.doesNotMatch(second, /Removed/, 'a second run must not report removing anything, least of all its own backup');
+    assert.doesNotMatch(second, /Replaced/, 'nothing changed upstream between the two runs');
+    assert.ok(fs.existsSync(backupPath), 'the original backup must still be exactly where it was');
+    assert.ok(
+      !fs.existsSync(`${backupPath}.fc-bak-0.1.1`),
+      'the backup must never itself be backed up — no nested .fc-bak-X.fc-bak-Y suffix'
+    );
+
+    // Third run, for good measure — QA1's repro specifically named three
+    // runs as where the nesting became visible.
+    const third = runInstall(dir);
+    assert.doesNotMatch(third, /Removed/);
+    assert.strictEqual(fs.readFileSync(backupPath, 'utf8'), '// old placeholder content, not the real file\n');
+  });
+});
+
+test('install.js: a symlink under a framework-owned directory is never descended into or deleted through', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    fs.mkdirSync(path.join(dir, 'scripts', 'launcher'), { recursive: true });
+
+    // A directory genuinely outside anything install.js should ever
+    // touch, reachable only by following a symlink planted inside a
+    // framework-owned directory — QA1's exact repro.
+    const outsideDir = path.join(dir, 'my-precious');
+    fs.mkdirSync(outsideDir, { recursive: true });
+    const preciousFile = path.join(outsideDir, 'notes.txt');
+    fs.writeFileSync(preciousFile, 'do not touch this\n');
+    fs.symlinkSync(outsideDir, path.join(dir, 'scripts', 'launcher', 'sneaky-link'));
+
+    runInstall(dir);
+
+    assert.strictEqual(fs.readFileSync(preciousFile, 'utf8'), 'do not touch this\n', 'a file reached only via a symlink must never be deleted');
+    assert.ok(fs.existsSync(path.join(dir, 'scripts', 'launcher', 'sneaky-link')), 'the symlink itself is not framework content and must be left alone too');
+  });
+});
+
+test('install.js: a real first install never copies this repo\'s own sprint content, only the empty skeleton', () => {
+  withFixture((dir) => {
+    const output = runInstall(dir);
+
+    // Only .gitkeep placeholders may come from docs/sprints/, regardless
+    // of whatever real sprint data currently sits in this repo's own
+    // docs/sprints/ at test-run time.
+    const sprintsDir = path.join(dir, 'docs', 'sprints');
+    const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]
+    );
+    const installedFiles = walk(sprintsDir);
+    for (const f of installedFiles) {
+      assert.strictEqual(path.basename(f), '.gitkeep', `docs/sprints must only ever contain .gitkeep files on a fresh install, found ${f}`);
+    }
+    assert.ok(!fs.existsSync(path.join(sprintsDir, 'registry.json')), 'this repo\'s own registry.json must never be copied');
+    assert.ok(!fs.existsSync(path.join(sprintsDir, 'state', 'sprint-1.json')), 'this repo\'s own sprint state must never be copied');
+    assert.doesNotMatch(output, /registry\.json/);
+  });
+});
+
+test('install.js: removing a dead gitignore line preserves the file\'s original CRLF line endings', () => {
+  withFixture((dir) => {
+    // Includes docs/sprints/.locks/ already, so nothing needs appending —
+    // isolates removeDeadGitignoreLines()'s own rewrite (the thing QA1
+    // found losing CRLF) from the separate, pre-existing, explicitly
+    // out-of-scope append-with-hardcoded-\n path in the "missing lines"
+    // branch below it (present before sprint 2, unrelated to this fix).
+    const oldGitignoreCRLF =
+      '__pycache__/\r\n*.pyc\r\n\r\n# Fully Completely (added by scripts/install.js)\r\ndocs/sprints/.locks/\r\n.claude-launcher/\r\n';
+    fs.writeFileSync(path.join(dir, '.gitignore'), oldGitignoreCRLF);
+
+    runInstall(dir);
+
+    const finalRaw = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
+    assert.ok(!finalRaw.split(/\r?\n/).includes('.claude-launcher/'), 'the dead line must still be removed');
+    assert.ok(finalRaw.includes('\r\n'), 'the file\'s original CRLF line endings must be preserved, not silently converted to LF');
+    assert.ok(!/(?<!\r)\n/.test(finalRaw), 'no bare LF (not preceded by \\r) should have been introduced by the rewrite');
   });
 });
 

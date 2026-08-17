@@ -75,14 +75,48 @@ const FRAMEWORK_OWNED = [
 // User-owned: designed to be customised, or — in docs/sprints's case —
 // simply not ours to touch once installed. docs/sprints/ in a target
 // project is that *project's own* sprint data (its registry, its sprint
-// files, its state); this repo's copy of docs/sprints/ only ever supplies
-// the initial empty-folder skeleton on a genuine first install. Treating
-// it as framework-owned would mean a future upgrade tries to overwrite a
-// target's real sprint history with whatever this source repo's own
-// sprints happen to contain at install time — exactly the kind of
-// misclassification the sprint's Risks section warns about, just for a
-// directory instead of a single file.
+// files, its state), never this repo's own. That distinction has to be
+// enforced in code, not just claimed in a comment: QA1 round 1 caught
+// that an earlier version of this file asserted "only ever supplies the
+// initial empty-folder skeleton" while the actual code walked
+// docs/sprints/ like any other directory, which on a real first install
+// copied THIS repo's real registry.json, state/*.json (full QA1/LiveQA
+// audit text), and sprint files straight into the target — corrupting its
+// sprint numbering from the very first command. Fixed below:
+// SPRINT_SKELETON_FILES is an explicit allowlist of only the phase
+// folders' .gitkeep placeholders, and docs/sprints is special-cased in
+// the USER_OWNED loop to install only from that list, never from a
+// directory walk. Once a target has its own real sprint files, those are
+// user-owned in the same never-overwrite sense as everything else in this
+// category — they're just never *sourced* from this repo either way.
 const USER_OWNED = ['.claude/agents', 'CLAUDE.md', 'docs/sprints'];
+
+const SPRINT_SKELETON_FILES = [
+  'docs/sprints/0-backlog/.gitkeep',
+  'docs/sprints/1-todo/.gitkeep',
+  'docs/sprints/2-in-progress/.gitkeep',
+  'docs/sprints/3-done/.gitkeep',
+  'docs/sprints/4-blocked/.gitkeep',
+  'docs/sprints/5-abandoned/.gitkeep',
+  'docs/sprints/state/.gitkeep',
+];
+
+// The marker every backup file's name contains (Req 2/4). Framework-owned
+// backups are deliberately written as *siblings* of the original — same
+// directory — per Req 2's own wording, which means the same directory
+// walk that finds real framework files also finds our own backups. QA1
+// caught that without this exclusion, a backup created on run 1 gets
+// treated as "no longer part of the framework" on run 2, gets backed up
+// *again* (nesting the suffix), and so on — a compounding rename every
+// run, eventually exceeding filesystem filename limits. Every path
+// collectPaths() returns is filtered against this marker so a backup is
+// never mistaken for a real framework file at any point after the run
+// that created it.
+const BACKUP_MARKER = '.fc-bak-';
+
+function isBackupPath(relPath) {
+  return path.basename(relPath).includes(BACKUP_MARKER);
+}
 
 const VERSION_MARKER_PATH = path.join(DEST_ROOT, '.claude', 'fully-completely-version');
 const CURRENT_VERSION = require(path.join(SOURCE_ROOT, 'package.json')).version;
@@ -107,17 +141,29 @@ function sameContent(src, dest) {
 // *should* exist) and DEST_ROOT (what currently *does* exist) for the
 // same framework-owned entry, so overwrite and removal can each work off
 // the right side of that comparison.
+//
+// Two safety filters, both from QA1 round 2:
+//   - lstatSync, not statSync, and a symlink is never descended into. A
+//     symlink under a framework-owned directory could point anywhere —
+//     following it would let removeStaleFrameworkFile() walk into, and
+//     potentially delete, files completely outside the framework-owned
+//     set, which Req 4 forbids without qualification.
+//   - a path matching BACKUP_MARKER is excluded entirely, so our own
+//     backups (siblings of the files they back up, per Req 2) are never
+//     mistaken for framework content on a later run.
 function collectPaths(root, relPath) {
   const abs = path.join(root, relPath);
   if (!fs.existsSync(abs)) return [];
-  if (fs.statSync(abs).isDirectory()) {
+  const st = fs.lstatSync(abs);
+  if (st.isSymbolicLink()) return [];
+  if (st.isDirectory()) {
     const results = [];
     for (const entry of fs.readdirSync(abs)) {
       results.push(...collectPaths(root, path.join(relPath, entry)));
     }
     return results;
   }
-  return [relPath];
+  return isBackupPath(relPath) ? [] : [relPath];
 }
 
 // Req 5: a missing marker means "unknown previous version" and must
@@ -148,7 +194,7 @@ const installedVersion = readInstalledVersion();
 // rather than piling up identical duplicates.
 function backupPathFor(destPath) {
   const versionTag = installedVersion || 'unknown';
-  const base = `${destPath}.bak-${versionTag}`;
+  const base = `${destPath}${BACKUP_MARKER}${versionTag}`;
   if (!fs.existsSync(base)) return base;
   if (sameContent(destPath, base)) return base;
   let n = 2;
@@ -352,6 +398,11 @@ function removeDeadGitignoreLines() {
   const deadLines = ['.claude-launcher/'];
   if (!fs.existsSync(destPath)) return;
   const raw = fs.readFileSync(destPath, 'utf8');
+  // Preserve whatever line ending the file already uses — QA1 caught that
+  // split(/\r?\n/).join('\n') silently converts CRLF to LF on rewrite,
+  // harmless on macOS but exactly the kind of thing Part B's Windows gate
+  // exists to catch.
+  const eol = raw.includes('\r\n') ? '\r\n' : '\n';
   const lines = raw.split(/\r?\n/);
   const kept = [];
   const removedHere = [];
@@ -363,7 +414,7 @@ function removeDeadGitignoreLines() {
     }
   }
   if (removedHere.length > 0) {
-    fs.writeFileSync(destPath, kept.join('\n'));
+    fs.writeFileSync(destPath, kept.join(eol));
     removed.push(`${relPath} (removed now-dead line(s): ${removedHere.join(', ')})`);
     return;
   }
@@ -403,6 +454,15 @@ for (const p of FRAMEWORK_OWNED) {
 }
 
 for (const p of USER_OWNED) {
+  if (p === 'docs/sprints') {
+    // Special-cased, not walked: see SPRINT_SKELETON_FILES above. Only
+    // the empty phase-folder skeleton is ever sourced from this repo,
+    // never its real sprint content.
+    for (const relPath of SPRINT_SKELETON_FILES) {
+      if (fs.existsSync(path.join(SOURCE_ROOT, relPath))) copyUserOwnedFile(relPath);
+    }
+    continue;
+  }
   const abs = path.join(SOURCE_ROOT, p);
   if (!fs.existsSync(abs)) continue;
   if (fs.statSync(abs).isDirectory()) {
