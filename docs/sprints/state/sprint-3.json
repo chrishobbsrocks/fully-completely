@@ -1,0 +1,22 @@
+{
+  "id": 3,
+  "title": "Ship 0.1.3 with the evidence bar and transition rule",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-08-28T19:27:05+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-08-28T19:27:05+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ]
+}
