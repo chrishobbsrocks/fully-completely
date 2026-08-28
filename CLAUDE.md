@@ -139,6 +139,20 @@ and need a fresh audit (a new commit landed after the fact), re-running
 `/sprint-qa1` is expected to work and resets the phase, run
 `/sprint-dev-done` again afterward before shipping.
 
+**Transition-precondition design rule**, credited to an external team who
+named it during a cross-install review: *a precondition on a phase
+transition must be clearable by the role that hits it, or it must ship with
+a documented cross-role recovery path.* The tree-hash check just above is
+the worked example: Pipeman is the one who hits it, and Pipeman cannot
+clear it, only a fresh audit in QA1's session can. That is fine, not a gap,
+because `cmd_qa1` already accepts a sprint sitting in `dev_agreed_done`
+specifically so that error has a documented way out (re-run `/sprint-qa1`,
+then `/sprint-dev-done` again) rather than being a dead end. Read this as a
+constraint on *how* a precondition gets added, never as a reason not to add
+one: the hash gates are themselves preconditions on transitions and they
+are this framework's best mechanical protections. The rule is "pair every
+gate with a recovery path," not "don't add gates."
+
 ## Trivial fix fast lane
 
 Not every change needs the full lifecycle. On the downstream project this
@@ -289,5 +303,24 @@ two different systems. Do not refer to this project as "Maestro," assume
 it uses Maestro's conventions, or treat the two as interchangeable, even
 when the global skill list shows Maestro skills alongside this project's
 own `.claude/commands/sprint-*` and `.claude/agents/` files.
+
+**State-field access convention (`scripts/sprint_lifecycle.py`).** Fields
+that have been in a sprint's `state` dict since it was first created (see
+`cmd_start`: `id`, `phase`, `qa1_audit_result`, `audit_rounds`, `history`,
+and the rest of that literal) are indexed directly, `state["phase"]`, never
+`state.get("phase")`. A missing base-schema field means the state file is
+corrupt, and that must fail loudly with a `KeyError` rather than silently
+evaluating to `None` and letting a malformed state limp through the state
+machine. Fields added to the schema *after* sprints already existed are
+read with `.get()` and an explicit default instead, because state files for
+sprints started before that field existed genuinely lack the key, and
+that's expected, not corruption. `cmd_dev_done`'s handling of
+`qa1_audit_file_hash` is the precedent: it reads
+`state.get("qa1_audit_file_hash")`, with a comment explaining that `None`
+there means "this sprint PASSed under a version of this script from before
+the hash field existed," not "the field failed to save." Follow this for
+the next field added to the schema: `.get()` with a default only for fields
+younger than some sprint still in flight could be; direct indexing for
+everything in the base schema.
 
 ---
