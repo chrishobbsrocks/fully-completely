@@ -305,10 +305,17 @@ when the global skill list shows Maestro skills alongside this project's
 own `.claude/commands/sprint-*` and `.claude/agents/` files.
 
 **State-field access convention (`scripts/sprint_lifecycle.py`).** Fields
-that have been in a sprint's `state` dict since it was first created (see
-`cmd_start`: `id`, `phase`, `qa1_audit_result`, `audit_rounds`, `history`,
-and the rest of that literal) are indexed directly, `state["phase"]`, never
-`state.get("phase")`. A missing base-schema field means the state file is
+that have been in a sprint's `state` dict since it was first created
+(`id`, `title`, `phase`, `qa1_audit_result`, `groundtruth_result`,
+`audit_rounds`, `live_test_rounds`, `started`, `completed`, `history`) are
+indexed directly, `state["phase"]`, never `state.get("phase")`. **This is
+not the same list as `cmd_start`'s dict literal** — that literal seeds a
+brand-new sprint with the *full current* schema, so it also initializes
+every post-hoc field (`qa1_audit_file_hash`, `qa1_audited_tree_hash`,
+`last_shipped_commit`), which must stay `.get()`-only everywhere else in
+the file for the sprints that predate them; don't take "it's in
+`cmd_start`'s literal" as license to index a field directly. A missing
+base-schema field means the state file is
 corrupt, and that must fail loudly with a `KeyError` rather than silently
 evaluating to `None` and letting a malformed state limp through the state
 machine. Fields added to the schema *after* sprints already existed are
