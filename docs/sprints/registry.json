@@ -22,8 +22,8 @@
     "4": {
       "title": "Scrub the shipped client name and define Pipeman's publish step",
       "epic": "Framework rules and distribution",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-4_scrub-the-shipped-client-name-and-define-pipeman-s-publish-step.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-4_scrub-the-shipped-client-name-and-define-pipeman-s-publish-step.md"
     }
   }
 }

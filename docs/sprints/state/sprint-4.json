@@ -1,0 +1,22 @@
+{
+  "id": 4,
+  "title": "Scrub the shipped client name and define Pipeman's publish step",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-08-29T18:51:47+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-08-29T18:51:47+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ]
+}
