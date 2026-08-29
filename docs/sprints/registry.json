@@ -1,5 +1,5 @@
 {
-  "next_id": 4,
+  "next_id": 5,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -16,8 +16,14 @@
     "3": {
       "title": "Ship 0.1.3 with the evidence bar and transition rule",
       "epic": "Framework rules and distribution",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-3_ship-0-1-3-with-the-evidence-bar-and-transition-rule.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-3_ship-0-1-3-with-the-evidence-bar-and-transition-rule--done.md"
+    },
+    "4": {
+      "title": "Scrub the shipped client name and define Pipeman's publish step",
+      "epic": "Framework rules and distribution",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-4_scrub-the-shipped-client-name-and-define-pipeman-s-publish-step.md"
     }
   }
 }

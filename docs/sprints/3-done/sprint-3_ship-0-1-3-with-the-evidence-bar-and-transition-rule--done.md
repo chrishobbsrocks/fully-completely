@@ -2,7 +2,7 @@
 id: 3
 title: "Ship 0.1.3 with the evidence bar and transition rule"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-08-28T19:24:33+00:00
 ---
 
