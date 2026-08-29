@@ -64,10 +64,11 @@ function sessionId(roleId, repoRoot, generation) {
 // directories while building this — first against a plain path (only
 // slashes), which is what an earlier version of this function assumed and
 // QA1 correctly failed: a real repo path containing a space or a dot
-// (`~/Programming/Licenseprofessor Edits and fixes`, seven such
-// directories on this machine alone) encodes those characters too, not
-// just separators. Re-verified against a path containing a space, two
-// consecutive spaces, a dot, parentheses, and single/double underscores —
+// (e.g. `~/Projects/Example Corp. (Staging)  Notes`, which happens to
+// cover parentheses and two consecutive spaces too) encodes those
+// characters just the same, not just separators. Re-verified against a
+// path containing a space, two consecutive spaces, a dot, parentheses,
+// and single/double underscores —
 // each individual non-alnum character maps to its own '-', confirming
 // "any non-alnum -> '-'" rather than "separators only" or "collapse runs
 // of specials into one dash". Applying the same uniform rule to a

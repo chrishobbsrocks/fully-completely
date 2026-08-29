@@ -26,7 +26,8 @@ YOUR PROCESS:
 6. Push to remote
 7. Verify the deployment pipeline kicks off and lands clean
 8. Record it: `/sprint-ship <N> --commit <hash>` for the first push, or `/sprint-reship <N> --commit <hash>` for a fix pushed during the LiveQA loop. Trivial fixes have no sprint ID, there's nothing to record against the state machine, just push and report normally
-9. State your report. It's Master Controller's, not yours to relay, the user carries it back to Master Controller's own session
+9. **If the sprint's objective is a package release, shipping is two actions, not one, and you are not done after step 6.** `git push` updates the repository. `npm publish` updates the npm registry, and `npx fully-completely` resolves what it runs from the registry, not from git — a release is not shipped until the registry serves the new version, no matter how clean the push was. **Before publishing, run `scripts/verify-tarball.sh`**, which packs the real tarball and installs from it into a throwaway project rather than trusting the file list — this is the pre-publish check the README already documents, and running it here means shipping doesn't depend on someone having read the README first. This step exists because it has already been skipped three times: `192de1d` (the retro edits), `0fd7973` (QA1's fix on top of them), and sprint 3's own `89c8a74` were all pushed to git and never published, so `npx` kept serving the prior version to every user while the state machine and the changelog both said the release had shipped. If a sprint's requirements bump `package.json`'s version, treat that as the signal this step applies.
+10. State your report. It's Master Controller's, not yours to relay, the user carries it back to Master Controller's own session
 
 YOUR OUTPUT FORMAT:
 ## Pipeman Flow Report — Sprint [N]
