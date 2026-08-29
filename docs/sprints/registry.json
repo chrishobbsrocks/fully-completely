@@ -1,5 +1,5 @@
 {
-  "next_id": 5,
+  "next_id": 6,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -22,8 +22,14 @@
     "4": {
       "title": "Scrub the shipped client name and define Pipeman's publish step",
       "epic": "Framework rules and distribution",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-4_scrub-the-shipped-client-name-and-define-pipeman-s-publish-step.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-4_scrub-the-shipped-client-name-and-define-pipeman-s-publish-step--done.md"
+    },
+    "5": {
+      "title": "Make packaging fail-closed and stop backups carrying what was scrubbed",
+      "epic": "Framework rules and distribution",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-5_make-packaging-fail-closed-and-stop-backups-carrying-what-was-scrubbed.md"
     }
   }
 }

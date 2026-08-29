@@ -2,7 +2,7 @@
 id: 4
 title: "Scrub the shipped client name and define Pipeman's publish step"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-08-28T19:24:33+00:00
 ---
 
