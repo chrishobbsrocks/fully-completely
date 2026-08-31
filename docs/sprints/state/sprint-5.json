@@ -1,0 +1,28 @@
+{
+  "id": 5,
+  "title": "Make packaging fail-closed and stop backups carrying what was scrubbed",
+  "phase": "aborted",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-08-31T21:03:29+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-08-31T21:03:29+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    },
+    {
+      "ts": "2026-08-31T21:09:39+00:00",
+      "actor": "human",
+      "event": "aborted",
+      "detail": "Shelved by Master Controller before any work began. Preventive value only; the taxonomy problem is worth more. The files allowlist, the *.fc-bak-* ignore rule and the stale-backup report stay real \u2014 pick them up after sprint 6, which makes more backups by design."
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "next_id": 6,
+  "next_id": 8,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -28,8 +28,20 @@
     "5": {
       "title": "Make packaging fail-closed and stop backups carrying what was scrubbed",
       "epic": "Framework rules and distribution",
+      "status": "abandoned",
+      "file": "docs/sprints/5-abandoned/sprint-5_make-packaging-fail-closed-and-stop-backups-carrying-what-was-scrubbed.md"
+    },
+    "6": {
+      "title": "Upgrade untouched user-owned files instead of never upgrading them",
+      "epic": "Framework rules and distribution",
       "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-5_make-packaging-fail-closed-and-stop-backups-carrying-what-was-scrubbed.md"
+      "file": "docs/sprints/1-todo/sprint-6_upgrade-untouched-user-owned-files-instead-of-never-upgrading-them.md"
+    },
+    "7": {
+      "title": "Say which tree, and let QA1 record an audit during the live loop",
+      "epic": "Honest reporting",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-7_say-which-tree-and-let-qa1-record-an-audit-during-the-live-loop.md"
     }
   }
 }
