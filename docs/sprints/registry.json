@@ -34,8 +34,8 @@
     "6": {
       "title": "Upgrade untouched user-owned files instead of never upgrading them",
       "epic": "Framework rules and distribution",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-6_upgrade-untouched-user-owned-files-instead-of-never-upgrading-them.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-6_upgrade-untouched-user-owned-files-instead-of-never-upgrading-them--done.md"
     },
     "7": {
       "title": "Say which tree, and let QA1 record an audit during the live loop",

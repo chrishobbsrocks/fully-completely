@@ -2,7 +2,7 @@
 id: 6
 title: "Upgrade untouched user-owned files instead of never upgrading them"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-08-29T00:00:00+00:00
 ---
 
