@@ -16,7 +16,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const assert = require('assert');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 let failures = 0;
@@ -401,11 +401,22 @@ function runInstall(cwd) {
   try {
     return execFileSync('node', [path.join(REPO_ROOT, 'scripts', 'install.js')], { cwd, encoding: 'utf8' });
   } catch (err) {
-    // install.js exits 1 when it reports conflicts — still valid output
-    // to inspect, not a test-harness failure.
+    // Sprint 8, Req 5: a normal run reporting conflicts exits 0 now (see
+    // the exit-code tests below), so this catch exists only for a
+    // genuine failure — still worth surfacing stdout if there is any,
+    // rather than losing it, but this is no longer the routine path it
+    // was under sprint 3-7's exitCode=1 behaviour.
     if (typeof err.stdout === 'string') return err.stdout;
     throw err;
   }
+}
+
+// Sprint 8, Req 5/8: runs install.js the same way runInstall() does, but
+// returns the process's exit status instead of throwing away everything
+// but stdout — spawnSync (not execFileSync) so a non-zero status is data,
+// not a thrown exception, whether it's 0, 1, or anything else.
+function runInstallStatus(cwd) {
+  return spawnSync('node', [path.join(REPO_ROOT, 'scripts', 'install.js')], { cwd, encoding: 'utf8' }).status;
 }
 
 // Sprint 6: mirrors install.js's own hashFile() (sha256 of CRLF-normalised
@@ -428,6 +439,45 @@ function writeManifest(dir, manifest) {
 
 function readManifest(dir) {
   return JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'fully-completely-manifest.json'), 'utf8'));
+}
+
+// Sprint 8: unlike the manifest above (which lives under a throwaway
+// DEST_ROOT fixture this file fully controls), the baseline table lives
+// under SOURCE_ROOT — this repo's own committed data, read from wherever
+// install.js's own scripts/baselines/ directory actually is. There is no
+// per-run fixture to point it at, so testing its failure modes (missing,
+// corrupt) or giving a test deterministic, non-network baseline data
+// means temporarily replacing this repo's real file and restoring it
+// afterwards, in `finally`, no matter what `fn` does — the same
+// always-clean-up discipline withFixture() uses for its temp directories,
+// applied to a file this repo actually ships instead of a scratch one.
+// `rawContentOrNull === null` means "delete it" (a missing table), a
+// string means "replace its contents" (corrupt JSON, or fabricated valid
+// JSON for a deterministic test that doesn't depend on the real,
+// regeneratable table's current contents).
+const REAL_BASELINES_PATH = path.join(REPO_ROOT, 'scripts', 'baselines', 'user-owned-content.json');
+
+function withReplacedBaselines(rawContentOrNull, fn) {
+  const original = fs.readFileSync(REAL_BASELINES_PATH, 'utf8');
+  if (rawContentOrNull === null) {
+    fs.rmSync(REAL_BASELINES_PATH);
+  } else {
+    fs.writeFileSync(REAL_BASELINES_PATH, rawContentOrNull);
+  }
+  try {
+    fn();
+  } finally {
+    fs.writeFileSync(REAL_BASELINES_PATH, original);
+  }
+}
+
+function fakeBaselines(filesByVersion) {
+  return JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    versions: Object.keys(filesByVersion),
+    paths: [QA1_REL_PATH],
+    files: { [QA1_REL_PATH]: filesByVersion },
+  });
 }
 
 test('install.js: fresh project gets the framework and an 8-task tasks.json', () => {
@@ -846,9 +896,13 @@ test('install.js: a user-owned file whose content no longer matches its manifest
     const output = runInstall(dir);
 
     assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
-    // QA1 round 1: the file genuinely differs from upstream here, so the
-    // message must say so and point at how to see the diff.
-    assert.match(output, /Upstream has updated \.claude\/agents\/qa1\.md since the version you have/);
+    // QA1 round 1 (sprint 6): the file genuinely differs from what's on
+    // disk. Sprint 8: qa1.md's shipped content really has changed at some
+    // point relative to 0.1.6 (no baseline data exists for 0.1.6 itself,
+    // so this falls to the "changed anywhere in known history" fallback,
+    // which is true here) — so the message must say so and point at how
+    // to see the diff.
+    assert.match(output, /shipped content has changed since it was first published/);
     assert.match(output, /npx fully-completely/);
     assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), customized, 'a customised file must never be overwritten');
     assert.ok(!fs.existsSync(`${qa1Path}.fc-bak-${REAL_CURRENT_VERSION}`), 'nothing was overwritten, so nothing should be backed up');
@@ -861,53 +915,60 @@ test('install.js: a user-owned file whose content no longer matches its manifest
   });
 });
 
-test('install.js: no manifest file at all means a user-owned file is never overwritten, even if its content matches upstream exactly', () => {
-  // Req 3's sharpest case: every install from before this sprint looks
-  // exactly like this — a version marker, real user-owned files, no
-  // manifest. Content matching upstream by coincidence must not be
-  // mistaken for positive proof.
+test('install.js: a file matching a published baseline, with no manifest at all, is upgraded and recorded — the epic goal (Req 1/3)', () => {
+  // The exact real-world shape sprint 8 exists to fix: a version marker,
+  // real user-owned files, no manifest — every install from before
+  // sprint 6 shipped. Sprint 6/QA1's own repro (a real 0.1.4 -> 0.1.5
+  // upgrade) found this conflicted on all seven tracked files forever,
+  // because a manifest was the ONLY proof source and none of those
+  // installs could ever have one. This repo's real, committed baseline
+  // table (scripts/baselines/user-owned-content.json, generated from the
+  // real published tarballs) is Req 1's second source of proof: qa1.md's
+  // content here is exactly what 0.1.0-0.1.5 actually shipped, so it must
+  // now be recognised and brought current, not conflicted.
   withFixture((dir) => {
-    writeVersionMarker(dir, '0.1.0');
+    writeVersionMarker(dir, '0.1.4');
     const qa1Path = path.join(dir, QA1_REL_PATH);
     fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
     fs.writeFileSync(qa1Path, REAL_QA1_MD);
 
     const output = runInstall(dir);
 
-    assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
-    // QA1 round 1's finding: this is the exact real-world case (a real
-    // 0.1.4 -> 0.1.5 upgrade, no manifest, untouched file) where the old
-    // single-message version falsely claimed upstream had changed the
-    // file. It hasn't — content is byte-identical — so the message must
-    // say that instead, not send the user off to diff nothing.
-    assert.doesNotMatch(
-      output,
-      /Upstream has updated \.claude\/agents\/qa1\.md/,
-      'must not claim upstream changed a file that is byte-identical to what upstream ships now'
-    );
-    assert.match(output, /already byte-identical to what upstream ships now/);
+    assert.doesNotMatch(output, /Conflicts/, 'a baseline-proven file must not conflict');
+    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/qa1\.md/);
     assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
     const manifest = readManifest(dir);
-    assert.ok(
-      !Object.prototype.hasOwnProperty.call(manifest, QA1_REL_PATH),
-      'a path with no prior manifest entry gets none added just for being seen — the conflict must be resolved by hand first'
+    assert.strictEqual(
+      manifest[QA1_REL_PATH],
+      fcHash(REAL_QA1_MD),
+      'a baseline-proven file must be recorded in the manifest as it is upgraded (Req 3), so the next run no longer needs the baseline sweep at all'
     );
   });
 });
+
+// Sprint 8: all three tests below use genuinely customised content —
+// never published in any release — rather than REAL_QA1_MD, deliberately.
+// A manifest failure alone no longer guarantees a conflict now that
+// baselines are a second proof source (Req 1's own "when a file has no
+// manifest entry" fallback); these tests exist to isolate the MANIFEST's
+// own failure modes, so they need content that can't be proven by the
+// baseline table either, or they'd just be re-testing the baseline-match
+// path above under a different name.
+const CUSTOMIZED_QA1_MD = '---\nname: qa1\n---\nMy customised QA1 persona, never published anywhere.\n';
 
 test('install.js: a manifest that is not valid JSON resolves every user-owned file to no-overwrite, not a crash', () => {
   withFixture((dir) => {
     writeVersionMarker(dir, '0.1.0');
     const qa1Path = path.join(dir, QA1_REL_PATH);
     fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
-    fs.writeFileSync(qa1Path, REAL_QA1_MD);
+    fs.writeFileSync(qa1Path, CUSTOMIZED_QA1_MD);
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.claude', 'fully-completely-manifest.json'), '{ this is not valid JSON');
 
     const output = runInstall(dir);
 
     assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
-    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), CUSTOMIZED_QA1_MD);
   });
 });
 
@@ -916,13 +977,13 @@ test('install.js: a manifest entry that is not a well-formed hash resolves that 
     writeVersionMarker(dir, '0.1.0');
     const qa1Path = path.join(dir, QA1_REL_PATH);
     fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
-    fs.writeFileSync(qa1Path, REAL_QA1_MD);
+    fs.writeFileSync(qa1Path, CUSTOMIZED_QA1_MD);
     writeManifest(dir, { [QA1_REL_PATH]: 'not-a-real-hash' });
 
     const output = runInstall(dir);
 
     assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
-    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), CUSTOMIZED_QA1_MD);
   });
 });
 
@@ -931,7 +992,7 @@ test('install.js: a valid manifest with no entry for a given user-owned file res
     writeVersionMarker(dir, '0.1.0');
     const qa1Path = path.join(dir, QA1_REL_PATH);
     fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
-    fs.writeFileSync(qa1Path, REAL_QA1_MD);
+    fs.writeFileSync(qa1Path, CUSTOMIZED_QA1_MD);
     // A real, well-formed manifest — just with no key at all for this
     // particular path.
     writeManifest(dir, { 'CLAUDE.md': fcHash('unrelated') });
@@ -939,8 +1000,126 @@ test('install.js: a valid manifest with no entry for a given user-owned file res
     const output = runInstall(dir);
 
     assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
-    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), CUSTOMIZED_QA1_MD);
   });
+});
+
+// -------------------------------------------------------------------------
+// install.js: sprint 8's published-baseline mechanism (Req 1/2/3), the
+// two-condition conflict message (Req 4), and the exit-code contract
+// (Req 5). The corrupt/missing-table and message-selection tests below
+// use withReplacedBaselines() with fabricated data specifically so they
+// stay hermetic and deterministic — no network access, and no dependency
+// on this repo's own real publication history never changing shape.
+// -------------------------------------------------------------------------
+test('install.js: a missing baseline table resolves to no-overwrite, same as a missing manifest (Req 1)', () => {
+  withReplacedBaselines(null, () => {
+    withFixture((dir) => {
+      writeVersionMarker(dir, '0.1.0');
+      const qa1Path = path.join(dir, QA1_REL_PATH);
+      fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+      fs.writeFileSync(qa1Path, REAL_QA1_MD); // would match, if the table existed at all
+
+      const output = runInstall(dir);
+
+      assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+      assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
+    });
+  });
+});
+
+test('install.js: a corrupt (unparseable) baseline table resolves to no-overwrite, not a crash (Req 1)', () => {
+  withReplacedBaselines('{ this is not valid JSON', () => {
+    withFixture((dir) => {
+      writeVersionMarker(dir, '0.1.0');
+      const qa1Path = path.join(dir, QA1_REL_PATH);
+      fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+      fs.writeFileSync(qa1Path, REAL_QA1_MD);
+
+      const output = runInstall(dir);
+
+      assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+      assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
+    });
+  });
+});
+
+test('install.js: a file matching an OLDER published baseline (not the newest) is upgraded and backed up (Req 1)', () => {
+  const oldContent = '---\nname: qa1\n---\nA fabricated older published version, standing in for real history.\n';
+  withReplacedBaselines(fakeBaselines({ '0.0.9': fcHash(oldContent) }), () => {
+    withFixture((dir) => {
+      writeVersionMarker(dir, '0.0.9');
+      const qa1Path = path.join(dir, QA1_REL_PATH);
+      fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+      fs.writeFileSync(qa1Path, oldContent);
+
+      const output = runInstall(dir);
+
+      assert.match(output, /Replaced[\s\S]*\.claude\/agents\/qa1\.md/);
+      assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD, 'must be brought up to the real current version');
+      assert.ok(fs.existsSync(`${qa1Path}.fc-bak-0.0.9`), 'the old, baseline-proven version should be backed up first');
+      const manifest = readManifest(dir);
+      assert.strictEqual(manifest[QA1_REL_PATH], fcHash(REAL_QA1_MD));
+    });
+  });
+});
+
+test('install.js: local edits with no upstream change since the install say "no update pending", not "upstream changed" (Req 4)', () => {
+  // hasUpstreamChangedSinceInstall() compares the installed version's
+  // baseline hash against the REAL current source content (SOURCE_ROOT is
+  // this actual repo, not something a test can fake) — so "unchanged
+  // since install" has to mean the baseline entry at `installedVersion`
+  // genuinely matches REAL_QA1_MD, not an arbitrary fabricated string.
+  withReplacedBaselines(fakeBaselines({ '0.1.0': fcHash(REAL_QA1_MD), '0.1.1': fcHash(REAL_QA1_MD) }), () => {
+    withFixture((dir) => {
+      writeVersionMarker(dir, '0.1.1');
+      const qa1Path = path.join(dir, QA1_REL_PATH);
+      fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+      fs.writeFileSync(qa1Path, CUSTOMIZED_QA1_MD);
+
+      const output = runInstall(dir);
+
+      assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+      assert.doesNotMatch(output, /shipped content has changed since it was first published/);
+      assert.match(output, /no upstream update pending for this file/);
+    });
+  });
+});
+
+test('install.js: local edits with a real upstream change since the install say so, and how to see it (Req 4)', () => {
+  const oldShipped = 'a fabricated OLD shipped version, deliberately different from what is installed now\n';
+  withReplacedBaselines(fakeBaselines({ '0.1.0': fcHash(oldShipped) }), () => {
+    withFixture((dir) => {
+      writeVersionMarker(dir, '0.1.0');
+      const qa1Path = path.join(dir, QA1_REL_PATH);
+      fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+      fs.writeFileSync(qa1Path, CUSTOMIZED_QA1_MD);
+
+      const output = runInstall(dir);
+
+      assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+      assert.match(output, /shipped content has changed since it was first published/);
+      assert.match(output, /npx fully-completely/);
+    });
+  });
+});
+
+test('install.js: a successful upgrade exits 0 even when it reports conflicts (Req 5)', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const qa1Path = path.join(dir, QA1_REL_PATH);
+    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+    fs.writeFileSync(qa1Path, CUSTOMIZED_QA1_MD); // matches no manifest and no baseline -> a real, guaranteed conflict
+
+    const status = runInstallStatus(dir);
+
+    assert.strictEqual(status, 0, 'a run that safely declines to overwrite something is a successful run, not a failed one');
+  });
+});
+
+test('install.js: running against the source repo itself is a genuine failure and still exits non-zero (Req 5)', () => {
+  const status = runInstallStatus(REPO_ROOT);
+  assert.notStrictEqual(status, 0, 'the wrong-directory guard is a real error and must still signal one');
 });
 
 if (failures > 0) {

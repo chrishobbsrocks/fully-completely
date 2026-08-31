@@ -78,6 +78,17 @@ done < <(find "$UNPACKED/docs/sprints" -type f \( -name '*.json' -o -name '*.md'
 [ "$LEAK_FOUND" -eq 0 ] || fail "this repo's own sprint content is present in the tarball — check .npmignore"
 echo "  clean — only .gitkeep placeholders present"
 
+echo "== confirming scripts/baselines/user-owned-content.json shipped (sprint 8) =="
+BASELINES_IN_TARBALL="$UNPACKED/scripts/baselines/user-owned-content.json"
+[ -f "$BASELINES_IN_TARBALL" ] || fail "scripts/baselines/user-owned-content.json is missing from the tarball — excluded here, the baseline mechanism ships and silently does nothing"
+BASELINE_PATH_COUNT="$(node -e "
+  const data = require('$BASELINES_IN_TARBALL');
+  const paths = data && data.files && typeof data.files === 'object' ? Object.keys(data.files) : [];
+  if (paths.length === 0) { console.error(0); process.exit(1); }
+  console.log(paths.length);
+")" || fail "scripts/baselines/user-owned-content.json in the tarball is not well-formed or has no path entries"
+echo "  present, $BASELINE_PATH_COUNT path(s) covered"
+
 echo
 echo "TARBALL VERIFICATION PASSED"
 echo "  tarball:  $TARBALL_PATH"
