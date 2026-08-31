@@ -846,6 +846,10 @@ test('install.js: a user-owned file whose content no longer matches its manifest
     const output = runInstall(dir);
 
     assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+    // QA1 round 1: the file genuinely differs from upstream here, so the
+    // message must say so and point at how to see the diff.
+    assert.match(output, /Upstream has updated \.claude\/agents\/qa1\.md since the version you have/);
+    assert.match(output, /npx fully-completely/);
     assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), customized, 'a customised file must never be overwritten');
     assert.ok(!fs.existsSync(`${qa1Path}.fc-bak-${REAL_CURRENT_VERSION}`), 'nothing was overwritten, so nothing should be backed up');
     const manifest = readManifest(dir);
@@ -871,6 +875,17 @@ test('install.js: no manifest file at all means a user-owned file is never overw
     const output = runInstall(dir);
 
     assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+    // QA1 round 1's finding: this is the exact real-world case (a real
+    // 0.1.4 -> 0.1.5 upgrade, no manifest, untouched file) where the old
+    // single-message version falsely claimed upstream had changed the
+    // file. It hasn't — content is byte-identical — so the message must
+    // say that instead, not send the user off to diff nothing.
+    assert.doesNotMatch(
+      output,
+      /Upstream has updated \.claude\/agents\/qa1\.md/,
+      'must not claim upstream changed a file that is byte-identical to what upstream ships now'
+    );
+    assert.match(output, /already byte-identical to what upstream ships now/);
     assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
     const manifest = readManifest(dir);
     assert.ok(

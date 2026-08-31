@@ -359,21 +359,37 @@ function copyUserOwnedFile(relPath) {
 
 // Req 4: unlike copyUserOwnedFile's generic conflict line above (still
 // used for docs/sprints, Req 6, where there is no manifest and never will
-// be), this file is under the manifest mechanism, so "upstream changed"
-// is a claim we can actually back up rather than boilerplate — and the
-// external team's whole failure (sprint 6's Context) was not knowing a
-// rule existed, not knowing how to look. `npx fully-completely` into an
-// empty directory is the one way to get a fresh copy that works
-// regardless of how this project got installed (npx, a cloned repo, a git
-// submodule), so it's what's pointed at here rather than guessing at a
-// source path on this machine.
-function trackedConflictMessage(relPath) {
+// be), this file is under the manifest mechanism — but "upstream has
+// updated this file" is only a claim the no-manifest/mismatched-hash
+// branch can back up when it's actually true. QA1 round 1 caught that the
+// single-message version said it unconditionally: on a real 0.1.4 ->
+// 0.1.5 upgrade with no manifest at all, every untouched agent file lands
+// on this same branch, and five of seven were byte-identical to upstream
+// — "upstream has updated this" was simply false for those five. `matches`
+// (sameContent(src, dest), already computed by the caller) is what makes
+// the message honest either way: if the file actually differs, point at
+// how to see that; if it doesn't, say so and stop there, since there is
+// nothing to reconcile. `npx fully-completely` into an empty directory is
+// the one way to get a fresh copy that works regardless of how this
+// project got installed (npx, a cloned repo, a git submodule), so it's
+// what's pointed at here rather than guessing at a source path on this
+// machine.
+function trackedConflictMessage(relPath, matches) {
+  const reason =
+    "this doesn't match what this installer last wrote here, so this upgrade left it untouched to " +
+    'protect anything you may have customised.';
+  if (matches) {
+    return (
+      `${relPath} (yours — ${reason} Nothing to reconcile, though: this file is already byte-identical ` +
+      "to what upstream ships now, so there's no diff to look at. It's flagged only because nothing " +
+      "confirms you never touched it — no action needed if that's expected.)"
+    );
+  }
   return (
-    `${relPath} (yours — this doesn't match what this installer last wrote here, so this upgrade left ` +
-    'it untouched to protect anything you may have customised. Upstream has updated ' +
-    `${relPath} since the version you have; to see exactly what's different, run ` +
-    "`npx fully-completely` again inside an empty scratch directory to get a fresh copy of the " +
-    'current upstream version, then diff it against your own file and merge anything you want by hand.)'
+    `${relPath} (yours — ${reason} Upstream has updated ${relPath} since the version you have; to see ` +
+    "exactly what's different, run `npx fully-completely` again inside an empty scratch directory to " +
+    'get a fresh copy of the current upstream version, then diff it against your own file and merge ' +
+    'anything you want by hand.)'
   );
 }
 
@@ -410,7 +426,7 @@ function syncTrackedUserOwnedFile(relPath, oldManifest, newManifest) {
   const currentHash = hashFile(dest);
 
   if (recordedHash === null || recordedHash !== currentHash) {
-    conflicts.push(trackedConflictMessage(relPath));
+    conflicts.push(trackedConflictMessage(relPath, sameContent(src, dest)));
     if (recordedHash !== null) newManifest[relPath] = recordedHash;
     return;
   }
