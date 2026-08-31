@@ -1,0 +1,22 @@
+{
+  "id": 8,
+  "title": "Make the manifest reach installs that predate it, and stop the installer asserting what it cannot know",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-08-31T22:14:26+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-08-31T22:14:26+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ]
+}
