@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const assert = require('assert');
 const { execFileSync } = require('child_process');
 
@@ -407,6 +408,28 @@ function runInstall(cwd) {
   }
 }
 
+// Sprint 6: mirrors install.js's own hashFile() (sha256 of CRLF-normalised
+// content) exactly, so these tests can construct a manifest that install.js
+// will actually recognize as a match — re-deriving the algorithm here
+// rather than requiring install.js's internals keeps this file testing
+// behavior through the same CLI boundary every other test in this section
+// uses.
+function fcHash(content) {
+  return crypto.createHash('sha256').update(content.replace(/\r\n/g, '\n')).digest('hex');
+}
+
+function writeManifest(dir, manifest) {
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '.claude', 'fully-completely-manifest.json'),
+    JSON.stringify(manifest, null, 2) + '\n'
+  );
+}
+
+function readManifest(dir) {
+  return JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'fully-completely-manifest.json'), 'utf8'));
+}
+
 test('install.js: fresh project gets the framework and an 8-task tasks.json', () => {
   withFixture((dir) => {
     const output = runInstall(dir);
@@ -448,10 +471,18 @@ test('install.js: a colliding task label is reported and nothing is written', ()
   });
 });
 
-test('install.js: a CRLF-converted framework file is recognized as unchanged', () => {
+test('install.js: a CRLF-converted user-owned file the manifest confirms is unchanged is recognized as such', () => {
+  // Sprint 6: CLAUDE.md is now manifest-governed, so "unchanged" requires
+  // a manifest entry as positive proof (Req 3) — a manifest-less dest with
+  // merely CRLF-equivalent content is exactly the "no entry" case Req 3
+  // says must default to conflict, covered separately below. This test
+  // is what the pre-sprint-6 version of it covered: CRLF alone must not
+  // be mistaken for a real edit once there IS a manifest to check against.
   withFixture((dir) => {
-    const crlf = fs.readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf8').replace(/\r?\n/g, '\r\n');
+    const original = fs.readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf8');
+    const crlf = original.replace(/\r?\n/g, '\r\n');
     fs.writeFileSync(path.join(dir, 'CLAUDE.md'), crlf);
+    writeManifest(dir, { 'CLAUDE.md': fcHash(original) });
     const output = runInstall(dir);
     assert.match(output, /Already present, unchanged[\s\S]*CLAUDE\.md/);
   });
@@ -734,6 +765,166 @@ test('install.js: removing a dead gitignore line preserves the file\'s original 
     assert.ok(!finalRaw.split(/\r?\n/).includes('.claude-launcher/'), 'the dead line must still be removed');
     assert.ok(finalRaw.includes('\r\n'), 'the file\'s original CRLF line endings must be preserved, not silently converted to LF');
     assert.ok(!/(?<!\r)\n/.test(finalRaw), 'no bare LF (not preceded by \\r) should have been introduced by the rewrite');
+  });
+});
+
+// -------------------------------------------------------------------------
+// install.js: sprint 6's manifest mechanism. `.claude/agents/*` and
+// CLAUDE.md are upgraded exactly when the manifest proves the installed
+// copy was never touched (Req 1/2); everything else — no manifest file,
+// no entry for this path, unparseable JSON, a malformed entry value, or a
+// hash that plain doesn't match — must resolve to "never overwrite" (Req
+// 3, the load-bearing requirement). Each of those five ways to land on
+// the safe branch gets its own test below, named to match QA1's own
+// acceptance-criteria wording so the audit can check this list directly
+// rather than re-deriving it.
+// -------------------------------------------------------------------------
+const QA1_REL_PATH = path.join('.claude', 'agents', 'qa1.md');
+
+test('install.js: a fresh install writes a manifest recording every tracked user-owned file it wrote', () => {
+  withFixture((dir) => {
+    runInstall(dir);
+    const manifest = readManifest(dir);
+    assert.strictEqual(manifest['CLAUDE.md'], fcHash(fs.readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf8')));
+    assert.strictEqual(manifest[QA1_REL_PATH], fcHash(REAL_QA1_MD));
+    assert.ok(
+      !Object.keys(manifest).some((k) => k.startsWith('docs/sprints')),
+      'docs/sprints is excluded from the mechanism (Req 6) and must never appear in the manifest'
+    );
+  });
+});
+
+test('install.js: a user-owned file the manifest confirms is untouched is upgraded on the next release, backed up first', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const qa1Path = path.join(dir, QA1_REL_PATH);
+    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+    const oldContent = '---\nname: qa1\n---\nAn old shipped version, standing in for an untouched prior release.\n';
+    fs.writeFileSync(qa1Path, oldContent);
+    writeManifest(dir, { [QA1_REL_PATH]: fcHash(oldContent) });
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Replaced[\s\S]*\.claude\/agents\/qa1\.md/);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD, 'must be brought up to the real current version');
+    const backupPath = `${qa1Path}.fc-bak-0.1.0`;
+    assert.ok(fs.existsSync(backupPath), 'the untouched previous version should be backed up before overwriting');
+    assert.strictEqual(fs.readFileSync(backupPath, 'utf8'), oldContent);
+    const manifest = readManifest(dir);
+    assert.strictEqual(manifest[QA1_REL_PATH], fcHash(REAL_QA1_MD), 'the manifest must record the newly-written content');
+  });
+});
+
+test('install.js: CLAUDE.md goes through the identical manifest mechanism as agent files (Req 5)', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const oldContent = 'Standing in for CLAUDE.md as this installer last wrote it, untouched since.\n';
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), oldContent);
+    writeManifest(dir, { 'CLAUDE.md': fcHash(oldContent) });
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Replaced[\s\S]*CLAUDE\.md/);
+    const realClaudeMd = fs.readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf8');
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8'), realClaudeMd);
+    assert.ok(fs.existsSync(path.join(dir, 'CLAUDE.md.fc-bak-0.1.0')));
+  });
+});
+
+test('install.js: a user-owned file whose content no longer matches its manifest entry is preserved and reported, not overwritten', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, REAL_CURRENT_VERSION);
+    const qa1Path = path.join(dir, QA1_REL_PATH);
+    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+    const customized = '---\nname: qa1\n---\nMy customised QA1 persona, do not overwrite.\n';
+    fs.writeFileSync(qa1Path, customized);
+    // Records what this installer actually wrote at some earlier point —
+    // deliberately NOT what's on disk now, simulating a real hand-edit
+    // made after that write.
+    writeManifest(dir, { [QA1_REL_PATH]: fcHash(REAL_QA1_MD) });
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), customized, 'a customised file must never be overwritten');
+    assert.ok(!fs.existsSync(`${qa1Path}.fc-bak-${REAL_CURRENT_VERSION}`), 'nothing was overwritten, so nothing should be backed up');
+    const manifest = readManifest(dir);
+    assert.strictEqual(
+      manifest[QA1_REL_PATH],
+      fcHash(REAL_QA1_MD),
+      "a conflicted path's manifest entry is carried forward unchanged, never updated to the customised content"
+    );
+  });
+});
+
+test('install.js: no manifest file at all means a user-owned file is never overwritten, even if its content matches upstream exactly', () => {
+  // Req 3's sharpest case: every install from before this sprint looks
+  // exactly like this — a version marker, real user-owned files, no
+  // manifest. Content matching upstream by coincidence must not be
+  // mistaken for positive proof.
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const qa1Path = path.join(dir, QA1_REL_PATH);
+    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+    fs.writeFileSync(qa1Path, REAL_QA1_MD);
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
+    const manifest = readManifest(dir);
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(manifest, QA1_REL_PATH),
+      'a path with no prior manifest entry gets none added just for being seen — the conflict must be resolved by hand first'
+    );
+  });
+});
+
+test('install.js: a manifest that is not valid JSON resolves every user-owned file to no-overwrite, not a crash', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const qa1Path = path.join(dir, QA1_REL_PATH);
+    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+    fs.writeFileSync(qa1Path, REAL_QA1_MD);
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude', 'fully-completely-manifest.json'), '{ this is not valid JSON');
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
+  });
+});
+
+test('install.js: a manifest entry that is not a well-formed hash resolves that file to no-overwrite', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const qa1Path = path.join(dir, QA1_REL_PATH);
+    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+    fs.writeFileSync(qa1Path, REAL_QA1_MD);
+    writeManifest(dir, { [QA1_REL_PATH]: 'not-a-real-hash' });
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
+  });
+});
+
+test('install.js: a valid manifest with no entry for a given user-owned file resolves that file to no-overwrite', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const qa1Path = path.join(dir, QA1_REL_PATH);
+    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+    fs.writeFileSync(qa1Path, REAL_QA1_MD);
+    // A real, well-formed manifest — just with no key at all for this
+    // particular path.
+    writeManifest(dir, { 'CLAUDE.md': fcHash('unrelated') });
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
   });
 });
 

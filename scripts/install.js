@@ -22,9 +22,8 @@
 //     way to clean it up.
 //   USER_OWNED — designed to be customised (agent personas, this repo's
 //     own CLAUDE.md inviting you to extend its "Project standards"
-//     section). An upgrade NEVER overwrites these; a differing file is
-//     reported as a conflict, same as before, just louder about whose
-//     file it is (Req 3).
+//     section). A differing file is reported as a conflict, same as
+//     before, just louder about whose file it is (Req 3).
 //   MERGED — .vscode/settings.json, .vscode/tasks.json, .gitignore. Real
 //     merge logic, unchanged by this sprint except for one narrow
 //     addition (removing a specific dead .gitignore line, Req 4).
@@ -35,8 +34,19 @@
 // .claude/ (not .claude/agents or .claude/commands, so it never collides
 // with either taxonomy) and is never sprint state, so it doesn't live
 // under docs/sprints/.
+//
+// Sprint 6 changes what "USER_OWNED ... never overwrites" means, for
+// `.claude/agents/` and `CLAUDE.md` only (not `docs/sprints`, Req 6): a
+// manifest alongside the version marker records the hash of every such
+// file *as this installer wrote it*, so an upgrade can tell "shipped
+// content nobody touched" from "the user customised this" and only
+// overwrite the former — see readManifest()/writeManifest() and
+// syncTrackedUserOwnedFile() below. Before this, every rule this
+// framework ships into an agent file or CLAUDE.md reached fresh installs
+// only, forever, because nothing recorded what had been written.
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { hasComments, parseJsonc } = require('./launcher/jsonc');
 
 const SOURCE_ROOT = path.resolve(__dirname, '..');
@@ -121,6 +131,13 @@ function isBackupPath(relPath) {
 const VERSION_MARKER_PATH = path.join(DEST_ROOT, '.claude', 'fully-completely-version');
 const CURRENT_VERSION = require(path.join(SOURCE_ROOT, 'package.json')).version;
 
+// Sprint 6, Req 1: the manifest lives beside the version marker — a
+// framework-owned location, not sprint state, same reasoning as
+// VERSION_MARKER_PATH above. One JSON object, relPath -> sha256 hex (of
+// CRLF-normalised content, see hashFile() below) of what this installer
+// last wrote there.
+const MANIFEST_PATH = path.join(DEST_ROOT, '.claude', 'fully-completely-manifest.json');
+
 const copied = [];
 const skipped = [];
 const conflicts = [];
@@ -181,6 +198,58 @@ function readInstalledVersion() {
 function writeInstalledVersion(version) {
   fs.mkdirSync(path.dirname(VERSION_MARKER_PATH), { recursive: true });
   fs.writeFileSync(VERSION_MARKER_PATH, `${version}\n`);
+}
+
+// Sprint 6, Req 1/3. Hashes normalised content (CRLF collapsed to LF),
+// matching sameContent() below, rather than raw bytes — an editor's
+// line-ending setting or git's autocrlf shouldn't manufacture a false
+// "customised" conflict on every Windows install, and this codebase
+// already treats CRLF/LF as the same content everywhere else it compares
+// files (sameContent(), removeDeadGitignoreLines()'s own CRLF
+// preservation). Req 3's safety property is about requiring positive
+// proof of a match before overwriting, not about matching at the
+// individual-byte level: a real content edit changes this hash exactly as
+// surely as it would a raw-byte one, and only a real content edit does.
+function hashFile(absPath) {
+  return crypto.createHash('sha256').update(normalizeLineEndings(fs.readFileSync(absPath))).digest('hex');
+}
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+// Req 3, the load-bearing function: every way this can fail — no manifest
+// file, a manifest that isn't valid JSON, JSON that isn't a plain object,
+// or a value for this specific path that isn't a well-formed sha256 hex
+// string — returns null. Every caller below treats null as "no positive
+// proof", which is what puts a file on the never-overwrite branch. There
+// is no code path here that can throw past this and no code path that
+// returns a value for a path it isn't confident about.
+function readManifest() {
+  let raw;
+  try {
+    raw = fs.readFileSync(MANIFEST_PATH, 'utf8');
+  } catch {
+    return {};
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  return parsed;
+}
+
+function manifestHashFor(manifest, relPath) {
+  const value = manifest[relPath];
+  return typeof value === 'string' && SHA256_HEX.test(value) ? value : null;
+}
+
+function writeManifest(manifest) {
+  fs.mkdirSync(path.dirname(MANIFEST_PATH), { recursive: true });
+  const sorted = {};
+  for (const key of Object.keys(manifest).sort()) sorted[key] = manifest[key];
+  fs.writeFileSync(MANIFEST_PATH, JSON.stringify(sorted, null, 2) + '\n');
 }
 
 const installedVersion = readInstalledVersion();
@@ -286,6 +355,76 @@ function copyUserOwnedFile(relPath) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(src, dest);
   copied.push(relPath);
+}
+
+// Req 4: unlike copyUserOwnedFile's generic conflict line above (still
+// used for docs/sprints, Req 6, where there is no manifest and never will
+// be), this file is under the manifest mechanism, so "upstream changed"
+// is a claim we can actually back up rather than boilerplate — and the
+// external team's whole failure (sprint 6's Context) was not knowing a
+// rule existed, not knowing how to look. `npx fully-completely` into an
+// empty directory is the one way to get a fresh copy that works
+// regardless of how this project got installed (npx, a cloned repo, a git
+// submodule), so it's what's pointed at here rather than guessing at a
+// source path on this machine.
+function trackedConflictMessage(relPath) {
+  return (
+    `${relPath} (yours — this doesn't match what this installer last wrote here, so this upgrade left ` +
+    'it untouched to protect anything you may have customised. Upstream has updated ' +
+    `${relPath} since the version you have; to see exactly what's different, run ` +
+    "`npx fully-completely` again inside an empty scratch directory to get a fresh copy of the " +
+    'current upstream version, then diff it against your own file and merge anything you want by hand.)'
+  );
+}
+
+// Req 1-3, Req 5: the manifest-governed replacement for copyUserOwnedFile,
+// used for `.claude/agents/*` and `CLAUDE.md` (both walk through the same
+// USER_OWNED loop below, so both get this uniformly, per Req 5).
+//   - Missing at DEST_ROOT -> fresh copy, exactly like a first install
+//     always has; record its hash.
+//   - Present, and manifestHashFor() returns null (no manifest, unreadable
+//     manifest, no entry for this path, or a malformed one) -> Req 3's
+//     safe branch: conflict, untouched, and the old manifest entry (if
+//     any survived being read) is carried forward unchanged rather than
+//     guessed at.
+//   - Present, and the recorded hash doesn't match the file's current
+//     (CRLF-normalised) hash -> genuinely customised since our last write
+//     -> same safe branch as above.
+//   - Present, and the recorded hash matches -> positive proof nobody
+//     touched it -> safe to bring current, same as FRAMEWORK_OWNED:
+//     skip (record hash again) if upstream's own content hasn't changed
+//     either, otherwise back up and overwrite, then record the new hash.
+function syncTrackedUserOwnedFile(relPath, oldManifest, newManifest) {
+  const src = path.join(SOURCE_ROOT, relPath);
+  const dest = path.join(DEST_ROOT, relPath);
+
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    copied.push(relPath);
+    newManifest[relPath] = hashFile(dest);
+    return;
+  }
+
+  const recordedHash = manifestHashFor(oldManifest, relPath);
+  const currentHash = hashFile(dest);
+
+  if (recordedHash === null || recordedHash !== currentHash) {
+    conflicts.push(trackedConflictMessage(relPath));
+    if (recordedHash !== null) newManifest[relPath] = recordedHash;
+    return;
+  }
+
+  if (sameContent(src, dest)) {
+    skipped.push(relPath);
+    newManifest[relPath] = currentHash;
+    return;
+  }
+  const backup = backupPathFor(dest);
+  fs.copyFileSync(dest, backup);
+  fs.copyFileSync(src, dest);
+  replaced.push(`${relPath} (upgraded, previous version backed up to ${path.relative(DEST_ROOT, backup)})`);
+  newManifest[relPath] = hashFile(dest);
 }
 
 // Parses a target's existing JSONC file, or reports why it can't be
@@ -453,22 +592,33 @@ for (const p of FRAMEWORK_OWNED) {
   syncFrameworkPath(p);
 }
 
+// Req 1: the manifest as it was before this run wrote anything, so
+// "unchanged since our last write" means exactly that; newManifest is
+// what gets written at the end, built up entry-by-entry as
+// syncTrackedUserOwnedFile() below decides each path.
+const oldManifest = readManifest();
+const newManifest = {};
+
 for (const p of USER_OWNED) {
   if (p === 'docs/sprints') {
     // Special-cased, not walked: see SPRINT_SKELETON_FILES above. Only
     // the empty phase-folder skeleton is ever sourced from this repo,
-    // never its real sprint content.
+    // never its real sprint content. Req 6: excluded from the manifest
+    // mechanism entirely — plain copyUserOwnedFile(), unchanged.
     for (const relPath of SPRINT_SKELETON_FILES) {
       if (fs.existsSync(path.join(SOURCE_ROOT, relPath))) copyUserOwnedFile(relPath);
     }
     continue;
   }
+  // Req 5: `.claude/agents` (a directory) and `CLAUDE.md` (a single file)
+  // both land here and both go through syncTrackedUserOwnedFile()
+  // identically — nothing below branches on which one it is.
   const abs = path.join(SOURCE_ROOT, p);
   if (!fs.existsSync(abs)) continue;
   if (fs.statSync(abs).isDirectory()) {
-    for (const relPath of collectPaths(SOURCE_ROOT, p)) copyUserOwnedFile(relPath);
+    for (const relPath of collectPaths(SOURCE_ROOT, p)) syncTrackedUserOwnedFile(relPath, oldManifest, newManifest);
   } else {
-    copyUserOwnedFile(p);
+    syncTrackedUserOwnedFile(p, oldManifest, newManifest);
   }
 }
 
@@ -477,6 +627,7 @@ mergeTasks();
 mergeGitignore();
 
 writeInstalledVersion(CURRENT_VERSION);
+writeManifest(newManifest);
 
 function section(title, items) {
   if (items.length === 0) return;
