@@ -835,13 +835,16 @@ console.log(
 // itself failing to do its job; a non-zero exit is reserved for an actual
 // error — the "run this from inside the target project, not from this
 // repo" guard near the top of this file (still a hard `process.exit(1)`)
-// and an uncaught exception are the only ways to reach one. Checked this
-// repo and its docs for anything that branches on install.js's exit code
-// (README, package.json scripts, CI config, the test harness in
-// launcher_test.js) — nothing does; the test harness's own runInstall()
-// helper already treats a conflicts-only run as ordinary output to
-// inspect, not a harness failure, so nothing here relied on the old
-// non-zero behaviour either.
+// and an uncaught exception are the only ways to reach one. One real call
+// site branches on this exit code — scripts/verify-tarball.sh:47's `(cd
+// "$TARGET" && node "$UNPACKED/scripts/install.js") || fail ...` — and it
+// is unaffected and actually improved by this change: that target is
+// always a fresh empty directory, so it never produced a conflict to
+// begin with, and the new contract makes a genuine install.js failure
+// (what that check exists to catch) distinguishable from a routine
+// conflict in a way the old blanket exitCode=1 never was; README,
+// package.json, and launcher_test.js's own runInstall() helper don't
+// branch on the exit code at all.
 if (conflicts.length > 0) {
   console.log(
     `\n${conflicts.length} file(s) already exist here with different content and were not overwritten. ` +
