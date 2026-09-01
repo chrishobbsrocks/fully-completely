@@ -445,7 +445,25 @@ function copyUserOwnedFile(relPath) {
 // copy that works regardless of how this project got installed (npx, a
 // cloned repo, a git submodule), so that's what's pointed at rather than
 // guessing at a source path on this machine.
-function trackedConflictMessage(relPath, upstreamChanged) {
+//
+// `preciseToInstalledVersion` (sprint 9, QA1's round-1 CONDITIONAL on
+// sprint 9 itself): whether "since the version you have" is a claim this
+// run can actually back up. Sprint 9's Req 5 tightened the true-branch
+// wording to that phrase on the assumption hasUpstreamChangedSinceInstall
+// always establishes it — but that function's own fallback path (no
+// baseline data for the exact installed version) only establishes the
+// weaker "changed somewhere in the versions we do have data for", not
+// "since the version you have" specifically. QA1 caught this live: the
+// baseline table lagged three published releases behind at the time, so
+// EVERY 0.1.6/0.1.7/0.1.8 install hit the fallback, and a user on any of
+// those who'd edited a file that genuinely never changed (liveqa.md,
+// constant since 0.1.3) was told upstream had updated it — false, and not
+// a rare case, the common one at the time. Regenerating the baseline
+// table fixes today's installs; this is what keeps the message honest
+// even when that table goes stale again next release, since the true
+// branch below only claims what's actually known instead of assuming
+// the precise case.
+function trackedConflictMessage(relPath, upstreamChanged, preciseToInstalledVersion) {
   const reason =
     "this doesn't match what this installer last wrote here, so this upgrade left it untouched to " +
     'protect anything you may have customised.';
@@ -456,17 +474,15 @@ function trackedConflictMessage(relPath, upstreamChanged) {
       'changed. Nothing to reconcile; no action needed unless you want one.)'
     );
   }
-  // Sprint 9, Req 5: "since the version you have", not the weaker "since
-  // it was first published" this used to say — the condition above
-  // already establishes the stronger claim (hasUpstreamChangedSinceInstall
-  // is install-version-bounded, see its own comment), the message just
-  // wasn't saying so. QA1 flagged this in sprint 8 as not worth its own
-  // commit; this is that commit, wording only.
+  const since = preciseToInstalledVersion
+    ? 'since the version you have'
+    : "at some point since it was first published — this installer doesn't have exact data for the " +
+      "version you're on to say precisely when";
   return (
-    `${relPath} (yours — ${reason} This file's shipped content has changed since the version you ` +
-    "have; to see exactly what's different in the current release, run `npx fully-completely` " +
-    'again inside an empty scratch directory to get a fresh copy, then diff it against your own file ' +
-    'and merge anything you want by hand.)'
+    `${relPath} (yours — ${reason} This file's shipped content has changed ${since}; to see exactly ` +
+    "what's different in the current release, run `npx fully-completely` again inside an empty " +
+    'scratch directory to get a fresh copy, then diff it against your own file and merge anything ' +
+    'you want by hand.)'
   );
 }
 
@@ -504,6 +520,20 @@ function hasUpstreamChangedSinceInstall(relPath, baselines) {
   const hashes = new Set(baselineHashesFor(baselines, relPath));
   hashes.add(currentSourceHash);
   return hashes.size > 1;
+}
+
+// Sprint 9 (round 2): read-only, message-wording-only — never consulted
+// by hasUpstreamChangedSinceInstall() above or by Req 1/3's overwrite
+// gate, only by trackedConflictMessage() to decide whether "since the
+// version you have" is a claim it can actually make. True exactly when
+// installedVersion is known AND the baseline table has a real entry for
+// that exact version; this is deliberately the same condition that puts
+// hasUpstreamChangedSinceInstall() on its precise path rather than its
+// fallback one, kept as its own function so a caller that only needs the
+// wording question doesn't have to re-derive it from that function's
+// internals.
+function installedVersionHasBaselineData(relPath, baselines) {
+  return installedVersion !== null && baselineHashForVersion(baselines, relPath, installedVersion) !== null;
 }
 
 // Sprint 6 Req 1-3/5, sprint 8 Req 1-4: the proof-governed replacement for
@@ -544,7 +574,8 @@ function syncTrackedUserOwnedFile(relPath, oldManifest, newManifest, baselines) 
 
   if (!proven) {
     const upstreamChanged = !sameContent(src, dest) && hasUpstreamChangedSinceInstall(relPath, baselines);
-    conflicts.push(trackedConflictMessage(relPath, upstreamChanged));
+    const preciseToInstalledVersion = installedVersionHasBaselineData(relPath, baselines);
+    conflicts.push(trackedConflictMessage(relPath, upstreamChanged, preciseToInstalledVersion));
     if (recordedHash !== null) newManifest[relPath] = recordedHash;
     return;
   }

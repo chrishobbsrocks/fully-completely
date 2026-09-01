@@ -890,7 +890,14 @@ test('install.js: CLAUDE.md goes through the identical manifest mechanism as age
 
 test('install.js: a user-owned file whose content no longer matches its manifest entry is preserved and reported, not overwritten', () => {
   withFixture((dir) => {
-    writeVersionMarker(dir, REAL_CURRENT_VERSION);
+    // Anchored to 0.1.2 (predates sprint 3's addition to qa1.md), not the
+    // live current version — sprint 9 round 2: with the baseline table
+    // regenerated and current, an installedVersion of "whatever's current
+    // right now" would correctly find qa1.md unchanged since itself,
+    // which is the *other* branch. 0.1.2 guarantees a real, known
+    // difference exists between it and current, so this test still
+    // exercises the "genuinely differs" branch it's named for.
+    writeVersionMarker(dir, '0.1.2');
     const qa1Path = path.join(dir, QA1_REL_PATH);
     fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
     const customized = '---\nname: qa1\n---\nMy customised QA1 persona, do not overwrite.\n';
@@ -903,16 +910,14 @@ test('install.js: a user-owned file whose content no longer matches its manifest
     const output = runInstall(dir);
 
     assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
-    // QA1 round 1 (sprint 6): the file genuinely differs from what's on
-    // disk. Sprint 8: qa1.md's shipped content really has changed at some
-    // point relative to 0.1.6 (no baseline data exists for 0.1.6 itself,
-    // so this falls to the "changed anywhere in known history" fallback,
-    // which is true here) — so the message must say so and point at how
-    // to see the diff.
+    // qa1.md's shipped content really has changed since 0.1.2 (sprint 3
+    // added to it in 0.1.3, sprint 9 edited it again) — the baseline
+    // table has a real entry for 0.1.2, so this is the precise branch,
+    // not the fallback, and the message should say so plainly.
     assert.match(output, /shipped content has changed since the version you have/);
     assert.match(output, /npx fully-completely/);
     assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), customized, 'a customised file must never be overwritten');
-    assert.ok(!fs.existsSync(`${qa1Path}.fc-bak-${REAL_CURRENT_VERSION}`), 'nothing was overwritten, so nothing should be backed up');
+    assert.ok(!fs.existsSync(`${qa1Path}.fc-bak-0.1.2`), 'nothing was overwritten, so nothing should be backed up');
     const manifest = readManifest(dir);
     assert.strictEqual(
       manifest[QA1_REL_PATH],
@@ -1109,6 +1114,39 @@ test('install.js: local edits with a real upstream change since the install say 
 
       assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
       assert.match(output, /shipped content has changed since the version you have/);
+      assert.match(output, /npx fully-completely/);
+    });
+  });
+});
+
+test('install.js: no baseline data for the installed version means the message can\'t claim "since the version you have" (Req 4/5, sprint 9 round 2)', () => {
+  // QA1's exact round-1 finding on sprint 9 itself: the baseline table
+  // lagged three published releases behind, so every 0.1.6/0.1.7/0.1.8
+  // install hit hasUpstreamChangedSinceInstall()'s fallback path (true,
+  // because content changed somewhere in older history) while the
+  // message still claimed the precise "since the version you have" — a
+  // claim that branch never actually established. Reproduced here with
+  // fabricated data: installedVersion '0.1.9' has no baseline entry at
+  // all, so the fallback fires; content genuinely differs across what
+  // baseline data does exist, so upstreamChanged is correctly true; the
+  // message must hedge rather than claim precision it doesn't have.
+  const oldShipped = 'a fabricated OLD shipped version, deliberately different from what is installed now\n';
+  withReplacedBaselines(fakeBaselines({ '0.1.0': fcHash(oldShipped) }), () => {
+    withFixture((dir) => {
+      writeVersionMarker(dir, '0.1.9'); // not in the fabricated table at all
+      const qa1Path = path.join(dir, QA1_REL_PATH);
+      fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+      fs.writeFileSync(qa1Path, CUSTOMIZED_QA1_MD);
+
+      const output = runInstall(dir);
+
+      assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+      assert.doesNotMatch(
+        output,
+        /shipped content has changed since the version you have/,
+        'must not claim precision the fallback branch never established'
+      );
+      assert.match(output, /doesn't have exact data for the version you're on/);
       assert.match(output, /npx fully-completely/);
     });
   });
