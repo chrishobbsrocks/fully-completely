@@ -2,7 +2,7 @@
 id: 9
 title: "Check the claim before reporting it, and make the record match by construction"
 epic: "Honest reporting"
-status: in_progress
+status: done
 created: 2026-09-01T05:42:40+00:00
 ---
 
