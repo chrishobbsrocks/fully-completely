@@ -1,5 +1,5 @@
 {
-  "next_id": 9,
+  "next_id": 10,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -48,6 +48,12 @@
       "epic": "Framework rules and distribution",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-8_make-the-manifest-reach-installs-that-predate-it-and-stop-the-installer-asserting-what-it-cannot-know--done.md"
+    },
+    "9": {
+      "title": "Check the claim before reporting it, and make the record match by construction",
+      "epic": "Honest reporting",
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-9_check-the-claim-before-reporting-it-and-make-the-record-match-by-construction.md"
     }
   }
 }
