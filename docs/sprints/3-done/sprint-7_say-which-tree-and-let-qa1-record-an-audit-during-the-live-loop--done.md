@@ -2,7 +2,7 @@
 id: 7
 title: "Say which tree, and let QA1 record an audit during the live loop"
 epic: "Honest reporting"
-status: in_progress
+status: done
 created: 2026-08-31T21:05:01+00:00
 ---
 
