@@ -40,8 +40,8 @@
     "7": {
       "title": "Say which tree, and let QA1 record an audit during the live loop",
       "epic": "Honest reporting",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-7_say-which-tree-and-let-qa1-record-an-audit-during-the-live-loop.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-7_say-which-tree-and-let-qa1-record-an-audit-during-the-live-loop.md"
     },
     "8": {
       "title": "Make the manifest reach installs that predate it, and stop the installer asserting what it cannot know",
