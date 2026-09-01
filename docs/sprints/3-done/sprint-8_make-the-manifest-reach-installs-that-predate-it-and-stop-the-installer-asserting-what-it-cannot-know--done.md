@@ -2,7 +2,7 @@
 id: 8
 title: "Make the manifest reach installs that predate it, and stop the installer asserting what it cannot know"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-08-31T22:13:46+00:00
 ---
 
