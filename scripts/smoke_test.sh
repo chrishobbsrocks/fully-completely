@@ -55,7 +55,31 @@ echo "== gates: zero completed sprints prints a clean no-data message, not zeroe
 $SCRIPT gates > /tmp/gates_out.txt 2>&1 || fail "gates exited non-zero with no sprint data"
 grep -q "Nothing to aggregate" /tmp/gates_out.txt || fail "gates zero-data message missing"
 grep -qE "Traceback" /tmp/gates_out.txt && fail "gates raised a traceback on zero completed sprints"
+# Sprint 7, Req 6: "there is nothing here" is the exact sentence that
+# produced every one of the wrong readings this sprint exists to fix —
+# this is the only point in this script where zero sprints exist at all,
+# so it's the only place cmd_status/cmd_list/cmd_gates's "no data yet"
+# branches (as opposed to load_state's "no state file for sprint N",
+# checked separately below once sprints exist) can be exercised.
+grep -qF "fully-completely-smoke" /tmp/gates_out.txt || fail "gates' no-data message doesn't name the tree it looked in"
+grep -q "branch:" /tmp/gates_out.txt || fail "gates' no-data message doesn't name the branch"
 rm -f /tmp/gates_out.txt
+
+echo "== status/list: zero sprints also names the tree (sprint 7, Req 6) =="
+$SCRIPT status > /tmp/out.txt 2>&1 || fail "status with no id and no sprints exited non-zero"
+grep -q "No sprints yet in" /tmp/out.txt || fail "status's no-sprints message doesn't name the tree"
+grep -qF "fully-completely-smoke" /tmp/out.txt || fail "status's no-sprints message doesn't actually name this sandbox"
+
+$SCRIPT list > /tmp/out.txt 2>&1 || fail "list with no sprints exited non-zero"
+grep -q "No sprints yet in" /tmp/out.txt || fail "list's no-sprints message doesn't name the tree"
+grep -qF "fully-completely-smoke" /tmp/out.txt || fail "list's no-sprints message doesn't actually name this sandbox"
+rm -f /tmp/out.txt
+
+echo "== tree-naming degrades gracefully when git itself is unavailable, never crashing a read-only command (Req 7) =="
+PY3_DIR="$(dirname "$(command -v python3)")"
+NOGIT_PATH_OUT=$(PATH="$PY3_DIR" $SCRIPT status 2>&1) || fail "status crashed when git was unavailable on PATH"
+echo "$NOGIT_PATH_OUT" | grep -qE "Traceback" && fail "status raised a traceback when git was unavailable on PATH"
+echo "$NOGIT_PATH_OUT" | grep -q "branch unknown" || fail "status should degrade to 'branch unknown' when git can't be found, not omit the tree entirely or crash"
 
 # Captures the numeric sprint id `new` just created from its own stdout,
 # rather than assuming IDs increment one-per-test. Some tests below create a
@@ -138,6 +162,11 @@ grep -q "title cannot be empty" /tmp/out.txt || fail "empty-title error message 
 
 $SCRIPT status 999 > /tmp/out.txt 2>&1 && fail "nonexistent sprint returned success" || true
 grep -q "No state file for sprint 999" /tmp/out.txt || fail "nonexistent-sprint error message missing"
+# Sprint 7, Req 6: load_state's absence message must name which tree it
+# looked in — this is the exact sentence a wrong-checkout status read
+# produced four confidently-wrong answers against before this sprint.
+grep -qF "fully-completely-smoke" /tmp/out.txt || fail "load_state's absence message doesn't name the tree it looked in"
+grep -q "branch:" /tmp/out.txt || fail "load_state's absence message doesn't name the branch"
 
 echo "== injection regression: malicious text via --title-file must be inert =="
 rm -f /tmp/PWNED
@@ -554,6 +583,167 @@ grep -q "deprecated alias" /tmp/out.txt && fail "the canonical 'liveqa' subcomma
 grep -q "LiveQA live test PASSED" /tmp/out.txt || fail "the new 'liveqa' subcommand didn't actually record the verdict"
 $SCRIPT status "$SPRINT_NEW_NAME_OLD_PHASE" 2>/dev/null | grep -q "Phase: complete_ready" || \
   fail "sprint stuck on the legacy phase string never reached complete_ready via the new subcommand"
+rm -f /tmp/out.txt
+
+# ---------------------------------------------------------------------------
+# Sprint 7: the live-loop audit (Req 1/2/3/9) and the git-repository-cause
+# distinction (Req 12). All added at the end of the file, deliberately —
+# every earlier "gates" check above counts completed sprints by a hardcoded
+# number, and every sprint this section completes happens after the last
+# of those checks, so it can't perturb them.
+# ---------------------------------------------------------------------------
+echo "== live-loop audit: records without touching any gate-read field, verified by a full state diff (Req 1) =="
+SPRINT_LL=$(new_sprint "Live loop audit sprint")
+$SCRIPT start "$SPRINT_LL" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_LL work"
+$SCRIPT qa1 "$SPRINT_LL" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_LL" > /dev/null
+LL_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_LL" --commit "$LL_COMMIT" > /dev/null
+$SCRIPT liveqa "$SPRINT_LL" --deployed-commit "$LL_COMMIT" --verdict FAIL --notes "needs a live-loop audit" > /dev/null
+
+# Now genuinely sitting at liveqa_live with a gate-1 PASS and both hashes
+# populated — QA1's own verification method for Req 1: seed exactly this
+# shape, diff the WHOLE state file before and after, don't just read the
+# code (reading the diff is explicitly not sufficient per the sprint file).
+LL_STATE="docs/sprints/state/sprint-${SPRINT_LL}.json"
+cp "$LL_STATE" /tmp/ll_before.json
+
+LL_OUT=$($SCRIPT qa1 "$SPRINT_LL" --verdict PASS --notes "live-loop audit" --commit "$LL_COMMIT" 2>&1)
+echo "$LL_OUT" | grep -q "RECORD, not a" || fail "live-loop audit output should say plainly that this is a record, not a gate verdict"
+echo "$LL_OUT" | grep -q "does not change the sprint's phase" || fail "live-loop audit output should say plainly it doesn't move the sprint"
+
+python3 -c "
+import json
+before = json.load(open('/tmp/ll_before.json'))
+after = json.load(open('$LL_STATE'))
+protected = ['phase', 'qa1_audit_result', 'audit_rounds', 'qa1_audit_file_hash', 'qa1_audited_tree_hash']
+for field in protected:
+    if before[field] != after[field]:
+        raise SystemExit(f'protected field {field} changed: {before[field]!r} -> {after[field]!r}')
+before_no_history = {k: v for k, v in before.items() if k != 'history'}
+after_no_history = {k: v for k, v in after.items() if k != 'history'}
+if before_no_history != after_no_history:
+    raise SystemExit(f'a field outside the five named ones changed too: before={before_no_history} after={after_no_history}')
+if len(after['history']) != len(before['history']) + 1:
+    raise SystemExit(f'expected exactly one new history event, before={len(before[\"history\"])} after={len(after[\"history\"])}')
+new_event = after['history'][-1]
+if new_event['event'] == 'audit':
+    raise SystemExit('live-loop audit must use a name distinct from gate 1\'s \"audit\", or cmd_gates would count it')
+if '$LL_COMMIT' not in new_event['detail']:
+    raise SystemExit('the resolved --commit should appear in the live-loop audit event detail')
+" || fail "live-loop audit state diff check failed — see message above"
+rm -f /tmp/ll_before.json
+
+echo "== live-loop audit: all three verdicts record; none of them change phase or move the sprint (Req 3) =="
+for V in PASS CONDITIONAL FAIL; do
+  BEFORE_PHASE=$(python3 -c "import json; print(json.load(open('$LL_STATE'))['phase'])")
+  $SCRIPT qa1 "$SPRINT_LL" --verdict "$V" --notes "live-loop $V" > /tmp/out.txt 2>&1 || fail "live-loop qa1 with verdict $V should succeed"
+  AFTER_PHASE=$(python3 -c "import json; print(json.load(open('$LL_STATE'))['phase'])")
+  [ "$BEFORE_PHASE" = "$AFTER_PHASE" ] || fail "live-loop $V verdict changed phase from $BEFORE_PHASE to $AFTER_PHASE"
+  [ "$AFTER_PHASE" = "liveqa_live" ] || fail "sprint $SPRINT_LL should still be in liveqa_live after a live-loop $V"
+done
+rm -f /tmp/out.txt
+
+echo "== live-loop audit: an unresolvable --commit is refused, and nothing is written on refusal (Req 2) =="
+cp "$LL_STATE" /tmp/ll_before2.json
+$SCRIPT qa1 "$SPRINT_LL" --verdict PASS --notes "bad commit" --commit not-a-real-commit > /tmp/out.txt 2>&1 && fail "live-loop audit accepted an unresolvable --commit" || true
+grep -q "does not resolve to a real commit" /tmp/out.txt || fail "live-loop audit's bad-commit refusal message missing"
+diff -q /tmp/ll_before2.json "$LL_STATE" > /dev/null || fail "a refused live-loop --commit must not write anything to the state file"
+rm -f /tmp/out.txt /tmp/ll_before2.json
+
+echo "== live-loop audit: omitting --commit keeps working exactly as before (Req 2, additive-only argument) =="
+$SCRIPT qa1 "$SPRINT_LL" --verdict PASS --notes "no commit given" > /tmp/out.txt 2>&1 || fail "live-loop audit without --commit should still succeed"
+grep -q "RECORD, not a" /tmp/out.txt || fail "live-loop audit without --commit should still print the record-not-a-gate message"
+rm -f /tmp/out.txt
+
+echo "== qa1: a sprint in a phase neither set applies to still refuses, naming both valid phase sets (Req 4) =="
+$SCRIPT qa1 "$SPRINT_1" --verdict PASS --notes "trying to audit an already-closed sprint" > /tmp/out.txt 2>&1 && \
+  fail "qa1 succeeded against sprint $SPRINT_1, already in complete phase" || true
+grep -q "dev_build" /tmp/out.txt || fail "qa1's refusal for an inapplicable phase should still name the gate-1 phase set"
+grep -qi "live" /tmp/out.txt || fail "qa1's refusal for an inapplicable phase should also mention the live-loop phase set, now that two paths exist"
+rm -f /tmp/out.txt
+
+echo "== gates: a live-loop audit is never counted as a gate catch, even on a completed sprint (Req 9) =="
+GATES_BEFORE_LL=$($SCRIPT gates)
+git commit -q --allow-empty -m "fix for sprint $SPRINT_LL after the live loop"
+LL_FIX_COMMIT=$(git rev-parse HEAD)
+$SCRIPT reship "$SPRINT_LL" --commit "$LL_FIX_COMMIT" > /dev/null
+$SCRIPT liveqa "$SPRINT_LL" --deployed-commit "$LL_FIX_COMMIT" --verdict PASS --notes ok > /dev/null
+$SCRIPT complete "$SPRINT_LL" --user-said "close it, the live-loop audits above are just records" > /dev/null
+GATES_AFTER_LL=$($SCRIPT gates)
+echo "$GATES_AFTER_LL" | grep "^   QA1:" > /tmp/qa1_line.txt
+grep -qE "\b${SPRINT_LL}\b" /tmp/qa1_line.txt && \
+  fail "gates counted sprint $SPRINT_LL under QA1's catch rate — its only real gate-1 'audit' event was a single PASS; the live-loop PASS/CONDITIONAL/FAIL entries above must not count"
+rm -f /tmp/qa1_line.txt
+
+echo "== Req 12: a PASS with no git repository present says so, and ship blames the missing repo, not a missing QA1 pass =="
+NOGIT_SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/fully-completely-smoke-nogit.XXXXXX")"
+mkdir -p "$NOGIT_SANDBOX/scripts" "$NOGIT_SANDBOX/templates"
+cp "$REPO_ROOT/scripts/sprint_lifecycle.py" "$NOGIT_SANDBOX/scripts/sprint_lifecycle.py"
+if [ -f "$REPO_ROOT/templates/sprint-template.md" ]; then
+  cp "$REPO_ROOT/templates/sprint-template.md" "$NOGIT_SANDBOX/templates/sprint-template.md"
+fi
+NOGIT_SCRIPT="python3 $NOGIT_SANDBOX/scripts/sprint_lifecycle.py"
+# Deliberately no `git init` here — this directory is not a git repository
+# at all, the exact scenario Req 12 exists for. ROOT resolves from where
+# the script FILE lives (Path(__file__).resolve().parent.parent), not cwd,
+# so running it from anywhere still points ROOT at $NOGIT_SANDBOX.
+
+NOGIT_ID=$($NOGIT_SCRIPT new "No repo sprint" | grep -oE 'Created sprint [0-9]+' | grep -oE '[0-9]+')
+$NOGIT_SCRIPT start "$NOGIT_ID" > /dev/null
+
+NOGIT_QA1_OUT=$($NOGIT_SCRIPT qa1 "$NOGIT_ID" --verdict PASS --notes ok 2>&1)
+echo "$NOGIT_QA1_OUT" | grep -q "QA1 audit PASSED" || fail "PASS itself should still succeed with no git repository present"
+echo "$NOGIT_QA1_OUT" | grep -q "not a git repository" || fail "PASS with no repository present should say so plainly, not record None in silence"
+$NOGIT_SCRIPT dev-done "$NOGIT_ID" > /dev/null || fail "dev-done should still succeed with no git repository present (it doesn't need one)"
+
+$NOGIT_SCRIPT ship "$NOGIT_ID" --commit deadbeef > /tmp/out.txt 2>&1 && fail "ship succeeded with no git repository present" || true
+grep -q "not a git repository" /tmp/out.txt || fail "ship's no-repo message should name the missing repository"
+grep -q "no QA1-audited commit on record" /tmp/out.txt && fail "ship should blame the missing repository, not a missing QA1 pass — QA1 DID pass"
+rm -f /tmp/out.txt
+
+echo "== Req 12: reship and liveqa give the same no-repository message, not the generic 'doesn't resolve' one =="
+NOGIT_ID2=$($NOGIT_SCRIPT new "No repo reship sprint" | grep -oE 'Created sprint [0-9]+' | grep -oE '[0-9]+')
+$NOGIT_SCRIPT start "$NOGIT_ID2" > /dev/null
+NOGIT_STATE2="$NOGIT_SANDBOX/docs/sprints/state/sprint-${NOGIT_ID2}.json"
+python3 -c "
+import json
+p = '$NOGIT_STATE2'
+s = json.load(open(p))
+s['phase'] = 'liveqa_live'
+json.dump(s, open(p, 'w'), indent=2)
+"
+$NOGIT_SCRIPT reship "$NOGIT_ID2" --commit deadbeef > /tmp/out.txt 2>&1 && fail "reship succeeded with no git repository present" || true
+grep -q "not a git repository" /tmp/out.txt || fail "reship's no-repo message should name the missing repository"
+rm -f /tmp/out.txt
+
+$NOGIT_SCRIPT liveqa "$NOGIT_ID2" --deployed-commit deadbeef --verdict PASS --notes ok > /tmp/out.txt 2>&1 && fail "liveqa succeeded with no git repository present" || true
+grep -q "not a git repository" /tmp/out.txt || fail "liveqa's no-repo message should name the missing repository"
+rm -f /tmp/out.txt
+rm -rf "$NOGIT_SANDBOX"
+
+echo "== Req 12: behaviour inside a real git repository is unchanged — the existing 'no QA1-audited commit' message still fires there =="
+SPRINT_REALREPO_NOQA1=$(new_sprint "Real repo no qa1 sprint")
+$SCRIPT start "$SPRINT_REALREPO_NOQA1" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_REALREPO_NOQA1 work"
+# Force phase to dev_agreed_done without a QA1 PASS ever landing on record,
+# same hand-edit technique as SPRINT_LEGACY above, to reach cmd_ship's "no
+# audited tree hash" branch inside a REAL repo, never touching the
+# no-repository path at all.
+REALREPO_NOQA1_STATE="docs/sprints/state/sprint-${SPRINT_REALREPO_NOQA1}.json"
+python3 -c "
+import json
+p = '$REALREPO_NOQA1_STATE'
+s = json.load(open(p))
+s['phase'] = 'dev_agreed_done'
+json.dump(s, open(p, 'w'), indent=2)
+"
+REALREPO_NOQA1_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_REALREPO_NOQA1" --commit "$REALREPO_NOQA1_COMMIT" > /tmp/out.txt 2>&1 && \
+  fail "ship succeeded with no QA1 audit ever recorded (test setup broken)" || true
+grep -q "no QA1-audited commit on record" /tmp/out.txt || fail "ship's real-repo, no-QA1-pass message regressed"
+grep -q "not a git repository" /tmp/out.txt && fail "ship should never claim no repository exists when it's running inside a real one"
 rm -f /tmp/out.txt
 
 echo "ALL SMOKE TESTS PASSED"

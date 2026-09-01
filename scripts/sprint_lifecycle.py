@@ -124,6 +124,14 @@ LIVEQA_PHASE = "liveqa_live"
 _LEGACY_LIVEQA_PHASE = "groundtruth_live"
 LIVEQA_PHASES = (LIVEQA_PHASE, _LEGACY_LIVEQA_PHASE)
 
+# Sprint 7, Req 1: deliberately not "audit" — cmd_gates' verdict-counting
+# functions (sprints_with_non_pass, the crossover section) filter history
+# events by exact name, so a live-loop audit recorded under this distinct
+# name is invisible to every gate-catch calculation by construction, not
+# because cmd_gates was taught to special-case it (Req 9: cmd_gates itself
+# is untouched by this sprint).
+LIVE_LOOP_AUDIT_EVENT = "live_loop_audit"
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -187,7 +195,8 @@ def state_path(sprint_id: int) -> Path:
 def load_state(sprint_id: int) -> dict:
     p = state_path(sprint_id)
     if not p.exists():
-        die(f"No state file for sprint {sprint_id}. Run /sprint-start {sprint_id} first.")
+        die(f"No state file for sprint {sprint_id} in {tree_description()}. "
+            f"Run /sprint-start {sprint_id} first.")
     return json.loads(p.read_text())
 
 
@@ -298,6 +307,58 @@ def git_commit_sha(ref: str) -> Optional[str]:
         return result.stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         return None
+
+
+def is_git_repository() -> bool:
+    """True only if ROOT is inside a real git working tree. Sprint 7, Req
+    12: git_tree_hash() and git_commit_sha() above both collapse two very
+    different causes into the same None — 'this isn't a git repository at
+    all' and 'a ref inside a real repository doesn't resolve' — and every
+    message downstream that reads one of those None results has to guess
+    which, then guesses wrong: a directory with no repository at all gets
+    told "run /sprint-qa1", which it already did, forever. This function
+    is what lets a caller ask the two questions separately. Same
+    subprocess-failure handling as git_tree_hash/git_commit_sha: no repo,
+    no git on PATH, or any other failure to run git at all means False,
+    never a raised exception."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+        return result.stdout.strip() == "true"
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return False
+
+
+def current_branch() -> Optional[str]:
+    """The branch this checkout is on, or None if that can't be
+    determined (detached HEAD, git missing from PATH, not a git
+    repository at all). Sprint 7, Req 7: this must never be the reason a
+    read-only command fails to answer at all, so every failure mode here
+    collapses to None exactly like git_tree_hash/git_commit_sha above,
+    and tree_description() below already treats a missing branch as
+    something to omit, not something to error on."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+        branch = result.stdout.strip()
+        return branch if branch and branch != "HEAD" else None
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+
+
+def tree_description() -> str:
+    """Sprint 7, Req 6: names which tree a command looked in and found
+    nothing, at the point it says so — not as more banner text at the top
+    of the output (main()'s wrong-script line already does that, Req 8,
+    and it printed correctly in every one of the four wrong readings that
+    motivated this). An agent reads the answer, not the header; this
+    puts the answer in the sentence that's actually read."""
+    branch = current_branch()
+    return f"{ROOT} (branch: {branch})" if branch else f"{ROOT} (branch unknown)"
 
 
 def file_hash(path: Path) -> Optional[str]:
@@ -437,7 +498,7 @@ def cmd_status(args) -> None:
     if args.id is None:
         reg = load_registry()
         if not reg["sprints"]:
-            print("No sprints yet. Use /sprint-new to create one.")
+            print(f"No sprints yet in {tree_description()}. Use /sprint-new to create one.")
             return
         for sid, entry in sorted(reg["sprints"].items(), key=lambda kv: int(kv[0])):
             print(f"Sprint {sid}: {entry['title']} — {entry['status']}")
@@ -467,16 +528,80 @@ def cmd_status(args) -> None:
             print(f"  [{h['ts']}] {h['actor']}: {h['event']} {h['detail']}")
 
 
+def _qa1_live_loop_audit(args, state) -> None:
+    """Sprint 7, Req 1: records an audit QA1 performed during the LiveQA
+    fix loop, without touching anything either gate reads.
+
+    This function must NEVER assign to state["phase"],
+    state["qa1_audit_result"], state["audit_rounds"],
+    state["qa1_audit_file_hash"], or state["qa1_audited_tree_hash"] — the
+    last two are exactly what cmd_ship compares a shipped commit's content
+    against, so writing them here with a value unrelated to what gate 1
+    actually audited would let a mismatched commit ship, which is worse
+    than the recording gap this closes. The append-only property is not a
+    convention this function happens to follow, it IS the safety
+    argument: log_event() below is the only mutation of `state` anywhere
+    in this function. There is no line here that could ever launder an
+    inconvenient gate-1 verdict, by construction, not by rule — there is
+    simply nothing else in this function that writes to `state` at all.
+
+    Called with the sprint's lock already held (cmd_qa1 acquires it
+    before dispatching here) and saves state itself, exactly like the
+    gate-1 branch does."""
+    verdict = args.verdict.upper()
+    if verdict not in VALID_VERDICTS:
+        die(f"Verdict must be one of {sorted(VALID_VERDICTS)}.")
+
+    notes = resolve_text(args.notes, args.notes_file)
+
+    # Req 2: optional, resolved with the same helper cmd_reship uses, and
+    # refused if given but unresolvable — an audit record naming a commit
+    # that doesn't exist is worse than one naming none at all. Omitting
+    # it entirely is unchanged from how this argument didn't exist before
+    # this sprint: this is purely additive.
+    detail = f"{verdict}: {notes}"
+    if args.commit:
+        resolved = git_commit_sha(args.commit)
+        if resolved is None:
+            die(f"'{args.commit}' does not resolve to a real commit in this repo. "
+                "--commit, if given, must be an actual commit hash — a live-loop audit "
+                "record naming a commit that doesn't exist is worse than one naming none.")
+        detail += f" | commit={resolved}"
+
+    log_event(state, "qa1", LIVE_LOOP_AUDIT_EVENT, detail)
+    save_state(args.id, state)
+    # Req 3: printed plainly as a record, not a verdict — a reader must
+    # not be able to mistake this for gate 1 passing or failing. Neither
+    # gate moves: phase stays exactly what it was above.
+    print(f"Sprint {args.id}: live-loop audit recorded ({verdict}). This is a RECORD, not a "
+          "gate verdict — it does not change the sprint's phase and does not substitute for "
+          "either gate. LiveQA's live-test retest remains what actually gates this code; "
+          "run /sprint-liveqa once Pipeman has reshipped.")
+
+
 def cmd_qa1(args) -> None:
     with locked(f"sprint-{args.id}"):
         state = load_state(args.id)
+
+        # Sprint 7, Req 1: a distinct branch for a sprint currently in the
+        # LiveQA fix loop — QA1 can now record an audit performed during
+        # that loop, but it can never reach the gate-1 logic below, and
+        # the gate-1 logic below can never run for a sprint in this phase
+        # either. See _qa1_live_loop_audit()'s own docstring for the
+        # safety argument.
+        if state["phase"] in LIVEQA_PHASES:
+            _qa1_live_loop_audit(args, state)
+            return
+
         # dev_agreed_done is included so a sprint can get a fresh audit
         # after dev-done already succeeded once, this is the recovery path
         # ship's tree-hash check sends people to when a new, unaudited
         # commit lands after dev-done. Without it that check's own error
         # message ("run /sprint-qa1 again") would be a dead end.
         if state["phase"] not in ("dev_build", "qa1_audit", "dev_agreed_done"):
-            die(f"Sprint {args.id} is in phase '{state['phase']}', not ready for QA1's first audit.")
+            die(f"Sprint {args.id} is in phase '{state['phase']}'. QA1's first audit only runs "
+                "during dev_build/qa1_audit/dev_agreed_done; a live-loop audit record "
+                f"only runs during {'/'.join(LIVEQA_PHASES)}. Neither applies to this phase.")
         verdict = args.verdict.upper()
         if verdict not in VALID_VERDICTS:
             die(f"Verdict must be one of {sorted(VALID_VERDICTS)}.")
@@ -491,6 +616,16 @@ def cmd_qa1(args) -> None:
             state["qa1_audit_file_hash"] = file_hash(registry_sprint_file(args.id))
             state["qa1_audited_tree_hash"] = git_tree_hash("HEAD")
             print(f"QA1 audit PASSED (round {state['audit_rounds']}).")
+            if state["qa1_audited_tree_hash"] is None and not is_git_repository():
+                # Req 12: say so now, at the moment the gap is created,
+                # rather than letting it surface later as cmd_ship's "no
+                # QA1-audited commit on record" — which names the wrong
+                # cause here: QA1 DID pass, there is simply no repository
+                # for a tree hash to exist in.
+                print(f"WARNING: {ROOT} is not a git repository, so no audited commit hash "
+                      "could be recorded. /sprint-ship will refuse until this sprint is in a "
+                      "real git repository and re-audited — that refusal will not be a QA1 "
+                      "failure, there is simply nothing yet for ship to check a commit against.")
             print("Dev Team: run /sprint-dev-done when ready to tell Master Controller "
                   "the coding side is agreed done. This does NOT mark the sprint complete.")
         else:
@@ -540,6 +675,18 @@ def cmd_ship(args) -> None:
             die(f"Sprint {args.id} is in phase '{state['phase']}', Pipeman can't ship yet, "
                 "dev work must be agreed done first.")
 
+        # Req 12: checked before either hash-comparison message below, so a
+        # missing repository is never reported as "no QA1-audited commit on
+        # record" — that message is correct for a real repo where QA1 truly
+        # never PASSed, and actively wrong (an unclearable dead end, QA1
+        # DID pass) when the actual cause is that this directory isn't a
+        # git repository at all. Behaviour inside a real repository is
+        # unaffected: is_git_repository() is True there, so this never
+        # fires and every check below runs exactly as before.
+        if not is_git_repository():
+            die(f"{ROOT} is not a git repository. Run this from inside a real git repository — "
+                "there is nothing here for --commit to resolve against.")
+
         shipped_tree = git_tree_hash(args.commit) if args.commit else None
         audited_tree = state.get("qa1_audited_tree_hash")
         if shipped_tree is None:
@@ -577,18 +724,31 @@ def cmd_ship(args) -> None:
 
 def cmd_reship(args) -> None:
     # No tree-hash check here, unlike cmd_ship: a reship's whole purpose is
-    # pushing a fix LiveQA's live test found and QA1 never re-audited
-    # (that's intentional in this two-gate design, LiveQA's retest
-    # after reship is the check for this code, not a fresh QA1 pass). So
-    # this commit is *expected* to differ in content from what QA1 audited.
-    # It still has to resolve to a real commit: last_shipped_commit is what
-    # cmd_liveqa's --deployed-commit check compares against, and an
-    # unresolved ref would leave nothing real recorded to check.
+    # pushing a fix for something LiveQA's live test found, and there is
+    # normally no time to route back through gate 1 first, so this commit
+    # ships without ever having been through QA1's static audit. That is
+    # NOT "LiveQA's retest instead of a fresh QA1 pass" — the two gates
+    # are not interchangeable, see CLAUDE.md and every agent file — it is
+    # a commit gate 1 has simply never seen. If QA1 does look at it,
+    # sprint 7's live-loop audit (cmd_qa1, called while phase is in
+    # LIVEQA_PHASES) is how that gets put on the record, without touching
+    # anything either gate reads. This commit still has to resolve to a
+    # real commit: last_shipped_commit is what cmd_liveqa's
+    # --deployed-commit check compares against, and an unresolved ref
+    # would leave nothing real recorded to check.
     with locked(f"sprint-{args.id}"):
         state = load_state(args.id)
         if state["phase"] not in LIVEQA_PHASES:
             die(f"Sprint {args.id} is in phase '{state['phase']}', reship only applies during "
                 "the LiveQA live-test fix loop.")
+        # Req 12: same distinction as cmd_ship — say plainly when the cause
+        # is no repository at all, rather than letting it surface as
+        # "doesn't resolve to a real commit" below, which is correct for a
+        # bad ref but misleading for a missing repository. Unaffected
+        # inside a real repository.
+        if not is_git_repository():
+            die(f"{ROOT} is not a git repository. Run this from inside a real git repository — "
+                "there is nothing here for --commit to resolve against.")
         reshipped_commit = git_commit_sha(args.commit) if args.commit else None
         if reshipped_commit is None:
             die(f"'{args.commit or ''}' does not resolve to a real commit in this repo. "
@@ -608,6 +768,14 @@ def cmd_liveqa(args) -> None:
         state = load_state(args.id)
         if state["phase"] not in LIVEQA_PHASES:
             die(f"Sprint {args.id} is in phase '{state['phase']}', not ready for a LiveQA live test.")
+
+        # Req 12: same distinction as cmd_ship/cmd_reship — say plainly
+        # when the cause is no repository at all, rather than letting it
+        # surface as "doesn't resolve to a real commit" below. Unaffected
+        # inside a real repository.
+        if not is_git_repository():
+            die(f"{ROOT} is not a git repository. Run this from inside a real git repository — "
+                "there is nothing here for --deployed-commit to resolve against.")
 
         # Identity check, not a content check: unlike the QA1-to-ship
         # tree-hash comparison, there's no legitimate rebase/squash step
@@ -806,7 +974,7 @@ def cmd_override(args) -> None:
 def cmd_list(args) -> None:
     reg = load_registry()
     if not reg["sprints"]:
-        print("No sprints yet.")
+        print(f"No sprints yet in {tree_description()}.")
         return
     for sid, entry in sorted(reg["sprints"].items(), key=lambda kv: int(kv[0])):
         print(f"{sid:>3}  {entry['status']:<12} {entry['title']}")
@@ -825,7 +993,7 @@ def cmd_gates(args) -> None:
     files instead of having to trust the aggregate.
     """
     if not STATE_DIR.exists():
-        print("No sprint state yet. Nothing to aggregate.")
+        print(f"No sprint state yet in {tree_description()}. Nothing to aggregate.")
         return
 
     completed = []
@@ -1019,6 +1187,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id", type=int); s.add_argument("--verdict", required=True)
     s.add_argument("--notes", default="")
     s.add_argument("--notes-file", help="Read notes from this file instead of the command line.")
+    s.add_argument("--commit", default="",
+                    help="Live-loop audits only: the commit this audit covers, resolved and "
+                    "refused if it doesn't exist, then recorded in the event detail. Optional; "
+                    "omitting it is unchanged from before this existed. Has no effect on a "
+                    "gate-1 audit.")
     s.set_defaults(func=cmd_qa1)
 
     s = sub.add_parser("dev-done"); s.add_argument("id", type=int); s.set_defaults(func=cmd_dev_done)
