@@ -8,7 +8,7 @@ allowed-tools: [Bash]
 Usage: `/sprint-ship <sprint-id> --commit <hash>`
 
 ```bash
-python3 scripts/sprint_lifecycle.py ship $ARGUMENTS
+node scripts/run-lifecycle.js ship $ARGUMENTS
 ```
 
 Only succeeds once Dev Team has run `/sprint-dev-done`. Moves the sprint into the `liveqa_live` phase, LiveQA should now test the deployed product with `/sprint-liveqa`.

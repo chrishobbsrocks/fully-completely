@@ -62,6 +62,8 @@ const fs = require('fs');
 const path = require('path');
 const { hasComments, parseJsonc } = require('./launcher/jsonc');
 const { normalizeLineEndings, hashContent } = require('./launcher/content-hash');
+const { toRelPathKey } = require('./launcher/rel-path-key');
+const { findPython3Interpreter } = require('./launcher/python-interpreter');
 
 const SOURCE_ROOT = path.resolve(__dirname, '..');
 const DEST_ROOT = process.cwd();
@@ -87,6 +89,7 @@ if (path.resolve(DEST_ROOT) === path.resolve(SOURCE_ROOT)) {
 const FRAMEWORK_OWNED = [
   '.claude/commands',
   'scripts/sprint_lifecycle.py',
+  'scripts/run-lifecycle.js',
   'scripts/smoke_test.sh',
   'scripts/dev2_worktree.sh',
   'scripts/worktree_test.sh',
@@ -230,6 +233,27 @@ function hashFile(absPath) {
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
+// Sprint 10, Req 1: every published baseline table is generated on macOS
+// (scripts/baselines/generate.js) with forward-slash keys, and cannot be
+// reissued for old releases — Req 1's own constraint. relPath everywhere
+// else in this file is built with path.join() and stays NATIVE (backslash
+// on Windows), which is exactly what fs.* calls and src/dest need; the
+// manifest and baseline objects are the only place that native form is
+// wrong, because on Windows `path.join('.claude','agents','qa1.md')` is
+// '.claude\\agents\\qa1.md', which can never equal a stored
+// '.claude/agents/qa1.md' key. That mismatch is the entire sprint 10
+// defect: every lookup silently missed, so every file fell through to
+// Req 3's conservative "no proof" branch — inert, not broken, which is
+// why it read as six routine conflicts instead of an error. This is the
+// one conversion point, applied at every manifest/baseline object
+// boundary (every lookup normalizes what it's given, every write
+// normalizes what it stores), so no call site has to remember to do it
+// itself. A path with no separator (CLAUDE.md) is unaffected either way.
+// Lives in scripts/launcher/rel-path-key.js (see that module's own
+// comment for why), not defined here, so it's directly unit-testable
+// with a manually-constructed Windows-shaped string — this file's own
+// CLI can't reproduce a real backslash relPath on a non-Windows machine.
+
 // Req 3, the load-bearing function: every way this can fail — no manifest
 // file, a manifest that isn't valid JSON, JSON that isn't a plain object,
 // or a value for this specific path that isn't a well-formed sha256 hex
@@ -255,14 +279,19 @@ function readManifest() {
 }
 
 function manifestHashFor(manifest, relPath) {
-  const value = manifest[relPath];
+  const value = manifest[toRelPathKey(relPath)];
   return typeof value === 'string' && SHA256_HEX.test(value) ? value : null;
 }
 
+// Keys normalized again here too (on top of every newManifest[...] write
+// site already using toRelPathKey), defense in depth: the file on disk
+// must always be forward-slash regardless of any future write site that
+// forgets to normalize, since a raw native key written once would then
+// round-trip as a permanent, silent mismatch on every future run.
 function writeManifest(manifest) {
   fs.mkdirSync(path.dirname(MANIFEST_PATH), { recursive: true });
   const sorted = {};
-  for (const key of Object.keys(manifest).sort()) sorted[key] = manifest[key];
+  for (const key of Object.keys(manifest).sort()) sorted[toRelPathKey(key)] = manifest[key];
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(sorted, null, 2) + '\n');
 }
 
@@ -299,7 +328,7 @@ function readBaselines() {
 // filtered out rather than allowed to poison the comparison; it simply
 // isn't counted as a match for anything.
 function baselineHashesFor(baselines, relPath) {
-  const entry = baselines[relPath];
+  const entry = baselines[toRelPathKey(relPath)];
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return [];
   return Object.values(entry).filter((v) => typeof v === 'string' && SHA256_HEX.test(v));
 }
@@ -309,7 +338,7 @@ function baselineHashesFor(baselines, relPath) {
 // hasUpstreamChangedSinceInstall() below, to ask a narrower question than
 // baselineHashesFor()'s "any version at all".
 function baselineHashForVersion(baselines, relPath, version) {
-  const entry = baselines[relPath];
+  const entry = baselines[toRelPathKey(relPath)];
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return null;
   const value = entry[version];
   return typeof value === 'string' && SHA256_HEX.test(value) ? value : null;
@@ -564,7 +593,7 @@ function syncTrackedUserOwnedFile(relPath, oldManifest, newManifest, baselines) 
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(src, dest);
     copied.push(relPath);
-    newManifest[relPath] = hashFile(dest);
+    newManifest[toRelPathKey(relPath)] = hashFile(dest);
     return;
   }
 
@@ -576,20 +605,20 @@ function syncTrackedUserOwnedFile(relPath, oldManifest, newManifest, baselines) 
     const upstreamChanged = !sameContent(src, dest) && hasUpstreamChangedSinceInstall(relPath, baselines);
     const preciseToInstalledVersion = installedVersionHasBaselineData(relPath, baselines);
     conflicts.push(trackedConflictMessage(relPath, upstreamChanged, preciseToInstalledVersion));
-    if (recordedHash !== null) newManifest[relPath] = recordedHash;
+    if (recordedHash !== null) newManifest[toRelPathKey(relPath)] = recordedHash;
     return;
   }
 
   if (sameContent(src, dest)) {
     skipped.push(relPath);
-    newManifest[relPath] = currentHash;
+    newManifest[toRelPathKey(relPath)] = currentHash;
     return;
   }
   const backup = backupPathFor(dest);
   fs.copyFileSync(dest, backup);
   fs.copyFileSync(src, dest);
   replaced.push(`${relPath} (upgraded, previous version backed up to ${path.relative(DEST_ROOT, backup)})`);
-  newManifest[relPath] = hashFile(dest);
+  newManifest[toRelPathKey(relPath)] = hashFile(dest);
 }
 
 // Parses a target's existing JSONC file, or reports why it can't be
@@ -853,6 +882,31 @@ console.log(
     'it otherwise proceeds, so this is a courtesy check, not a hard requirement ' +
     'this script can verify.'
 );
+
+// Sprint 10, Req 4: Python 3 is a hard requirement for every /sprint-*
+// slash command that runs scripts/sprint_lifecycle.py (eleven of the
+// twelve — /sprint-worktree runs dev2_worktree.sh instead, no Python
+// involved) but was never declared or checked anywhere before this. On a
+// clean Windows box
+// the first symptom was Windows' own "Python was not found; run without
+// arguments to install from the Microsoft Store" — a message about a
+// store page, not about what this framework actually needs, or how to
+// get it right (a Microsoft Store install and a python.org install
+// register themselves under different command names, see Req 5). This
+// check never blocks the install itself — the files above are still
+// worth writing regardless — but it must never be silent either, so a
+// missing interpreter is reported here rather than only surfacing later,
+// confusingly, the first time someone actually runs a slash command.
+if (findPython3Interpreter() === null) {
+  console.log(
+    '\nWARNING: no Python 3 interpreter found on PATH (tried python3, python, py). Every ' +
+      '/sprint-* slash command needs one to do anything. Install Python 3 from ' +
+      'https://python.org (the Microsoft Store listing works too), then confirm it with ' +
+      'one of `python3 --version`, `python --version`, or `py --version` — any of those ' +
+      'printing a "Python 3.x.y" line means you are ready. The files above were still ' +
+      'written; only running the slash commands needs this.'
+  );
+}
 
 // Sprint 8, Req 5: conflicts no longer set a non-zero exit code. The
 // original commit (3b52121, sprint "Add VS Code launcher...") introduced

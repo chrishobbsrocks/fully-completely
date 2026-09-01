@@ -6,7 +6,7 @@ allowed-tools: [Bash]
 # Sprint Status
 
 ```bash
-python3 scripts/sprint_lifecycle.py status $ARGUMENTS --verbose
+node scripts/run-lifecycle.js status $ARGUMENTS --verbose
 ```
 
 Omit the sprint ID to list every sprint and its status instead of the detailed view.

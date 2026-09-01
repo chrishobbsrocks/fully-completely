@@ -25,6 +25,9 @@ CLAUDE.md                     Root instructions (read this first)
 .claude/commands/               Slash commands, thin wrappers around the
                                 script below
 scripts/sprint_lifecycle.py    The actual enforcement logic
+scripts/run-lifecycle.js       What .claude/commands/ actually run — finds
+                                a real Python 3 (python3/python/py) and
+                                hands off to sprint_lifecycle.py above
 scripts/dev2_worktree.sh       Creates Dev Team 2's isolated git worktree
 scripts/smoke_test.sh          Full lifecycle test, runs in a sandbox
 scripts/worktree_test.sh       Tests dev2_worktree.sh, also sandboxed
@@ -57,11 +60,19 @@ docs/sprints/                  Where sprint files and state live
    re-running it later cleanly upgrades the framework files it owns
    (backing up what was there first) while never touching files you're
    meant to customise, reporting anything it skipped either way.
-2. Requires only Python 3 and Node.js, no packages to install for either.
-   Runs on macOS, Linux, and Windows. The shell scripts (`smoke_test.sh`,
-   `worktree_test.sh`, `dev2_worktree.sh`) need a POSIX-style shell, which
-   Windows users typically already have via Git Bash or WSL; they aren't
-   required to use `sprint_lifecycle.py` itself.
+2. Requires Python 3 and Node.js, no packages to install for either.
+   Runs on macOS, Linux, and Windows. `install.js` checks for a usable
+   Python 3 interpreter (`python3`, then `python`, then `py`) and warns
+   plainly if none is found — it doesn't block the rest of the install,
+   but no `/sprint-*` command will run without one. Verify yours with
+   whichever of those three prints a `Python 3.x.y` line. A python.org
+   install on Windows registers `python`/`py`, never `python3` — every
+   `/sprint-*` command already accounts for that by running
+   `scripts/run-lifecycle.js` instead of hardcoding an interpreter name.
+   The shell scripts (`smoke_test.sh`, `worktree_test.sh`,
+   `dev2_worktree.sh`) need a POSIX-style shell, which Windows users
+   typically already have via Git Bash or WSL; they aren't required to
+   use `sprint_lifecycle.py` itself.
 3. **Log in to Claude once before first running the launcher.** Open a
    normal terminal, run `claude`, complete login, then exit. The launcher's
    preflight check blocks with a clear message when Claude reports no
@@ -216,36 +227,37 @@ and generated task shapes, and runs in CI alongside `smoke_test.sh` and
 
 ```bash
 # Master Controller kicks off a sprint
-python3 scripts/sprint_lifecycle.py new "User auth with OAuth" --epic "Accounts"
+node scripts/run-lifecycle.js new "User auth with OAuth" --epic "Accounts"
 # → fill in Requirements / Acceptance Criteria / Out of Scope in the
 #   generated file, then:
-python3 scripts/sprint_lifecycle.py start 1
+node scripts/run-lifecycle.js start 1
 
 # Dev Team builds, then hands off
-python3 scripts/sprint_lifecycle.py qa1 1 --verdict PASS --notes "clean"
-python3 scripts/sprint_lifecycle.py dev-done 1
+node scripts/run-lifecycle.js qa1 1 --verdict PASS --notes "clean"
+node scripts/run-lifecycle.js dev-done 1
 
 # Pipeman ships
-python3 scripts/sprint_lifecycle.py ship 1 --commit abc123
+node scripts/run-lifecycle.js ship 1 --commit abc123
 
 # LiveQA tests the live deploy — --deployed-commit must match what was
 # actually shipped, an exact SHA check, not free text
-python3 scripts/sprint_lifecycle.py liveqa 1 --deployed-commit abc123 --verdict PASS --notes "3/3 clean runs"
+node scripts/run-lifecycle.js liveqa 1 --deployed-commit abc123 --verdict PASS --notes "3/3 clean runs"
 
 # Dev Team closes it out (same session that ran `start`, not Master Controller),
 # only once the user has actually said to close it, not just because both gates are green
-python3 scripts/sprint_lifecycle.py complete 1 --user-said "close it"
+node scripts/run-lifecycle.js complete 1 --user-said "close it"
 ```
 
 If you're running inside Claude Code, use the slash-command form instead
 of calling the script directly, e.g. `/sprint-qa1 1 --verdict PASS --notes
-"clean"`, the commands in `.claude/commands/` call the same script.
+"clean"`, the commands in `.claude/commands/` run the same
+`sprint_lifecycle.py`, through `scripts/run-lifecycle.js` (see above).
 
 Check where anything stands at any point:
 
 ```bash
-python3 scripts/sprint_lifecycle.py status 1 --verbose   # one sprint, full history
-python3 scripts/sprint_lifecycle.py list                 # every sprint
+node scripts/run-lifecycle.js status 1 --verbose   # one sprint, full history
+node scripts/run-lifecycle.js list                 # every sprint
 ```
 
 ## The two gates a sprint has to clear

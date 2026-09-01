@@ -67,6 +67,31 @@ test('jsonc: a commented-out setting is not picked up as live', () => {
 });
 
 // -------------------------------------------------------------------------
+// rel-path-key.js: sprint 10's Windows fix. install.js's own CLI can't
+// reproduce a real backslash relPath on a non-Windows machine (path.join()
+// never produces one here), so this is tested directly rather than only
+// through the full install run — the one way to actually exercise the bug
+// this closes outside a real Windows machine.
+// -------------------------------------------------------------------------
+const { toRelPathKey } = require('./launcher/rel-path-key');
+
+test('toRelPathKey: a Windows-shaped (backslash) relPath becomes the forward-slash form every published baseline table uses', () => {
+  assert.strictEqual(toRelPathKey('.claude\\agents\\qa1.md'), '.claude/agents/qa1.md');
+});
+
+test('toRelPathKey: an already forward-slash relPath (macOS/Linux) is unchanged', () => {
+  assert.strictEqual(toRelPathKey('.claude/agents/qa1.md'), '.claude/agents/qa1.md');
+});
+
+test('toRelPathKey: a path with no separator at all (CLAUDE.md) is unaffected either way — the discriminator that isolated this defect', () => {
+  assert.strictEqual(toRelPathKey('CLAUDE.md'), 'CLAUDE.md');
+});
+
+test('toRelPathKey: a mix of separators (defensive — not a real path.join() output on any platform) is fully converted', () => {
+  assert.strictEqual(toRelPathKey('.claude\\agents/qa1.md'), '.claude/agents/qa1.md');
+});
+
+// -------------------------------------------------------------------------
 // session.js: UUID derivation, path derivation, resume-vs-fresh selection
 // -------------------------------------------------------------------------
 const {
@@ -1020,6 +1045,62 @@ test('install.js: a valid manifest with no entry for a given user-owned file res
 });
 
 // -------------------------------------------------------------------------
+// install.js: sprint 10, Req 2/3 — a stale or foreign backslash-keyed
+// manifest/baseline entry must still degrade to no-match, never an
+// unearned overwrite. Req 3's own reasoning is that no real manifest can
+// contain a backslash key (nothing was ever proven on Windows before this
+// fix, so nothing was ever written), but "confirm rather than assume"
+// means proving the safe fallback holds even if that reasoning is wrong
+// somewhere — these tests do that directly, at the CLI level, with a
+// manifest hand-written to contain exactly the shape a broken pre-fix
+// Windows run would have (if Req 3's reasoning were wrong).
+// -------------------------------------------------------------------------
+test('install.js: a manifest entry stored under a backslash key never matches a real relPath, even by coincidence (Req 2/3)', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const qa1Path = path.join(dir, QA1_REL_PATH);
+    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+    fs.writeFileSync(qa1Path, REAL_QA1_MD); // byte-identical to what we'd write
+    // A manifest recording the CORRECT hash, but under the Windows-shaped
+    // key a broken pre-fix run would have used instead of the real
+    // forward-slash one. manifestHashFor() normalizes the QUERY key
+    // (built from the real, forward-slash relPath on this machine), so it
+    // must look for '.claude/agents/qa1.md' and find nothing here.
+    writeManifest(dir, { '.claude\\agents\\qa1.md': fcHash(REAL_QA1_MD) });
+
+    const output = runInstall(dir);
+
+    // No manifest match — but REAL_QA1_MD also matches a real published
+    // baseline, so Req 1's second proof source correctly takes over and
+    // this still resolves to "already present", not a conflict. That's
+    // the safe fallback working, not a failure to detect the stale key.
+    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/qa1\.md/);
+    assert.doesNotMatch(output, /Conflicts/);
+    const manifest = readManifest(dir);
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(manifest, '.claude\\agents\\qa1.md'),
+      'the stale backslash key must not survive into the new manifest'
+    );
+    assert.strictEqual(manifest[QA1_REL_PATH], fcHash(REAL_QA1_MD), 'the real, forward-slash key must be written instead');
+  });
+});
+
+test('install.js: a backslash-keyed manifest entry with customised content on disk still resolves to no-overwrite, not a coincidental match (Req 2/3)', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.1.0');
+    const qa1Path = path.join(dir, QA1_REL_PATH);
+    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
+    fs.writeFileSync(qa1Path, CUSTOMIZED_QA1_MD); // matches no manifest and no baseline
+    writeManifest(dir, { '.claude\\agents\\qa1.md': fcHash(REAL_QA1_MD) });
+
+    const output = runInstall(dir);
+
+    assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
+    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), CUSTOMIZED_QA1_MD, 'a customised file must never be overwritten, stale key or not');
+  });
+});
+
+// -------------------------------------------------------------------------
 // install.js: sprint 8's published-baseline mechanism (Req 1/2/3), the
 // two-condition conflict message (Req 4), and the exit-code contract
 // (Req 5). The corrupt/missing-table and message-selection tests below
@@ -1168,6 +1249,87 @@ test('install.js: a successful upgrade exits 0 even when it reports conflicts (R
 test('install.js: running against the source repo itself is a genuine failure and still exits non-zero (Req 5)', () => {
   const status = runInstallStatus(REPO_ROOT);
   assert.notStrictEqual(status, 0, 'the wrong-directory guard is a real error and must still signal one');
+});
+
+// -------------------------------------------------------------------------
+// python-interpreter.js: sprint 10, Req 5's resolution order (python3,
+// then python, then py) and its own named risk ("the interpreter
+// resolution picks Python 2 on a machine that has one"). This dev
+// machine's real interpreters can't exercise the fallback order or the
+// Python-2 case (there's a real python3 and nothing else here to test
+// against), so these use small fake executables on a controlled PATH —
+// the same technique sprint 7 used to test git-unavailable degradation.
+// -------------------------------------------------------------------------
+const { findPython3Interpreter } = require('./launcher/python-interpreter');
+
+function withFakeInterpreters(specs, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-fake-python-'));
+  const originalPath = process.env.PATH;
+  try {
+    for (const [name, spec] of Object.entries(specs)) {
+      const redirect = spec.toStderr ? '>&2' : '';
+      const exitCode = spec.exitCode !== undefined ? spec.exitCode : 0;
+      fs.writeFileSync(path.join(dir, name), `#!/bin/sh\necho "${spec.output}" ${redirect}\nexit ${exitCode}\n`);
+      fs.chmodSync(path.join(dir, name), 0o755);
+    }
+    process.env.PATH = dir;
+    fn();
+  } finally {
+    process.env.PATH = originalPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('python-interpreter: python3 present and correct resolves first (macOS/Linux, unchanged)', () => {
+  withFakeInterpreters({ python3: { output: 'Python 3.9.6' } }, () => {
+    assert.strictEqual(findPython3Interpreter(), 'python3');
+  });
+});
+
+test('python-interpreter: only "python" present (a python.org Windows install) resolves via the fallback order', () => {
+  withFakeInterpreters({ python: { output: 'Python 3.11.0' } }, () => {
+    assert.strictEqual(findPython3Interpreter(), 'python');
+  });
+});
+
+test('python-interpreter: only "py" present resolves via the last fallback', () => {
+  withFakeInterpreters({ py: { output: 'Python 3.12.1' } }, () => {
+    assert.strictEqual(findPython3Interpreter(), 'py');
+  });
+});
+
+test('python-interpreter: a Python 2 "python3" is rejected, not mistaken for Python 3 — the sprint\'s own named risk', () => {
+  withFakeInterpreters(
+    {
+      python3: { output: 'Python 2.7.18', toStderr: true }, // real python2 --version prints to stderr, not stdout
+      python: { output: 'Python 3.10.4' },
+    },
+    () => {
+      assert.strictEqual(
+        findPython3Interpreter(),
+        'python',
+        'must skip the Python 2 interpreter and fall through to the next candidate, not stop at the first one that merely exits 0'
+      );
+    }
+  );
+});
+
+test('python-interpreter: a candidate that exits non-zero (a Windows Store alias for an uninstalled Python) is treated as absent', () => {
+  withFakeInterpreters(
+    {
+      python3: { output: '', exitCode: 1 },
+      python: { output: 'Python 3.8.10' },
+    },
+    () => {
+      assert.strictEqual(findPython3Interpreter(), 'python');
+    }
+  );
+});
+
+test('python-interpreter: no candidate resolves to a real Python 3 -> null, not a throw', () => {
+  withFakeInterpreters({}, () => {
+    assert.strictEqual(findPython3Interpreter(), null);
+  });
 });
 
 if (failures > 0) {

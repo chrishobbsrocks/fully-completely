@@ -14,7 +14,7 @@ commands. Parse the sprint ID yourself (a safe, low-entropy value), write
 the `--user-said` text to a temp file with the Write tool, and run:
 
 ```bash
-python3 scripts/sprint_lifecycle.py complete <sprint-id> --user-said-file /tmp/sprint-complete-user-said.txt
+node scripts/run-lifecycle.js complete <sprint-id> --user-said-file /tmp/sprint-complete-user-said.txt
 ```
 
 This refuses to run unless all three are true:

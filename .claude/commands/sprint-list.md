@@ -6,5 +6,5 @@ allowed-tools: [Bash]
 # List Sprints
 
 ```bash
-python3 scripts/sprint_lifecycle.py list
+node scripts/run-lifecycle.js list
 ```

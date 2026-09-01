@@ -16,7 +16,7 @@ Before creating a sprint, check whether this change actually needs one: if it me
 3. Run:
 
 ```bash
-python3 scripts/sprint_lifecycle.py new --title-file /tmp/sprint-title.txt --epic-file /tmp/sprint-epic.txt
+node scripts/run-lifecycle.js new --title-file /tmp/sprint-title.txt --epic-file /tmp/sprint-epic.txt
 ```
 
 (Omit `--epic-file` entirely if no epic was given.)
