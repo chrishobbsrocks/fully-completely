@@ -556,6 +556,12 @@ test('install.js: a genuinely different CLAUDE.md is reported as a conflict', ()
 // -------------------------------------------------------------------------
 const REAL_RUN_ROLE_JS = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'launcher', 'run-role.js'), 'utf8');
 const REAL_QA1_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'qa1.md'), 'utf8');
+// liveqa.md, not qa1.md, for the baseline-match tests below (sprint 9
+// onward): sprint 9 edits qa1.md's live content, which the committed
+// baseline table (generated from published tarballs, before that edit)
+// doesn't cover — a test proving "matches a published baseline" needs a
+// file this repo hasn't since changed. liveqa.md is untouched since 0.1.5.
+const REAL_LIVEQA_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'liveqa.md'), 'utf8');
 const REAL_CURRENT_VERSION = require(path.join(REPO_ROOT, 'package.json')).version;
 
 function writeVersionMarker(dir, version) {
@@ -830,6 +836,7 @@ test('install.js: removing a dead gitignore line preserves the file\'s original 
 // rather than re-deriving it.
 // -------------------------------------------------------------------------
 const QA1_REL_PATH = path.join('.claude', 'agents', 'qa1.md');
+const LIVEQA_REL_PATH = path.join('.claude', 'agents', 'liveqa.md');
 
 test('install.js: a fresh install writes a manifest recording every tracked user-owned file it wrote', () => {
   withFixture((dir) => {
@@ -902,7 +909,7 @@ test('install.js: a user-owned file whose content no longer matches its manifest
     // so this falls to the "changed anywhere in known history" fallback,
     // which is true here) — so the message must say so and point at how
     // to see the diff.
-    assert.match(output, /shipped content has changed since it was first published/);
+    assert.match(output, /shipped content has changed since the version you have/);
     assert.match(output, /npx fully-completely/);
     assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), customized, 'a customised file must never be overwritten');
     assert.ok(!fs.existsSync(`${qa1Path}.fc-bak-${REAL_CURRENT_VERSION}`), 'nothing was overwritten, so nothing should be backed up');
@@ -923,24 +930,27 @@ test('install.js: a file matching a published baseline, with no manifest at all,
   // because a manifest was the ONLY proof source and none of those
   // installs could ever have one. This repo's real, committed baseline
   // table (scripts/baselines/user-owned-content.json, generated from the
-  // real published tarballs) is Req 1's second source of proof: qa1.md's
+  // real published tarballs) is Req 1's second source of proof: liveqa.md's
   // content here is exactly what 0.1.0-0.1.5 actually shipped, so it must
-  // now be recognised and brought current, not conflicted.
+  // now be recognised and brought current, not conflicted. (liveqa.md, not
+  // qa1.md — sprint 9 edits qa1.md's live content, so its current bytes
+  // are no longer what the committed baseline table has on record; see
+  // REAL_LIVEQA_MD's own comment above.)
   withFixture((dir) => {
     writeVersionMarker(dir, '0.1.4');
-    const qa1Path = path.join(dir, QA1_REL_PATH);
-    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
-    fs.writeFileSync(qa1Path, REAL_QA1_MD);
+    const liveqaPath = path.join(dir, LIVEQA_REL_PATH);
+    fs.mkdirSync(path.dirname(liveqaPath), { recursive: true });
+    fs.writeFileSync(liveqaPath, REAL_LIVEQA_MD);
 
     const output = runInstall(dir);
 
     assert.doesNotMatch(output, /Conflicts/, 'a baseline-proven file must not conflict');
-    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/qa1\.md/);
-    assert.strictEqual(fs.readFileSync(qa1Path, 'utf8'), REAL_QA1_MD);
+    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/liveqa\.md/);
+    assert.strictEqual(fs.readFileSync(liveqaPath, 'utf8'), REAL_LIVEQA_MD);
     const manifest = readManifest(dir);
     assert.strictEqual(
-      manifest[QA1_REL_PATH],
-      fcHash(REAL_QA1_MD),
+      manifest[LIVEQA_REL_PATH],
+      fcHash(REAL_LIVEQA_MD),
       'a baseline-proven file must be recorded in the manifest as it is upgraded (Req 3), so the next run no longer needs the baseline sweep at all'
     );
   });
@@ -1080,7 +1090,7 @@ test('install.js: local edits with no upstream change since the install say "no 
       const output = runInstall(dir);
 
       assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
-      assert.doesNotMatch(output, /shipped content has changed since it was first published/);
+      assert.doesNotMatch(output, /shipped content has changed since the version you have/);
       assert.match(output, /no upstream update pending for this file/);
     });
   });
@@ -1098,7 +1108,7 @@ test('install.js: local edits with a real upstream change since the install say 
       const output = runInstall(dir);
 
       assert.match(output, /Conflicts[\s\S]*\.claude\/agents\/qa1\.md \(yours/);
-      assert.match(output, /shipped content has changed since it was first published/);
+      assert.match(output, /shipped content has changed since the version you have/);
       assert.match(output, /npx fully-completely/);
     });
   });

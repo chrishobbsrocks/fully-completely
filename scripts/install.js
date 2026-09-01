@@ -456,9 +456,15 @@ function trackedConflictMessage(relPath, upstreamChanged) {
       'changed. Nothing to reconcile; no action needed unless you want one.)'
     );
   }
+  // Sprint 9, Req 5: "since the version you have", not the weaker "since
+  // it was first published" this used to say — the condition above
+  // already establishes the stronger claim (hasUpstreamChangedSinceInstall
+  // is install-version-bounded, see its own comment), the message just
+  // wasn't saying so. QA1 flagged this in sprint 8 as not worth its own
+  // commit; this is that commit, wording only.
   return (
-    `${relPath} (yours — ${reason} This file's shipped content has changed since it was first ` +
-    "published; to see exactly what's different in the current release, run `npx fully-completely` " +
+    `${relPath} (yours — ${reason} This file's shipped content has changed since the version you ` +
+    "have; to see exactly what's different in the current release, run `npx fully-completely` " +
     'again inside an empty scratch directory to get a fresh copy, then diff it against your own file ' +
     'and merge anything you want by hand.)'
   );
