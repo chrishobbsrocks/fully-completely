@@ -1,0 +1,22 @@
+{
+  "id": 10,
+  "title": "Make the upgrade mechanism work on Windows, and say what the framework needs to run",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-09-01T19:13:35+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-09-01T19:13:35+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ]
+}
