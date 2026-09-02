@@ -63,7 +63,32 @@ function readAgentMeta(roleId) {
     model: front.model || null,
     color: front.color || null,
     themeColor: COLOR_MAP[front.color] || null,
+    // Sprint 11: added for headless's --agents payload (see run-role.js's
+    // agentBody() usage below) — pre-existing callers destructure the
+    // fields they already used, so an additional field is not a breaking
+    // change to readAgentMeta's shape.
+    description: front.description || null,
   };
+}
+
+// Sprint 11: the persona body — everything after the frontmatter block —
+// discovered empirically to be needed because `--bare` mode does not read
+// .claude/agents/*.md at all (confirmed against a real invocation:
+// `--agent qa1` alone fails there with "not found. Available agents:
+// claude, Explore, general-purpose, Plan, statusline-setup", Claude
+// Code's own built-in agent types, not this project's). Headless supplies
+// the persona explicitly instead, via `--agents '{"<id>":{"prompt":
+// "<this>", ...}}'` alongside `--agent <id>`, confirmed to resolve
+// correctly the same way (a fake API key then fails at the auth step
+// instead of at agent resolution). Reuses parseFrontmatter's own
+// frontmatter-block regex via its match, rather than a second copy of it,
+// so the two can never drift about where the frontmatter ends.
+function agentBody(roleId) {
+  const file = agentFilePath(roleId);
+  if (!fs.existsSync(file)) return null;
+  const raw = fs.readFileSync(file, 'utf8');
+  const match = raw.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  return (match ? raw.slice(match[0].length) : raw).trim();
 }
 
 module.exports = {
@@ -74,4 +99,5 @@ module.exports = {
   agentFilePath,
   parseFrontmatter,
   readAgentMeta,
+  agentBody,
 };
