@@ -1409,6 +1409,28 @@ test('run-role: headlessLaunchArgs supplies the persona via --agents JSON (--bar
   assert.deepStrictEqual(args.slice(4), ['-p', '--output-format', 'json', '--bare', 'do the audit']);
 });
 
+test('run-role: headlessLaunchArgs omits --settings entirely when none is given (unchanged default shape)', () => {
+  const args = headlessLaunchArgs(QA1_ROLE, 'do the audit');
+  assert.ok(!args.includes('--settings'));
+  assert.strictEqual(args[args.length - 1], 'do the audit', 'prompt must stay the final positional argument');
+});
+
+// QA1 round 1 (Req 4): --settings is forwarded to claude's own --settings
+// flag, ahead of the trailing prompt, so an apiKeyHelper-based project has
+// a real way to use headless — not just a named-but-unwired remedy.
+test('run-role: headlessLaunchArgs forwards --settings ahead of the trailing prompt', () => {
+  const args = headlessLaunchArgs(QA1_ROLE, 'do the audit', '{"apiKeyHelper":"/path/to/helper.sh"}');
+  assert.deepStrictEqual(args.slice(4), [
+    '-p',
+    '--output-format',
+    'json',
+    '--bare',
+    '--settings',
+    '{"apiKeyHelper":"/path/to/helper.sh"}',
+    'do the audit',
+  ]);
+});
+
 test('run-role: headlessLaunchArgs omits "model" from the JSON when the persona file has none', () => {
   const args = headlessLaunchArgs({ id: 'qa1', label: 'QA1' }, 'p');
   const agentsJson = JSON.parse(args[3]);
@@ -1483,7 +1505,7 @@ test('run-role CLI: --headless without --prompt-file fails with the exact messag
   });
 });
 
-test('run-role CLI: missing ANTHROPIC_API_KEY fails headless before even reading the prompt file', () => {
+test('run-role CLI: neither ANTHROPIC_API_KEY nor --settings fails headless before even reading the prompt file', () => {
   withFakeClaude(({ dir, readArgv }) => {
     // Build env explicitly and delete the key after merging with
     // process.env, rather than just omitting it from envOverrides — an
@@ -1499,9 +1521,47 @@ test('run-role CLI: missing ANTHROPIC_API_KEY fails headless before even reading
       { cwd: REPO_ROOT, encoding: 'utf8', env }
     );
     assert.strictEqual(result.status, 1);
-    assert.match(result.stderr, /ANTHROPIC_API_KEY is not set/);
+    assert.match(result.stderr, /neither ANTHROPIC_API_KEY nor --settings/);
     assert.strictEqual(result.stdout, '');
     assert.deepStrictEqual(readArgv(), [], 'claude must never be invoked with no credentials');
+  });
+});
+
+// QA1 round 1 (Req 4): --settings must be a REAL, working alternative to
+// ANTHROPIC_API_KEY, not just a claim in the error message — this is the
+// specific gap QA1 demonstrated (the message named --settings as a remedy
+// this file never actually wired up). Fake ANTHROPIC_API_KEY is deleted
+// here for the same leak-proofing reason as the test above; --settings
+// alone must be enough to get past the precondition check.
+test('run-role CLI: --settings alone (no ANTHROPIC_API_KEY) satisfies the credential precondition and reaches claude', () => {
+  withFakeClaude(({ dir, readArgv }) => {
+    const promptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-settings-prompt-'));
+    const promptPath = path.join(promptDir, 'prompt.txt');
+    fs.writeFileSync(promptPath, 'audit it');
+    const env = { ...process.env, PATH: dir };
+    delete env.ANTHROPIC_API_KEY;
+    const result = spawnSync(
+      process.execPath,
+      [
+        RUN_ROLE_PATH,
+        'qa1',
+        '--headless',
+        '--prompt-file',
+        promptPath,
+        '--settings',
+        '{"apiKeyHelper":"/path/to/helper.sh"}',
+      ],
+      { cwd: REPO_ROOT, encoding: 'utf8', env }
+    );
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout, FAKE_JSON_RESULT);
+    assert.strictEqual(result.stderr, '');
+    assert.deepStrictEqual(
+      readArgv(),
+      headlessLaunchArgs(QA1_ROLE, 'audit it', '{"apiKeyHelper":"/path/to/helper.sh"}'),
+      '--settings must reach claude\'s own real argv, not just satisfy a local check'
+    );
+    assert.ok(readArgv().includes('--settings'), 'the real claude invocation must carry --settings through');
   });
 });
 

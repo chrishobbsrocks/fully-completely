@@ -30,7 +30,10 @@
 //
 // Sprint 11 adds a second, separate launch path, for driving a role
 // headless — no terminal, no human in the loop:
-//   node scripts/launcher/run-role.js <role-id> --headless --prompt-file <path>
+//   node scripts/launcher/run-role.js <role-id> --headless --prompt-file <path> [--settings <path-or-json>]
+// --settings is optional and forwarded verbatim to claude's own --settings
+// flag — the real path for an apiKeyHelper-based project (see runHeadless()
+// below); omit it when ANTHROPIC_API_KEY is set in the environment instead.
 // Requested by an external orchestrator (Fifty Mission Cap) that installs
 // this framework and drives docs/sprints/ from outside, through
 // sprint_lifecycle.py and state files only, never reading agent files or
@@ -160,43 +163,67 @@ function readPromptFile(filePath) {
 // (versus silently ignored, falling back to a default) is NOT verified —
 // that needs a real successful run, which needs real credentials this
 // build did not have; flagged rather than assumed.
-function headlessLaunchArgs(role, prompt) {
+//
+// QA1 round 1 (Req 4): `settings`, when given, is forwarded to claude
+// exactly as `--settings <value>` — a path to a JSON file or an inline
+// JSON string, --bare's own documented mechanism for supplying
+// apiKeyHelper. Without this, the precondition check below could name
+// "--settings" as a remedy that this file never actually wired up, which
+// is exactly the dead end QA1 demonstrated: a project relying solely on
+// apiKeyHelper had no way to use headless at all, no matter what the
+// error message claimed. Positioned before `prompt`, which must stay the
+// final, positional argument.
+function headlessLaunchArgs(role, prompt, settings) {
   const meta = readAgentMeta(role.id);
   const body = agentBody(role.id);
   const definition = { description: (meta && meta.description) || role.label, prompt: body };
   if (meta && meta.model) definition.model = meta.model;
   const agentsJson = JSON.stringify({ [role.id]: definition });
-  return ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json', '--bare', prompt];
+  const settingsArgs = settings ? ['--settings', settings] : [];
+  return ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json', '--bare', ...settingsArgs, prompt];
 }
 
-async function runHeadless(role, promptFilePath) {
-  // Req 4: checked here, before claude is even invoked, so the failure is
-  // immediate and unambiguous rather than waiting for --bare's own
-  // response — which is ALSO legible (a well-formed envelope with
-  // is_error:true and a "Not logged in" result, confirmed against the
-  // pinned notes and against a real run in an environment with no
-  // ANTHROPIC_API_KEY here) but easy for a careless consumer to miss
-  // buried inside a JSON blob, exactly the risk the pinned notes warn a
-  // naive metering caller into. This check reads the LAUNCHING
-  // ENVIRONMENT (an env var), never the envelope claude itself prints, so
-  // it doesn't touch Req 2's "we emit, we do not parse" boundary at all.
-  // --bare's own help text also accepts apiKeyHelper via --settings; this
-  // check only covers the ANTHROPIC_API_KEY case, the common one and the
-  // one the pinned notes actually exercised — a project relying on
-  // apiKeyHelper alone will see this warning even though headless would
-  // still work, a known, documented limitation of this precondition
-  // rather than a silent gap.
-  if (!process.env.ANTHROPIC_API_KEY) {
+async function runHeadless(role, promptFilePath, settings) {
+  // Req 4: checked here, before claude is even invoked, so the common
+  // failure (no credentials supplied at all) is immediate and unambiguous
+  // rather than waiting for --bare's own response — which is ALSO legible
+  // (a well-formed envelope with is_error:true and a "Not logged in"
+  // result, confirmed against the pinned notes and against a real run in
+  // an environment with no ANTHROPIC_API_KEY here) but easy for a careless
+  // consumer to miss buried inside a JSON blob, exactly the risk the
+  // pinned notes warn a naive metering caller into. This check reads the
+  // LAUNCHING ENVIRONMENT (an env var and this file's own --settings
+  // flag), never the envelope claude itself prints, so it doesn't touch
+  // Req 2's "we emit, we do not parse" boundary at all.
+  //
+  // QA1 round 1: this used to hard-fail whenever ANTHROPIC_API_KEY was
+  // unset, full stop, with a message naming "--settings" as a remedy that
+  // didn't exist anywhere in this file — an apiKeyHelper-only project
+  // could not use headless at all, no matter what it passed. Fixed by
+  // actually accepting a `--settings <value>` flag (parsed in main() below,
+  // forwarded into headlessLaunchArgs() above) and only hard-failing here
+  // when NEITHER credential source was supplied. This does not validate
+  // that a given --settings value actually configures apiKeyHelper — doing
+  // that would mean re-implementing claude's own settings-file parsing
+  // just to double-check it — so a meaningless --settings value (e.g.
+  // '{}') still passes this check and falls through to --bare's own
+  // legible is_error:true failure instead of this friendlier one. That's
+  // an acceptable, deliberate trade: Req 4 asks for a legible failure, not
+  // specifically an early one, and the same "don't block on an
+  // inconclusive signal" reasoning already applies to checkAuth() on the
+  // interactive path below.
+  if (!process.env.ANTHROPIC_API_KEY && !settings) {
     fail(
-      'Headless mode needs its own credentials — ANTHROPIC_API_KEY is not set in this ' +
-        'environment. --bare mode (which headless always uses) reads strictly ' +
+      'Headless mode needs its own credentials — neither ANTHROPIC_API_KEY nor --settings ' +
+        '<file-or-json> was supplied. --bare mode (which headless always uses) reads strictly ' +
         'ANTHROPIC_API_KEY or apiKeyHelper, never the OAuth/keychain session an interactive ' +
-        'launch would use. Set ANTHROPIC_API_KEY and re-run, or configure apiKeyHelper via ' +
-        '--settings (this check does not detect that case, only ANTHROPIC_API_KEY).'
+        'launch would use. Set ANTHROPIC_API_KEY, or pass --settings <path-or-inline-json> ' +
+        "pointing at an apiKeyHelper config, and re-run: node scripts/launcher/run-role.js " +
+        '<role-id> --headless --prompt-file <path> --settings <path-or-json>.'
     );
   }
   const prompt = readPromptFile(promptFilePath);
-  const result = await spawnClaude(headlessLaunchArgs(role, prompt));
+  const result = await spawnClaude(headlessLaunchArgs(role, prompt, settings));
   process.exitCode = result.code === null ? 0 : result.code;
 }
 
@@ -206,6 +233,11 @@ async function main() {
   const headless = rest.includes('--headless');
   const promptFileFlagIndex = rest.indexOf('--prompt-file');
   const promptFilePath = promptFileFlagIndex === -1 ? null : rest[promptFileFlagIndex + 1];
+  // QA1 round 1: forwarded to claude's own --settings, headless's real
+  // (rather than merely claimed) apiKeyHelper path — see runHeadless()'s
+  // comment above for why this exists.
+  const settingsFlagIndex = rest.indexOf('--settings');
+  const settings = settingsFlagIndex === -1 ? null : rest[settingsFlagIndex + 1];
 
   const role = ROLES.find((r) => r.id === roleId);
   if (!role) {
@@ -237,7 +269,7 @@ async function main() {
     if (!promptFilePath) {
       fail('--headless requires --prompt-file <path>.');
     }
-    await runHeadless(role, promptFilePath);
+    await runHeadless(role, promptFilePath, settings);
     return;
   }
 
