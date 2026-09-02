@@ -36,15 +36,36 @@ function devTeam2ResumePrompt(repoName) {
   );
 }
 
-// Sprint 11, Req 5 — the sprint's own deliverable. Discovered by actually
-// running each of the six roles headless, through one throwaway sprint
-// driven through both gates in a scratch git-init directory (never this
-// repo), not composed from a desk. What came back matches what the sprint
-// file predicted: the fixed scaffold below is nearly all of it, identical
-// across every role. The only thing that varies per role is HEADLESS_POINTERS
-// — what to point at, never what to explain. No verdict, note, requirement
-// or phase history is ever composed into this text; all of that stays on
-// disk, read by the role itself, exactly as Req 5 requires.
+// Sprint 11, Req 5 — the sprint's own deliverable, and this comment must
+// say exactly what happened, not what Req 5 asked for (QA1 round 3 caught
+// this drifting: an earlier version of this comment claimed all six roles
+// were driven through both gates in a scratch directory, which never
+// happened and contradicts the round-3 handoff's own account).
+//
+// What actually ran: ONE real headless launch, Dev Team 1, against a live
+// throwaway sprint in a scratch git-init directory (never this repo), on
+// this session's real OAuth session. It proved headless cannot write
+// files or run scripts at all without a permission-mode flag this session
+// has not been able to add (see run-role.js's headlessLaunchArgs() and the
+// round-3 handoff) — every Write/Edit/Bash call, including read-only
+// status checks, hit an unanswerable permission request. No role has
+// completed a real audit, recorded a real verdict, or driven a sprint
+// through either gate yet. The "through both gates" run Req 5 actually
+// asks for is still pending, blocked on that one flag.
+//
+// The scaffold and pointers below are therefore a DESIGN, not a discovery
+// result — composed directly from the sprint file's own unusually explicit
+// guidance (Req 5's "expect the fixed scaffold to be most of what you
+// find... something close to *you are running unattended; nobody will
+// answer a question; if blocked, record it in the state file and stop
+// rather than asking*, identical across all six. What differs per role is
+// what to point at, not what to explain" is close to verbatim in
+// headlessScaffold() below), not from an empirical result. QA1 round 3
+// read all six for restated verdict/note/requirement/phase-history content
+// and found none — that part of Req 5's bar is met. Whether this design
+// actually works for a real, unattended role with nothing else to go on is
+// still unverified and remains Req 5's open acceptance criterion: "confirm
+// the templates came from actual headless runs."
 //
 // No literal " characters anywhere in either function below, same
 // discipline as devTeam2ResumePrompt() above and for the same reason: this

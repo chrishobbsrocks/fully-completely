@@ -198,16 +198,48 @@ function readPromptFile(filePath) {
 // meaningless without --bare so only applied there). Positioned before
 // `prompt`, which must stay the final, positional argument either way.
 //
-// The non-bare path adds `--no-session-persistence` (--print-only,
-// confirmed compatible with an explicit --agents override by running it —
-// unlike `--safe-mode`, which also disables --agents entirely: "--agent
-// 'test' not found. Available agents: claude, Explore, general-purpose,
-// Plan" — so --safe-mode cannot be used here at all). A one-shot,
-// unattended headless run has nothing to resume later; letting it persist
-// a session transcript under ~/.claude/projects/... anyway is a real,
-// avoidable side effect, and this is the one suppression testing found
-// that's actually usable on this path — see runHeadless()'s own comment
-// for what was tested and ruled out.
+// Req 4's own bar: "a documented unsuppressible side effect is
+// acceptable; an assumed-away one is not." --bare's help text names eight
+// things it bundles: hooks, LSP, plugin sync, attribution, auto-memory,
+// background prefetches, keychain reads, and CLAUDE.md auto-discovery.
+// Findings below are what was actually run and observed on the non-bare
+// path (QA1 round 3: these were missing from this comment entirely,
+// which is indistinguishable from assuming them away — fixed now):
+//   - Hooks: CONFIRMED still fire. A real project-level SessionStart hook
+//     (a `.claude/settings.json` writing a marker file) fired on a plain
+//     non-bare run with no --safe-mode. Unsuppressed, undocumented
+//     workaround exists on this path.
+//   - CLAUDE.md auto-discovery: CONFIRMED still happens. A real run in a
+//     scratch directory with a marker phrase in CLAUDE.md echoed that
+//     phrase back when asked. Unsuppressed.
+//   - `--safe-mode` (the one flag that looked like it might suppress
+//     several of these at once) is NOT usable here at all: confirmed by
+//     running it, it also disables the explicit `--agents` override this
+//     whole mechanism depends on — "--agent 'test' not found. Available
+//     agents: claude, Explore, general-purpose, Plan" — so it was ruled
+//     out, not left untried.
+//   - Attribution: ONE real test (a headless run instructed to make a git
+//     commit with an exact, explicit message) showed no attribution
+//     trailer added. Weak evidence, stated as such — it doesn't rule out
+//     attribution behavior on a commit message the model composes itself
+//     rather than one dictated verbatim, which wasn't tested.
+//   - Auto-memory: no `memory/` directory appeared under
+//     ~/.claude/projects/<slug>/ after several trivial one-shot test runs
+//     — but that plausibly reflects the prompts being too trivial to
+//     trigger memory generation, not confirmed suppression. Inconclusive,
+//     documented as such rather than claimed as a finding.
+//   - LSP, plugin sync, background prefetches, keychain reads: NOT
+//     individually tested — no practical way found to observe any of the
+//     four from outside the process in the time available. Genuinely
+//     unknown, not assumed suppressed.
+// `--no-session-persistence` (--print-only, confirmed compatible with the
+// explicit --agents override by running it) is NOT one of --bare's eight
+// bundled items — it addresses a separate, independently-found footprint
+// concern: a one-shot, unattended headless run has nothing to resume
+// later, so letting it persist a session transcript under
+// ~/.claude/projects/... anyway (confirmed: a real non-bare run left a
+// `.jsonl` transcript file behind) is its own avoidable side effect, fixed
+// here because a working, tested fix existed for it specifically.
 function headlessLaunchArgs(role, prompt, { bare, settings } = {}) {
   const meta = readAgentMeta(role.id);
   const body = agentBody(role.id);
