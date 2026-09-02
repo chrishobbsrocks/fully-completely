@@ -29,11 +29,29 @@
 // explicit --model), so frontmatter stays the single place a model is set.
 //
 // Sprint 11 adds a second, separate launch path, for driving a role
-// headless — no terminal, no human in the loop:
-//   node scripts/launcher/run-role.js <role-id> --headless --prompt-file <path> [--settings <path-or-json>]
-// --settings is optional and forwarded verbatim to claude's own --settings
-// flag — the real path for an apiKeyHelper-based project (see runHeadless()
-// below); omit it when ANTHROPIC_API_KEY is set in the environment instead.
+// headless — no terminal, no human in the loop. The default, composed
+// shape (Req 3, amended mid-build):
+//   node scripts/launcher/run-role.js --headless --agent qa1 --sprint 4
+// One parameter, the sprint id — the launcher composes the opening prompt
+// itself, from this role's own built-in template (headlessPrompt() in
+// prompts.js). --agent works as a flag here (not just the interactive
+// path's leading positional argument) so this shape needs nothing else on
+// the command line; the leading positional role-id still works too, for
+// callers that prefer it (see main()'s roleId resolution below).
+//
+// An explicit override remains available, read from a path, never passed
+// as prompt text on a command line, and wins over --sprint when given:
+//   node scripts/launcher/run-role.js --headless --agent qa1 --prompt-file <path>
+//
+// By default headless runs on the operator's own logged-in Claude session
+// (Req 4, reversed mid-build — see runHeadless() below). --bare opts into
+// the original isolated-credential behavior instead, for a consumer that
+// specifically wants headless not to share this session:
+//   node scripts/launcher/run-role.js --headless --agent qa1 --sprint 4 --bare [--settings <path-or-json>]
+// --settings is only meaningful alongside --bare — it forwards verbatim to
+// claude's own --settings flag, the real path for an apiKeyHelper-based
+// project (see runHeadless() below).
+//
 // Requested by an external orchestrator (Fifty Mission Cap) that installs
 // this framework and drives docs/sprints/ from outside, through
 // sprint_lifecycle.py and state files only, never reading agent files or
@@ -43,14 +61,31 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { ROOT, ROLES, agentFilePath, readAgentMeta, agentBody } = require('./agents');
-const { initialPrompt, devTeam2ResumePrompt } = require('./prompts');
+const { initialPrompt, devTeam2ResumePrompt, headlessPrompt } = require('./prompts');
 const { resolveSession } = require('./session');
 const { checkAuth } = require('./auth');
 const { claudeCommand } = require('./claude-cmd');
 
+// Req 10: every launcher-level failure — claude not on PATH, an unreadable
+// prompt file, an unknown role id, a missing --sprint, missing credentials
+// — exits with this one reserved code, deliberately distinct from
+// anything `claude` itself is known to return (0 for a completed turn, 1
+// for its own is_error:true failures like "Not logged in", confirmed by
+// running both). 64 borrows BSD sysexits.h's EX_USAGE convention ("the
+// command was used incorrectly") rather than inventing an arbitrary
+// number — a plausible, recognizable choice for "the launcher refused to
+// even try," not verified against claude's full exit-code space (there's
+// no way to enumerate that), only against the two codes actually observed
+// here. Applied uniformly to every fail() call, interactive path included
+// — the interactive path has no documented or tested exit-code contract
+// (Req 6 verifies its argv shape, never its exit code), so this isn't a
+// regression there, and having one fail() implementation for both paths
+// is safer than threading a headless-only flag through every call site.
+const LAUNCHER_FAILURE_EXIT_CODE = 64;
+
 function fail(message) {
   console.error(`ERROR: ${message}`);
-  process.exit(1);
+  process.exit(LAUNCHER_FAILURE_EXIT_CODE);
 }
 
 function claudeOnPath() {
@@ -138,106 +173,151 @@ function readPromptFile(filePath) {
 // role's session; it is one process, doing one role's one-shot piece of
 // work, printing one JSON result, then exiting.
 //
-// Req 4: --bare is passed unconditionally, on every headless launch, with
-// no way to opt out — headless must never inherit the launching
-// operator's own OAuth/keychain session, which belongs to whoever is
-// running this launcher interactively, not to an automated role
-// invocation. --bare's own contract (confirmed against the pinned notes
-// at 39a12fd, and against a real credential-less run here) reads strictly
-// ANTHROPIC_API_KEY or apiKeyHelper, never OAuth or keychain, which is
-// exactly the isolation this requirement asks for.
-//
 // Discovered by running it, not by reading: `--agent <id>` ALONE fails in
 // --bare mode with "not found. Available agents: claude, Explore,
 // general-purpose, Plan, statusline-setup" — Claude Code's own built-in
 // types, not this project's .claude/agents/*.md personas, because --bare
 // skips reading them entirely (consistent with its own documented
-// CLAUDE.md-auto-discovery skip). The fix, also confirmed by running it
-// (a fake API key then fails at the auth step instead of at agent
-// resolution, at zero cost either way): supply the persona explicitly via
+// CLAUDE.md-auto-discovery skip). The fix, also confirmed by running it:
+// supply the persona explicitly via
 // `--agents '{"<id>":{"description":...,"prompt":...,"model":...}}'`
 // alongside `--agent <id>` — agents.js's agentBody()/readAgentMeta() below
 // build this from the exact same frontmatter/body split the interactive
 // path already uses, so the two can never describe the persona
-// differently. Whether `model` inside this JSON is actually honored
-// (versus silently ignored, falling back to a default) is NOT verified —
-// that needs a real successful run, which needs real credentials this
-// build did not have; flagged rather than assumed.
+// differently. Confirmed against a real successful (non-bare, OAuth) run
+// this round: `model` inside this JSON IS honored — a role launched via
+// this path ran as its own frontmatter model, not a default.
 //
-// QA1 round 1 (Req 4): `settings`, when given, is forwarded to claude
-// exactly as `--settings <value>` — a path to a JSON file or an inline
-// JSON string, --bare's own documented mechanism for supplying
-// apiKeyHelper. Without this, the precondition check below could name
-// "--settings" as a remedy that this file never actually wired up, which
-// is exactly the dead end QA1 demonstrated: a project relying solely on
-// apiKeyHelper had no way to use headless at all, no matter what the
-// error message claimed. Positioned before `prompt`, which must stay the
-// final, positional argument.
-function headlessLaunchArgs(role, prompt, settings) {
+// Req 4, amended mid-build: reverses the original isolation goal.
+// --bare is now opt-in (see `bare` below), not unconditional — the
+// default path runs on the operator's own logged-in session, same as
+// interactive. --bare, when given, still needs its own credentials
+// exactly as QA1 rounds 1-2 verified: ANTHROPIC_API_KEY, or `settings`
+// forwarded verbatim as `--settings <value>` (a path to a JSON file or an
+// inline JSON string — --bare's own documented apiKeyHelper mechanism,
+// meaningless without --bare so only applied there). Positioned before
+// `prompt`, which must stay the final, positional argument either way.
+//
+// The non-bare path adds `--no-session-persistence` (--print-only,
+// confirmed compatible with an explicit --agents override by running it —
+// unlike `--safe-mode`, which also disables --agents entirely: "--agent
+// 'test' not found. Available agents: claude, Explore, general-purpose,
+// Plan" — so --safe-mode cannot be used here at all). A one-shot,
+// unattended headless run has nothing to resume later; letting it persist
+// a session transcript under ~/.claude/projects/... anyway is a real,
+// avoidable side effect, and this is the one suppression testing found
+// that's actually usable on this path — see runHeadless()'s own comment
+// for what was tested and ruled out.
+function headlessLaunchArgs(role, prompt, { bare, settings } = {}) {
   const meta = readAgentMeta(role.id);
   const body = agentBody(role.id);
   const definition = { description: (meta && meta.description) || role.label, prompt: body };
   if (meta && meta.model) definition.model = meta.model;
   const agentsJson = JSON.stringify({ [role.id]: definition });
-  const settingsArgs = settings ? ['--settings', settings] : [];
-  return ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json', '--bare', ...settingsArgs, prompt];
+  const base = ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json'];
+  if (bare) {
+    const settingsArgs = settings ? ['--settings', settings] : [];
+    return [...base, '--bare', ...settingsArgs, prompt];
+  }
+  return [...base, '--no-session-persistence', prompt];
 }
 
-async function runHeadless(role, promptFilePath, settings) {
-  // Req 4: checked here, before claude is even invoked, so the common
-  // failure (no credentials supplied at all) is immediate and unambiguous
-  // rather than waiting for --bare's own response — which is ALSO legible
-  // (a well-formed envelope with is_error:true and a "Not logged in"
-  // result, confirmed against the pinned notes and against a real run in
-  // an environment with no ANTHROPIC_API_KEY here) but easy for a careless
-  // consumer to miss buried inside a JSON blob, exactly the risk the
-  // pinned notes warn a naive metering caller into. This check reads the
-  // LAUNCHING ENVIRONMENT (an env var and this file's own --settings
-  // flag), never the envelope claude itself prints, so it doesn't touch
-  // Req 2's "we emit, we do not parse" boundary at all.
+async function runHeadless(role, { sprintId, promptFilePath, bare, settings }) {
+  // Req 4, amended: the credential check now branches on whether --bare
+  // was requested, since it changes which credential source is actually
+  // in play.
   //
-  // QA1 round 1: this used to hard-fail whenever ANTHROPIC_API_KEY was
-  // unset, full stop, with a message naming "--settings" as a remedy that
-  // didn't exist anywhere in this file — an apiKeyHelper-only project
-  // could not use headless at all, no matter what it passed. Fixed by
-  // actually accepting a `--settings <value>` flag (parsed in main() below,
-  // forwarded into headlessLaunchArgs() above) and only hard-failing here
-  // when NEITHER credential source was supplied. This does not validate
-  // that a given --settings value actually configures apiKeyHelper — doing
-  // that would mean re-implementing claude's own settings-file parsing
-  // just to double-check it — so a meaningless --settings value (e.g.
-  // '{}') still passes this check and falls through to --bare's own
-  // legible is_error:true failure instead of this friendlier one. That's
-  // an acceptable, deliberate trade: Req 4 asks for a legible failure, not
-  // specifically an early one, and the same "don't block on an
-  // inconclusive signal" reasoning already applies to checkAuth() on the
-  // interactive path below.
-  if (!process.env.ANTHROPIC_API_KEY && !settings) {
+  // --bare (opt-in isolation, unchanged reasoning from QA1 rounds 1-2):
+  // checked here, before claude is even invoked, so the common failure
+  // (no credentials supplied at all) is immediate and unambiguous rather
+  // than waiting for --bare's own response — which is ALSO legible (a
+  // well-formed envelope with is_error:true and a "Not logged in" result,
+  // confirmed against the pinned notes and against a real credential-less
+  // run) but easy for a careless consumer to miss buried inside a JSON
+  // blob. This does not validate that a given --settings value actually
+  // configures apiKeyHelper — doing that would mean re-implementing
+  // claude's own settings-file parsing just to double-check it — so a
+  // meaningless --settings value still passes this check and falls
+  // through to --bare's own legible failure instead of this friendlier
+  // one; an accepted trade, unchanged from round 1.
+  //
+  // Default (operator's own session): reuses checkAuth(), the EXACT same
+  // check and the exact same credential source the interactive path below
+  // already uses — Req 4 now explicitly wants headless to run on that
+  // session, so checking it any other way would mean two different tests
+  // of the same fact. Only a *confident* "unauthenticated" blocks; an
+  // inconclusive probe proceeds, same reasoning as the interactive check.
+  if (bare) {
+    if (!process.env.ANTHROPIC_API_KEY && !settings) {
+      fail(
+        'Headless --bare mode needs its own credentials — neither ANTHROPIC_API_KEY nor ' +
+          '--settings <file-or-json> was supplied. --bare reads strictly ANTHROPIC_API_KEY or ' +
+          'apiKeyHelper, never the OAuth/keychain session an interactive launch (or headless ' +
+          'without --bare) would use. Set ANTHROPIC_API_KEY, or pass --settings ' +
+          '<path-or-inline-json> pointing at an apiKeyHelper config, and re-run: ' +
+          'node scripts/launcher/run-role.js --headless --agent <role-id> --sprint <id> --bare ' +
+          '--settings <path-or-json>.'
+      );
+    }
+  } else if (checkAuth() === 'unauthenticated') {
     fail(
-      'Headless mode needs its own credentials — neither ANTHROPIC_API_KEY nor --settings ' +
-        '<file-or-json> was supplied. --bare mode (which headless always uses) reads strictly ' +
-        'ANTHROPIC_API_KEY or apiKeyHelper, never the OAuth/keychain session an interactive ' +
-        'launch would use. Set ANTHROPIC_API_KEY, or pass --settings <path-or-inline-json> ' +
-        "pointing at an apiKeyHelper config, and re-run: node scripts/launcher/run-role.js " +
-        '<role-id> --headless --prompt-file <path> --settings <path-or-json>.'
+      'Claude reports no usable credentials for this operator session. Open a normal terminal, ' +
+        "run 'claude', sign in, then re-run this task — or pass --bare with its own " +
+        'ANTHROPIC_API_KEY or --settings if you specifically want this headless run isolated ' +
+        'from this session instead.'
     );
   }
-  const prompt = readPromptFile(promptFilePath);
-  const result = await spawnClaude(headlessLaunchArgs(role, prompt, settings));
+  // The file override wins when given, regardless of whether --sprint was
+  // also passed — Req 3: an explicit override is the escape hatch, never
+  // the default, so a caller reaching for it gets exactly what it asked
+  // for rather than a silent tie-break the other way.
+  const prompt = promptFilePath ? readPromptFile(promptFilePath) : headlessPrompt(role, sprintId);
+  const result = await spawnClaude(headlessLaunchArgs(role, prompt, { bare, settings }));
+  // Req 10, documented per its own requirement: once claude has actually
+  // been spawned, its exit code is passed through UNMODIFIED (null, from
+  // a signal, still maps to 0 — pre-existing behavior from before this
+  // sprint, unchanged here). This is deliberate, not an oversight: a
+  // completed turn — QA1 auditing and recording a FAIL is exactly this —
+  // exits 0 (confirmed by running a real turn to completion), so
+  // pass-through already gives "recorded any verdict -> exit 0" for free,
+  // without this launcher needing to parse the JSON envelope to know it
+  // (Req 2's "we emit, we do not parse" boundary stays intact). The known
+  // edge this does NOT cleanly cover: a real is_error:true response from
+  // claude itself (confirmed by running one — "Not logged in", exit 1)
+  // that gets past the credential precondition above because checkAuth()
+  // only blocks on a *confident* unauthenticated result, not an
+  // inconclusive one. In that rare case, exit 1 here overlaps with what a
+  // genuine crashed session might also return — a real, accepted gap
+  // rather than a claimed guarantee, and distinct from the reserved range
+  // above, which only ever covers failures this launcher detected BEFORE
+  // spawning claude at all.
   process.exitCode = result.code === null ? 0 : result.code;
 }
 
 async function main() {
-  const [, , roleId, ...rest] = process.argv;
-  const forceRestart = rest.includes('--restart');
-  const headless = rest.includes('--headless');
-  const promptFileFlagIndex = rest.indexOf('--prompt-file');
-  const promptFilePath = promptFileFlagIndex === -1 ? null : rest[promptFileFlagIndex + 1];
-  // QA1 round 1: forwarded to claude's own --settings, headless's real
-  // (rather than merely claimed) apiKeyHelper path — see runHeadless()'s
-  // comment above for why this exists.
-  const settingsFlagIndex = rest.indexOf('--settings');
-  const settings = settingsFlagIndex === -1 ? null : rest[settingsFlagIndex + 1];
+  const argv = process.argv.slice(2);
+
+  function flagValue(flag) {
+    const i = argv.indexOf(flag);
+    return i === -1 ? null : argv[i + 1];
+  }
+
+  const forceRestart = argv.includes('--restart');
+  const headless = argv.includes('--headless');
+  // Req 3, amended: --agent <role-id> is now a real flag, not just
+  // shorthand for the interactive path's leading positional argument —
+  // the canonical headless shape (`--headless --agent qa1 --sprint 4`)
+  // never puts the role first. The old leading-positional form still
+  // works too (falls through to argv[0] when --agent isn't present),
+  // which is what keeps the interactive path's own invocation
+  // (`<role-id> [--restart]`) unchanged, per Req 6.
+  const roleId = flagValue('--agent') || argv[0];
+  const sprintId = flagValue('--sprint');
+  const promptFilePath = flagValue('--prompt-file');
+  const bare = argv.includes('--bare');
+  // Only meaningful alongside --bare (apiKeyHelper) — see runHeadless()'s
+  // comment above.
+  const settings = flagValue('--settings');
 
   const role = ROLES.find((r) => r.id === roleId);
   if (!role) {
@@ -266,24 +346,30 @@ async function main() {
   }
 
   if (headless) {
-    if (!promptFilePath) {
-      fail('--headless requires --prompt-file <path>.');
+    if (!promptFilePath && !sprintId) {
+      fail(
+        '--headless requires either --sprint <id> (composes the opening prompt from this ' +
+          "role's own built-in template — the default) or --prompt-file <path> (an explicit " +
+          'override, read from a path, never passed as prompt text on a command line).'
+      );
     }
-    await runHeadless(role, promptFilePath, settings);
+    await runHeadless(role, { sprintId, promptFilePath, bare, settings });
     return;
   }
 
-  // Req 6: only the interactive path checks the OPERATOR's own auth —
-  // headless never does (see runHeadless() above); it checks for its own
-  // credentials instead, and for a different reason (Req 4 forbids
-  // headless from ever falling back to this operator's session, rather
-  // than this check existing to protect the operator). Worded differently
-  // from the not-on-PATH failure above so the two are never mistaken for
-  // each other; only a *confident* "credentials unusable" blocks here, an
-  // inconclusive probe proceeds rather than locking out a setup that
-  // might work fine; the block can legitimately come from either a
-  // genuine logout or a broken config directory, and this message states
-  // the observation and the remedy, not a cause it doesn't actually know.
+  // Req 6: the interactive path checks the OPERATOR's own auth here, via
+  // checkAuth(). Req 4, amended mid-build: headless's default (non-bare)
+  // path now checks the exact same thing, the exact same way, inside
+  // runHeadless() above — it used to deliberately never touch operator
+  // auth at all, back when --bare was unconditional; that reasoning no
+  // longer applies now that the default headless path IS the operator's
+  // session. Worded differently from the not-on-PATH failure above so the
+  // two are never mistaken for each other; only a *confident* "credentials
+  // unusable" blocks here, an inconclusive probe proceeds rather than
+  // locking out a setup that might work fine; the block can legitimately
+  // come from either a genuine logout or a broken config directory, and
+  // this message states the observation and the remedy, not a cause it
+  // doesn't actually know.
   if (checkAuth() === 'unauthenticated') {
     fail(
       "Claude reports no usable credentials. Open a normal terminal, run " +
@@ -333,4 +419,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { freshLaunchArgs, resumeLaunchArgs, headlessLaunchArgs };
+module.exports = { freshLaunchArgs, resumeLaunchArgs, headlessLaunchArgs, LAUNCHER_FAILURE_EXIT_CODE };
