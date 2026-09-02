@@ -89,11 +89,110 @@ prompt that something might talk its way past.
   what it removes/confines, but that description wasn't independently
   verified by running it here.
 - `--add-dir`-based directory confinement (mentioned in `--restricted`'s
-  own help text) — not tested as a standalone mechanism.
-- Whether this scope profile holds when applied to the REAL six persona
-  files (`--agents` JSON built from `agentBody()`) rather than the
-  synthetic `test` agent used throughout this document — plausible, not
-  confirmed.
+  own help text) — not tested as a standalone mechanism, and turned out
+  not to be needed: see "A finding this document didn't expect" below.
+
+## Closing the two UNTESTED items (Req 3's own condition for Req 4 to run)
+
+Both closed by running, before any Req 4 discovery pass began.
+
+**`npm publish` under Pipeman's profile.** `npm publish --dry-run` run
+under exactly `--permission-mode acceptEdits --allowedTools "Bash(npm *)"`
+in a scratch package succeeded cleanly — no permission block, only npm's
+own dry-run output (tarball contents, shasum, "Publishing to
+https://registry.npmjs.org/ with tag latest and default access
+(dry-run)"). CONFIRMED: the same `Bash(npm *)` allowlist that unblocked
+`--version`/`view` also covers `publish --dry-run`, with nothing narrower
+needed. A first attempt used a prerelease-tagged test version and npm
+itself refused it ("You must specify a tag using --tag when publishing a
+prerelease version") — that's npm's own validation, not a permission
+block, and the corrected version published clean on retry.
+
+**Master Controller writing a sprint file, as its own scenario.** Tested
+directly against the real mechanism (`node scripts/run-lifecycle.js new
+--title-file ...`), not inferred from Edit/Write generically:
+- The `Write` tool, writing a file WITHIN the working directory,
+  succeeded under plain `acceptEdits` alone — CONFIRMED, no allowlist
+  needed, matching the earlier Edit-tool finding.
+- Running `node scripts/run-lifecycle.js new` itself required an explicit
+  `--allowedTools "Bash(node scripts/run-lifecycle.js *)"` entry — it is
+  NOT auto-approved like `git`, it's in the same "interpreter + script"
+  category as `python3 scripts/*` and `node scripts/*` generally. This
+  was a genuine surprise relative to this document's original inference
+  ("the same acceptEdits-covers-Write profile Dev Team uses") — the write
+  itself needed nothing extra, but the script invocation that actually
+  creates a real sprint (the mechanism MC's own command file specifies)
+  did.
+- A write attempted to an absolute path OUTSIDE the working directory
+  (`/tmp/...`) was BLOCKED even under `acceptEdits` — "Claude requested
+  permissions to write to X, but you haven't granted it yet." This is new
+  evidence, not previously in this document: `acceptEdits`'s auto-approval
+  appears to already be confined to the launch working directory, without
+  any `--add-dir` configuration. That's exactly the "caller-designated
+  working directory" bound Req 2 asked to test — it looks like it comes
+  free with `acceptEdits`, not something this framework needs to
+  separately wire up. Stated as an observation from one test, not a
+  guarantee across every possible path shape.
+
+## Req 4: the real six-role discovery pass
+
+Run for real, in the same scratch throwaway repo used for Reqs 1-2 (a
+published-shaped install via `npm pack` of this repo's own code, not the
+synthetic `test` agent — the real six `--agents` personas, built through
+`agentBody()`/`readAgentMeta()` exactly as production headless does),
+driving one real sprint (`hello.txt` gains a header comment) through both
+gates, all six roles, in sequence:
+
+1. **Dev Team 1** — built the change, committed, self-reviewed, correct
+   handoff. $0.19, 9 turns, `is_error: false`.
+2. **QA1** — full audit, PASS recorded, byte-level verification (`od`
+   against both blobs) rather than trusting the commit message. $1.47, 25
+   turns.
+3. **Dev Team 1** (second invocation, `/sprint-dev-done`) — correctly
+   recognized no new work was needed, ran dev-done, produced a correct
+   handoff naming Pipeman as next. $0.20, 9 turns.
+4. **Pipeman** — pushed for real to a local bare remote, correctly
+   determined this scratch repo has no `package.json` (so no release, no
+   npm step — Req 11's fix validated in a real run: no false-positive
+   publish attempt), recorded the ship. $0.37, 22 turns.
+5. **LiveQA** — correctly identified there is no deployed product to
+   browser-test, verified what genuinely exists instead (byte-level
+   content check against the pushed remote, commit SHA match), PASS with
+   an explicit scope note rather than either fabricating a browser session
+   or refusing to run. $1.62, 28 turns.
+6. **Master Controller** — read-only status report, explicitly declined to
+   amend the sprint file (would invalidate QA1's audited-file hash),
+   correctly refused to treat "both gates green" as closure authorization.
+   $0.73, 9 turns.
+7. **Dev Team 2** (closing the loop on all six roles within this one
+   sprint) — confirmed the same status, correctly refused to run
+   `/sprint-complete` without real user authorization. $0.20, 8 turns.
+
+Total: ~$4.78 across seven real headless invocations. Every run:
+`is_error: false`, exit 0, correct tool use, no fabricated results.
+
+### A finding this document didn't expect: the templates themselves needed no changes
+
+Per Req 5's own framing ("where a run confirms the design, say so; where
+it contradicts it, say what was wrong") — the fixed scaffold and per-role
+pointers in `scripts/launcher/prompts.js` are UNCHANGED by this pass.
+Every role oriented correctly from nothing but "read the sprint file and
+state file" plus its own persona. The desk design survived contact.
+
+### The real finding: three roles independently hit the same tooling gap
+
+**QA1, LiveQA, and Master Controller each separately flagged, unprompted,
+that `.claude/agents/qa1.md` and `liveqa.md`'s `--notes-file` mandate is
+unusable headless** — both files require the Write tool for the
+`--notes-file` pattern, and Write is correctly disallowed for qa1/liveqa
+under this sprint's own Req 3 scoped profile. All three found working, safe
+alternatives on their own (a quoted heredoc via Bash; confirming notes
+contain no backtick/`$`/backslash before passing `--notes` inline) rather
+than being blocked or improvising something unsafe — but all three said
+this should be fixed at the source, not worked around every time. Three
+independent roles reaching the identical conclusion, unprompted, is strong
+evidence this is real, not a fluke of one role's phrasing. See the round-5
+handoff for the actual fix to `qa1.md`/`liveqa.md`.
 
 ## What this settles, and what it doesn't
 
