@@ -1,5 +1,5 @@
 {
-  "next_id": 11,
+  "next_id": 12,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -60,6 +60,12 @@
       "epic": "Framework rules and distribution",
       "status": "in_progress",
       "file": "docs/sprints/2-in-progress/sprint-10_make-the-upgrade-mechanism-work-on-windows-and-say-what-the-framework-needs-to-run.md"
+    },
+    "11": {
+      "title": "Launch a role headless, with its opening prompt read from a file",
+      "epic": "Framework rules and distribution",
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-11_launch-a-role-headless-with-its-opening-prompt-read-from-a-file.md"
     }
   }
 }
