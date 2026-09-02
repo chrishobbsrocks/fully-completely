@@ -1366,6 +1366,7 @@ const {
   freshLaunchArgs,
   resumeLaunchArgs,
   headlessLaunchArgs,
+  headlessPermissionArgs,
   LAUNCHER_FAILURE_EXIT_CODE,
 } = require('./launcher/run-role');
 
@@ -1428,9 +1429,22 @@ test('run-role: headlessLaunchArgs supplies the persona via --agents JSON (--bar
 // --agents override (--safe-mode was NOT: it disabled --agents too,
 // confirmed by running it — "--agent 'test' not found. Available agents:
 // claude, Explore, general-purpose, Plan").
+//
+// Sprint 12, Req 3: the permission-scope args (headlessPermissionArgs(),
+// tested separately below) now sit between the --agents JSON and -p —
+// these tests compute the expected block from the real function rather
+// than hardcoding QA1's profile content here, so they can never silently
+// drift from it.
 test('run-role: headlessLaunchArgs default (no bare) omits --bare, adds --no-session-persistence, omits --settings', () => {
   const args = headlessLaunchArgs(QA1_ROLE, 'do the audit');
-  assert.deepStrictEqual(args.slice(4), ['-p', '--output-format', 'json', '--no-session-persistence', 'do the audit']);
+  assert.deepStrictEqual(args.slice(4), [
+    '-p',
+    '--output-format',
+    'json',
+    ...headlessPermissionArgs(QA1_ROLE),
+    '--no-session-persistence',
+    'do the audit',
+  ]);
   assert.ok(!args.includes('--bare'));
   assert.ok(!args.includes('--settings'));
 });
@@ -1441,12 +1455,19 @@ test('run-role: headlessLaunchArgs default (no bare) also omits --bare/--setting
   const args = headlessLaunchArgs(QA1_ROLE, 'do the audit', { settings: '{"apiKeyHelper":"/x.sh"}' });
   assert.ok(!args.includes('--bare'));
   assert.ok(!args.includes('--settings'));
-  assert.deepStrictEqual(args.slice(4), ['-p', '--output-format', 'json', '--no-session-persistence', 'do the audit']);
+  assert.deepStrictEqual(args.slice(4), [
+    '-p',
+    '--output-format',
+    'json',
+    ...headlessPermissionArgs(QA1_ROLE),
+    '--no-session-persistence',
+    'do the audit',
+  ]);
 });
 
 test('run-role: headlessLaunchArgs bare:true adds --bare, omits --no-session-persistence, omits --settings when none given', () => {
   const args = headlessLaunchArgs(QA1_ROLE, 'do the audit', { bare: true });
-  assert.deepStrictEqual(args.slice(4), ['-p', '--output-format', 'json', '--bare', 'do the audit']);
+  assert.deepStrictEqual(args.slice(4), ['-p', '--output-format', 'json', ...headlessPermissionArgs(QA1_ROLE), '--bare', 'do the audit']);
   assert.ok(!args.includes('--no-session-persistence'));
   assert.ok(!args.includes('--settings'));
 });
@@ -1461,11 +1482,71 @@ test('run-role: headlessLaunchArgs bare:true forwards --settings ahead of the tr
     '-p',
     '--output-format',
     'json',
+    ...headlessPermissionArgs(QA1_ROLE),
     '--bare',
     '--settings',
     '{"apiKeyHelper":"/path/to/helper.sh"}',
     'do the audit',
   ]);
+});
+
+// -------------------------------------------------------------------------
+// Sprint 12, Req 3: headlessPermissionArgs() — the scoped profile itself.
+// -------------------------------------------------------------------------
+test('run-role: headlessPermissionArgs is defined for every real role and always includes acceptEdits', () => {
+  for (const role of RUN_ROLE_ROLES) {
+    const args = headlessPermissionArgs(role);
+    assert.deepStrictEqual(args.slice(0, 2), ['--permission-mode', 'acceptEdits'], `${role.id}: must start with acceptEdits`);
+  }
+});
+
+test('run-role: headlessPermissionArgs never includes --bare, --settings, or --permission-mode bypassPermissions', () => {
+  // The whole point of sprint 12's Req 3 decision: no role's profile may
+  // resemble the refused blanket bypass, ever, by construction.
+  for (const role of RUN_ROLE_ROLES) {
+    const args = headlessPermissionArgs(role);
+    assert.ok(!args.includes('bypassPermissions'), `${role.id}: must never grant bypassPermissions`);
+    assert.ok(!args.includes('--bare'));
+    assert.ok(!args.includes('--settings'));
+  }
+});
+
+test('run-role: headlessPermissionArgs hard-disables Edit/Write for qa1 and liveqa, neither of which writes source', () => {
+  for (const roleId of ['qa1', 'liveqa']) {
+    const role = RUN_ROLE_ROLES.find((r) => r.id === roleId);
+    const args = headlessPermissionArgs(role);
+    const idx = args.indexOf('--disallowedTools');
+    assert.ok(idx !== -1, `${roleId}: must pass --disallowedTools`);
+    assert.strictEqual(args[idx + 1], 'Edit,Write');
+  }
+});
+
+test('run-role: headlessPermissionArgs does not disallow Edit/Write for roles that write source or sprint files', () => {
+  for (const roleId of ['dev-team-1', 'dev-team-2', 'master-controller', 'pipeman']) {
+    const role = RUN_ROLE_ROLES.find((r) => r.id === roleId);
+    assert.ok(!headlessPermissionArgs(role).includes('--disallowedTools'), `${roleId}: must not disallow Edit/Write`);
+  }
+});
+
+test('run-role: headlessPermissionArgs grants pipeman npm access and nothing about npm to qa1', () => {
+  const pipemanArgs = headlessPermissionArgs(RUN_ROLE_ROLES.find((r) => r.id === 'pipeman'));
+  assert.ok(pipemanArgs.some((a) => a.includes('Bash(npm *)')), 'pipeman must be allowed Bash(npm *)');
+  const qa1Args = headlessPermissionArgs(QA1_ROLE);
+  assert.ok(!qa1Args.some((a) => a.includes('npm')), 'qa1 has no stated need for npm and must not be granted it');
+});
+
+test('run-role: headlessPermissionArgs grants every role the two lifecycle-script invocation patterns', () => {
+  for (const role of RUN_ROLE_ROLES) {
+    const allowedIdx = headlessPermissionArgs(role).indexOf('--allowedTools');
+    assert.ok(allowedIdx !== -1, `${role.id}: must pass --allowedTools`);
+    const allowed = headlessPermissionArgs(role)[allowedIdx + 1];
+    assert.ok(allowed.includes('Bash(node scripts/run-lifecycle.js *)'), `${role.id}: missing run-lifecycle.js allowlist`);
+    assert.ok(allowed.includes('Bash(python3 scripts/sprint_lifecycle.py *)'), `${role.id}: missing sprint_lifecycle.py allowlist`);
+  }
+});
+
+test('run-role: headlessPermissionArgs throws for an unknown role rather than launching with no scope at all', () => {
+  assert.throws(() => headlessPermissionArgs({ id: 'not-a-real-role', label: 'Nope' }), /No headless permission profile/);
 });
 
 test('run-role: headlessLaunchArgs prompt stays the final positional argument in every mode', () => {
