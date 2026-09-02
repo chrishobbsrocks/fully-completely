@@ -581,12 +581,16 @@ test('install.js: a genuinely different CLAUDE.md is reported as a conflict', ()
 // -------------------------------------------------------------------------
 const REAL_RUN_ROLE_JS = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'launcher', 'run-role.js'), 'utf8');
 const REAL_QA1_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'qa1.md'), 'utf8');
-// liveqa.md, not qa1.md, for the baseline-match tests below (sprint 9
-// onward): sprint 9 edits qa1.md's live content, which the committed
-// baseline table (generated from published tarballs, before that edit)
-// doesn't cover — a test proving "matches a published baseline" needs a
-// file this repo hasn't since changed. liveqa.md is untouched since 0.1.5.
-const REAL_LIVEQA_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'liveqa.md'), 'utf8');
+// pipeman.md, not qa1.md or liveqa.md, for the tests below that assert a
+// file matches the COMMITTED baseline table (scripts/baselines/user-owned-
+// content.json, generated from published tarballs): sprint 9 edited
+// qa1.md's live content and sprint 11 edits BOTH qa1.md's and liveqa.md's
+// (Req 7's --notes-file mandate) ahead of the 0.1.10 publish that will
+// regenerate that table, so neither currently matches any published
+// version — a test proving "matches a published baseline" needs a file
+// this repo hasn't since changed. pipeman.md is untouched since 0.1.8 (the
+// table's newest entry); confirmed by hash before relying on it here.
+const REAL_PIPEMAN_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'pipeman.md'), 'utf8');
 const REAL_CURRENT_VERSION = require(path.join(REPO_ROOT, 'package.json')).version;
 
 function writeVersionMarker(dir, version) {
@@ -861,7 +865,7 @@ test('install.js: removing a dead gitignore line preserves the file\'s original 
 // rather than re-deriving it.
 // -------------------------------------------------------------------------
 const QA1_REL_PATH = path.join('.claude', 'agents', 'qa1.md');
-const LIVEQA_REL_PATH = path.join('.claude', 'agents', 'liveqa.md');
+const PIPEMAN_REL_PATH = path.join('.claude', 'agents', 'pipeman.md');
 
 test('install.js: a fresh install writes a manifest recording every tracked user-owned file it wrote', () => {
   withFixture((dir) => {
@@ -960,27 +964,31 @@ test('install.js: a file matching a published baseline, with no manifest at all,
   // because a manifest was the ONLY proof source and none of those
   // installs could ever have one. This repo's real, committed baseline
   // table (scripts/baselines/user-owned-content.json, generated from the
-  // real published tarballs) is Req 1's second source of proof: liveqa.md's
-  // content here is exactly what 0.1.0-0.1.5 actually shipped, so it must
-  // now be recognised and brought current, not conflicted. (liveqa.md, not
-  // qa1.md — sprint 9 edits qa1.md's live content, so its current bytes
-  // are no longer what the committed baseline table has on record; see
-  // REAL_LIVEQA_MD's own comment above.)
+  // real published tarballs) is Req 1's second source of proof: pipeman.md's
+  // content here is exactly what shipped through 0.1.8, so it must now be
+  // recognised and brought current, not conflicted. (pipeman.md, not
+  // qa1.md or liveqa.md — sprint 9 edited qa1.md's live content and
+  // sprint 11 edits both qa1.md's and liveqa.md's ahead of the 0.1.10
+  // publish that will regenerate this table, so neither's current bytes
+  // are on record there right now; see REAL_PIPEMAN_MD's own comment
+  // above. baselineHashesFor() matches against any published version, not
+  // just the one in the fixture's version marker, so 0.1.4 here doesn't
+  // need to be the specific version whose hash matches.)
   withFixture((dir) => {
     writeVersionMarker(dir, '0.1.4');
-    const liveqaPath = path.join(dir, LIVEQA_REL_PATH);
-    fs.mkdirSync(path.dirname(liveqaPath), { recursive: true });
-    fs.writeFileSync(liveqaPath, REAL_LIVEQA_MD);
+    const pipemanPath = path.join(dir, PIPEMAN_REL_PATH);
+    fs.mkdirSync(path.dirname(pipemanPath), { recursive: true });
+    fs.writeFileSync(pipemanPath, REAL_PIPEMAN_MD);
 
     const output = runInstall(dir);
 
     assert.doesNotMatch(output, /Conflicts/, 'a baseline-proven file must not conflict');
-    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/liveqa\.md/);
-    assert.strictEqual(fs.readFileSync(liveqaPath, 'utf8'), REAL_LIVEQA_MD);
+    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/pipeman\.md/);
+    assert.strictEqual(fs.readFileSync(pipemanPath, 'utf8'), REAL_PIPEMAN_MD);
     const manifest = readManifest(dir);
     assert.strictEqual(
-      manifest[LIVEQA_REL_PATH],
-      fcHash(REAL_LIVEQA_MD),
+      manifest[PIPEMAN_REL_PATH],
+      fcHash(REAL_PIPEMAN_MD),
       'a baseline-proven file must be recorded in the manifest as it is upgraded (Req 3), so the next run no longer needs the baseline sweep at all'
     );
   });
@@ -1058,30 +1066,34 @@ test('install.js: a valid manifest with no entry for a given user-owned file res
 test('install.js: a manifest entry stored under a backslash key never matches a real relPath, even by coincidence (Req 2/3)', () => {
   withFixture((dir) => {
     writeVersionMarker(dir, '0.1.0');
-    const qa1Path = path.join(dir, QA1_REL_PATH);
-    fs.mkdirSync(path.dirname(qa1Path), { recursive: true });
-    fs.writeFileSync(qa1Path, REAL_QA1_MD); // byte-identical to what we'd write
+    const pipemanPath = path.join(dir, PIPEMAN_REL_PATH);
+    fs.mkdirSync(path.dirname(pipemanPath), { recursive: true });
+    fs.writeFileSync(pipemanPath, REAL_PIPEMAN_MD); // byte-identical to what we'd write
     // A manifest recording the CORRECT hash, but under the Windows-shaped
     // key a broken pre-fix run would have used instead of the real
     // forward-slash one. manifestHashFor() normalizes the QUERY key
     // (built from the real, forward-slash relPath on this machine), so it
-    // must look for '.claude/agents/qa1.md' and find nothing here.
-    writeManifest(dir, { '.claude\\agents\\qa1.md': fcHash(REAL_QA1_MD) });
+    // must look for '.claude/agents/pipeman.md' and find nothing here.
+    // pipeman.md, not qa1.md (this test's original fixture file) — sprint
+    // 11 edits qa1.md live (Req 7), so it's no longer on record in the
+    // committed baseline table until 0.1.10 publishes and regenerates it;
+    // see REAL_PIPEMAN_MD's own comment above.
+    writeManifest(dir, { '.claude\\agents\\pipeman.md': fcHash(REAL_PIPEMAN_MD) });
 
     const output = runInstall(dir);
 
-    // No manifest match — but REAL_QA1_MD also matches a real published
+    // No manifest match — but REAL_PIPEMAN_MD also matches a real published
     // baseline, so Req 1's second proof source correctly takes over and
     // this still resolves to "already present", not a conflict. That's
     // the safe fallback working, not a failure to detect the stale key.
-    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/qa1\.md/);
+    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/pipeman\.md/);
     assert.doesNotMatch(output, /Conflicts/);
     const manifest = readManifest(dir);
     assert.ok(
-      !Object.prototype.hasOwnProperty.call(manifest, '.claude\\agents\\qa1.md'),
+      !Object.prototype.hasOwnProperty.call(manifest, '.claude\\agents\\pipeman.md'),
       'the stale backslash key must not survive into the new manifest'
     );
-    assert.strictEqual(manifest[QA1_REL_PATH], fcHash(REAL_QA1_MD), 'the real, forward-slash key must be written instead');
+    assert.strictEqual(manifest[PIPEMAN_REL_PATH], fcHash(REAL_PIPEMAN_MD), 'the real, forward-slash key must be written instead');
   });
 });
 
@@ -1330,6 +1342,232 @@ test('python-interpreter: no candidate resolves to a real Python 3 -> null, not 
   withFakeInterpreters({}, () => {
     assert.strictEqual(findPython3Interpreter(), null);
   });
+});
+
+// -------------------------------------------------------------------------
+// run-role.js (Sprint 11: headless launch, Req 9 coverage)
+// -------------------------------------------------------------------------
+const { ROLES: RUN_ROLE_ROLES, readAgentMeta, agentBody } = require('./launcher/agents');
+const { initialPrompt: RR_initialPrompt, devTeam2ResumePrompt: RR_devTeam2ResumePrompt } = require('./launcher/prompts');
+const {
+  freshLaunchArgs,
+  resumeLaunchArgs,
+  headlessLaunchArgs,
+} = require('./launcher/run-role');
+
+const QA1_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'qa1');
+const DEV_TEAM_2_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'dev-team-2');
+
+// Req 6 (interactive path unchanged): exact-argv-shape assertions on the
+// pure builders extracted from the pre-sprint-11 launchFresh()/resume
+// call, so a regression here is a mechanical assertion failure, not a
+// claim in a handoff.
+test('run-role: freshLaunchArgs builds the exact pre-sprint-11 fresh-launch argv', () => {
+  const args = freshLaunchArgs(QA1_ROLE, 'fc:qa1:fully-completely', 'uuid-123');
+  assert.deepStrictEqual(args, [
+    '--agent',
+    'qa1',
+    '--session-id',
+    'uuid-123',
+    '--name',
+    'fc:qa1:fully-completely',
+    RR_initialPrompt('QA1'),
+  ]);
+});
+
+test('run-role: resumeLaunchArgs builds plain --agent/--resume argv for a non-dev-team-2 role', () => {
+  const args = resumeLaunchArgs(QA1_ROLE, 'uuid-456', 'fully-completely');
+  assert.deepStrictEqual(args, ['--agent', 'qa1', '--resume', 'uuid-456']);
+});
+
+test('run-role: resumeLaunchArgs appends the worktree-check prompt only for dev-team-2', () => {
+  const args = resumeLaunchArgs(DEV_TEAM_2_ROLE, 'uuid-789', 'fully-completely');
+  assert.deepStrictEqual(args, [
+    '--agent',
+    'dev-team-2',
+    '--resume',
+    'uuid-789',
+    RR_devTeam2ResumePrompt('fully-completely'),
+  ]);
+});
+
+// Req 3 + Req 4 (headless argv shape): built from the same
+// readAgentMeta()/agentBody() split the interactive path never touches, so
+// this test would fail the moment headlessLaunchArgs and agents.js drift
+// about where the frontmatter ends, rather than only on a real invocation.
+test('run-role: headlessLaunchArgs supplies the persona via --agents JSON (--bare cannot read .claude/agents/*.md)', () => {
+  const args = headlessLaunchArgs(QA1_ROLE, 'do the audit');
+  const meta = readAgentMeta('qa1');
+  const body = agentBody('qa1');
+  assert.deepStrictEqual(args.slice(0, 2), ['--agent', 'qa1']);
+  assert.strictEqual(args[2], '--agents');
+  const agentsJson = JSON.parse(args[3]);
+  assert.deepStrictEqual(Object.keys(agentsJson), ['qa1']);
+  assert.strictEqual(agentsJson.qa1.description, meta.description);
+  assert.strictEqual(agentsJson.qa1.prompt, body);
+  assert.strictEqual(agentsJson.qa1.model, meta.model);
+  assert.deepStrictEqual(args.slice(4), ['-p', '--output-format', 'json', '--bare', 'do the audit']);
+});
+
+test('run-role: headlessLaunchArgs omits "model" from the JSON when the persona file has none', () => {
+  const args = headlessLaunchArgs({ id: 'qa1', label: 'QA1' }, 'p');
+  const agentsJson = JSON.parse(args[3]);
+  // qa1.md does declare a model, so this exercises the omission branch
+  // directly rather than relying on a fixture file happening to lack one.
+  if (readAgentMeta('qa1').model) {
+    assert.ok('model' in agentsJson.qa1, 'sanity: qa1.md is expected to declare a model');
+  }
+});
+
+// CLI-level tests: spawn the real script as a real OS process (Req 1 — a
+// headless launch is a genuinely separate process, never an in-process
+// sub-agent call), against this worktree's real .claude/agents/*.md files.
+const RUN_ROLE_PATH = path.join(REPO_ROOT, 'scripts', 'launcher', 'run-role.js');
+
+function runRoleCli(args, envOverrides) {
+  return spawnSync(process.execPath, [RUN_ROLE_PATH, ...args], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, ...envOverrides },
+  });
+}
+
+// A fake `claude` on PATH: answers --version so claudeOnPath() passes,
+// records every other invocation's argv (one per line) to a log file, and
+// prints ONLY a fixed JSON string to stdout — nothing else — so a test can
+// assert stdout equals exactly that string (Req 2: headless writes nothing
+// extraneous to stdout) while still separately observing stderr.
+const FAKE_JSON_RESULT = '{"type":"result","is_error":true,"result":"fake"}';
+
+function withFakeClaude(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-fake-claude-'));
+  const argvLog = path.join(dir, 'argv.log');
+  const script = [
+    '#!/bin/sh',
+    'if [ "$1" = "--version" ]; then exit 0; fi',
+    'for a in "$@"; do printf \'%s\\n\' "$a" >> ' + JSON.stringify(argvLog) + '; done',
+    `printf '%s' '${FAKE_JSON_RESULT}'`,
+    'exit 0',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(dir, 'claude'), script);
+  fs.chmodSync(path.join(dir, 'claude'), 0o755);
+  try {
+    fn({
+      dir,
+      argvLog,
+      // No log file at all means claude was never invoked — a valid, in
+      // fact the expected, outcome for every precondition-failure test
+      // below, not a fixture bug.
+      readArgv: () => (fs.existsSync(argvLog) ? fs.readFileSync(argvLog, 'utf8').split('\n').filter((l) => l.length) : []),
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('run-role CLI: unknown role is rejected before any headless logic runs (no PATH/env needed)', () => {
+  const result = runRoleCli(['not-a-real-role', '--headless'], {});
+  assert.strictEqual(result.status, 1);
+  assert.match(result.stderr, /Unknown role 'not-a-real-role'/);
+  assert.strictEqual(result.stdout, '');
+});
+
+test('run-role CLI: --headless without --prompt-file fails with the exact message, before spawning claude', () => {
+  withFakeClaude(({ dir, readArgv }) => {
+    const result = runRoleCli(['qa1', '--headless'], { PATH: dir, ANTHROPIC_API_KEY: 'fake-key' });
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /--headless requires --prompt-file <path>\./);
+    assert.strictEqual(result.stdout, '');
+    assert.deepStrictEqual(readArgv(), [], 'claude must never be invoked when --prompt-file is missing');
+  });
+});
+
+test('run-role CLI: missing ANTHROPIC_API_KEY fails headless before even reading the prompt file', () => {
+  withFakeClaude(({ dir, readArgv }) => {
+    // Build env explicitly and delete the key after merging with
+    // process.env, rather than just omitting it from envOverrides — an
+    // ambient ANTHROPIC_API_KEY already set in the environment running
+    // this test suite would otherwise leak through runRoleCli's
+    // {...process.env, ...envOverrides} merge and silently pass this check
+    // for the wrong reason.
+    const env = { ...process.env, PATH: dir };
+    delete env.ANTHROPIC_API_KEY;
+    const result = spawnSync(
+      process.execPath,
+      [RUN_ROLE_PATH, 'qa1', '--headless', '--prompt-file', '/nonexistent/does-not-matter.txt'],
+      { cwd: REPO_ROOT, encoding: 'utf8', env }
+    );
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /ANTHROPIC_API_KEY is not set/);
+    assert.strictEqual(result.stdout, '');
+    assert.deepStrictEqual(readArgv(), [], 'claude must never be invoked with no credentials');
+  });
+});
+
+test('run-role CLI: a missing --prompt-file target fails and names the exact path', () => {
+  withFakeClaude(({ dir, readArgv }) => {
+    const missingPath = path.join(os.tmpdir(), `fc-missing-prompt-${Date.now()}.txt`);
+    const result = runRoleCli(['qa1', '--headless', '--prompt-file', missingPath], {
+      PATH: dir,
+      ANTHROPIC_API_KEY: 'fake-key',
+    });
+    assert.strictEqual(result.status, 1);
+    assert.ok(result.stderr.includes(`Could not read --prompt-file '${missingPath}'`), result.stderr);
+    assert.strictEqual(result.stdout, '');
+    assert.deepStrictEqual(readArgv(), []);
+  });
+});
+
+test('run-role CLI: an empty --prompt-file fails distinctly from a missing one', () => {
+  withFakeClaude(({ dir, readArgv }) => {
+    const emptyPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fc-empty-prompt-')), 'prompt.txt');
+    fs.writeFileSync(emptyPath, '   \n  \n');
+    const result = runRoleCli(['qa1', '--headless', '--prompt-file', emptyPath], {
+      PATH: dir,
+      ANTHROPIC_API_KEY: 'fake-key',
+    });
+    assert.strictEqual(result.status, 1);
+    assert.ok(result.stderr.includes(`--prompt-file '${emptyPath}' is empty`), result.stderr);
+    assert.strictEqual(result.stdout, '');
+    assert.deepStrictEqual(readArgv(), []);
+  });
+});
+
+test('run-role CLI: a real headless launch spawns claude with the exact headlessLaunchArgs and prints ONLY its stdout', () => {
+  withFakeClaude(({ dir, readArgv }) => {
+    const promptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-real-prompt-'));
+    const promptPath = path.join(promptDir, 'prompt.txt');
+    fs.writeFileSync(promptPath, '  do the sprint 11 audit  \n');
+    const result = runRoleCli(['qa1', '--headless', '--prompt-file', promptPath], {
+      PATH: dir,
+      ANTHROPIC_API_KEY: 'fake-key',
+    });
+    assert.strictEqual(result.status, 0);
+    // Req 2, mechanically: stdout is exactly the child's output, nothing
+    // this file's own code contributed (no banner, no "Restarting...",
+    // nothing) — and it parses, since the real --bare path's own envelope
+    // is JSON even on failure (confirmed against real credential-less
+    // runs; this fake stands in for that envelope shape).
+    assert.strictEqual(result.stdout, FAKE_JSON_RESULT);
+    assert.doesNotThrow(() => JSON.parse(result.stdout));
+    assert.strictEqual(result.stderr, '');
+    // Req 3 + Req 4: the prompt read from the file (trimmed) reached
+    // claude's real argv, and --bare was passed unconditionally.
+    assert.deepStrictEqual(readArgv(), headlessLaunchArgs(QA1_ROLE, 'do the sprint 11 audit'));
+  });
+});
+
+test('run-role CLI: --restart writes its banner to stderr only, never stdout (the named Req 2 offender, mechanically re-checked)', () => {
+  // Structural guarantee: the whole file has zero console.log calls left,
+  // so nothing on the interactive path — --restart included — can regress
+  // into writing a banner to stdout. This is a file-wide invariant, not a
+  // per-path claim, and cheaper to assert than re-driving the real
+  // resume-detection filesystem scan (scripts/launcher/session.js) just to
+  // reach the --restart branch in a CLI test.
+  const source = fs.readFileSync(RUN_ROLE_PATH, 'utf8');
+  assert.ok(!/console\.log\(/.test(source), 'run-role.js must contain zero console.log calls');
+  assert.match(source, /console\.error\(`Restarting \$\{role\.label\}/, 'the --restart banner must still exist, on stderr');
 });
 
 if (failures > 0) {

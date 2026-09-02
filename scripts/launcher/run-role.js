@@ -27,10 +27,19 @@
 // Model is never passed here — `--agent <id>` alone puts the agent file's
 // own frontmatter `model:` in charge (confirmed to win even over an
 // explicit --model), so frontmatter stays the single place a model is set.
+//
+// Sprint 11 adds a second, separate launch path, for driving a role
+// headless — no terminal, no human in the loop:
+//   node scripts/launcher/run-role.js <role-id> --headless --prompt-file <path>
+// Requested by an external orchestrator (Fifty Mission Cap) that installs
+// this framework and drives docs/sprints/ from outside, through
+// sprint_lifecycle.py and state files only, never reading agent files or
+// editing sprint files. See runHeadless() and its neighbors below for
+// what headless does differently from the interactive path above, and why.
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
-const { ROOT, ROLES, agentFilePath } = require('./agents');
+const { ROOT, ROLES, agentFilePath, readAgentMeta, agentBody } = require('./agents');
 const { initialPrompt, devTeam2ResumePrompt } = require('./prompts');
 const { resolveSession } = require('./session');
 const { checkAuth } = require('./auth');
@@ -64,13 +73,139 @@ function spawnClaude(args) {
   });
 }
 
+// Sprint 11, Req 6: the argv builders below are pure — no spawning, no
+// I/O — specifically so the interactive path can be regression-verified
+// mechanically (asserting on their exact output) rather than by a claim
+// in a handoff, and without needing a real claude process or credentials
+// to do it. This is the exact shape every interactive launch already
+// used before this sprint touched the file; extracted, not changed.
+function freshLaunchArgs(role, sessionTitle, uuid) {
+  return ['--agent', role.id, '--session-id', uuid, '--name', sessionTitle, initialPrompt(role.label)];
+}
+
+function resumeLaunchArgs(role, uuid, repoName) {
+  const args = ['--agent', role.id, '--resume', uuid];
+  if (role.id === 'dev-team-2') {
+    args.push(devTeam2ResumePrompt(repoName));
+  }
+  return args;
+}
+
 async function launchFresh(role, sessionTitle, uuid) {
-  return spawnClaude(['--agent', role.id, '--session-id', uuid, '--name', sessionTitle, initialPrompt(role.label)]);
+  return spawnClaude(freshLaunchArgs(role, sessionTitle, uuid));
+}
+
+// Sprint 11, Req 3: the headless prompt is read from a file, never taken
+// as a CLI argument or built from anything an external caller could pass
+// as free text on a command line. This is not about *this* file's own
+// spawn() call — an array-based spawn never goes through a shell on
+// either platform (see claude-cmd.js's own comment), so there is no
+// injection risk in how this file invokes claude. It's that a
+// `--prompt <text>` flag would invite an EXTERNAL caller (an orchestrator
+// building its own invocation of this script) to construct that
+// invocation by concatenating free text into a shell command line —
+// exactly the class of bug that command-substituted a backtick out of a
+// permanent LiveQA record this week (a different file, same failure
+// class). A file path is a small, low-entropy value; the free text never
+// has to survive a shell at all, on either side of the call.
+function readPromptFile(filePath) {
+  let content;
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    fail(
+      `Could not read --prompt-file '${filePath}': ${err.message}. Headless mode needs the ` +
+        'opening prompt in a real, readable file.'
+    );
+  }
+  const trimmed = content.trim();
+  if (!trimmed) {
+    fail(`--prompt-file '${filePath}' is empty. Headless mode needs a real opening prompt.`);
+  }
+  return trimmed;
+}
+
+// Sprint 11, Req 1: headless spawns claude as a genuinely separate OS
+// process, exactly the way the interactive path above already does (same
+// spawnClaude(), same child_process.spawn()) — stated explicitly here
+// because CLAUDE.md forbids one role session sub-agenting another, and a
+// headless launch path is exactly the kind of feature that could quietly
+// become that loophole if this weren't kept true on purpose. A headless
+// role never spawns, calls into, or shares a process with any other
+// role's session; it is one process, doing one role's one-shot piece of
+// work, printing one JSON result, then exiting.
+//
+// Req 4: --bare is passed unconditionally, on every headless launch, with
+// no way to opt out — headless must never inherit the launching
+// operator's own OAuth/keychain session, which belongs to whoever is
+// running this launcher interactively, not to an automated role
+// invocation. --bare's own contract (confirmed against the pinned notes
+// at 39a12fd, and against a real credential-less run here) reads strictly
+// ANTHROPIC_API_KEY or apiKeyHelper, never OAuth or keychain, which is
+// exactly the isolation this requirement asks for.
+//
+// Discovered by running it, not by reading: `--agent <id>` ALONE fails in
+// --bare mode with "not found. Available agents: claude, Explore,
+// general-purpose, Plan, statusline-setup" — Claude Code's own built-in
+// types, not this project's .claude/agents/*.md personas, because --bare
+// skips reading them entirely (consistent with its own documented
+// CLAUDE.md-auto-discovery skip). The fix, also confirmed by running it
+// (a fake API key then fails at the auth step instead of at agent
+// resolution, at zero cost either way): supply the persona explicitly via
+// `--agents '{"<id>":{"description":...,"prompt":...,"model":...}}'`
+// alongside `--agent <id>` — agents.js's agentBody()/readAgentMeta() below
+// build this from the exact same frontmatter/body split the interactive
+// path already uses, so the two can never describe the persona
+// differently. Whether `model` inside this JSON is actually honored
+// (versus silently ignored, falling back to a default) is NOT verified —
+// that needs a real successful run, which needs real credentials this
+// build did not have; flagged rather than assumed.
+function headlessLaunchArgs(role, prompt) {
+  const meta = readAgentMeta(role.id);
+  const body = agentBody(role.id);
+  const definition = { description: (meta && meta.description) || role.label, prompt: body };
+  if (meta && meta.model) definition.model = meta.model;
+  const agentsJson = JSON.stringify({ [role.id]: definition });
+  return ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json', '--bare', prompt];
+}
+
+async function runHeadless(role, promptFilePath) {
+  // Req 4: checked here, before claude is even invoked, so the failure is
+  // immediate and unambiguous rather than waiting for --bare's own
+  // response — which is ALSO legible (a well-formed envelope with
+  // is_error:true and a "Not logged in" result, confirmed against the
+  // pinned notes and against a real run in an environment with no
+  // ANTHROPIC_API_KEY here) but easy for a careless consumer to miss
+  // buried inside a JSON blob, exactly the risk the pinned notes warn a
+  // naive metering caller into. This check reads the LAUNCHING
+  // ENVIRONMENT (an env var), never the envelope claude itself prints, so
+  // it doesn't touch Req 2's "we emit, we do not parse" boundary at all.
+  // --bare's own help text also accepts apiKeyHelper via --settings; this
+  // check only covers the ANTHROPIC_API_KEY case, the common one and the
+  // one the pinned notes actually exercised — a project relying on
+  // apiKeyHelper alone will see this warning even though headless would
+  // still work, a known, documented limitation of this precondition
+  // rather than a silent gap.
+  if (!process.env.ANTHROPIC_API_KEY) {
+    fail(
+      'Headless mode needs its own credentials — ANTHROPIC_API_KEY is not set in this ' +
+        'environment. --bare mode (which headless always uses) reads strictly ' +
+        'ANTHROPIC_API_KEY or apiKeyHelper, never the OAuth/keychain session an interactive ' +
+        'launch would use. Set ANTHROPIC_API_KEY and re-run, or configure apiKeyHelper via ' +
+        '--settings (this check does not detect that case, only ANTHROPIC_API_KEY).'
+    );
+  }
+  const prompt = readPromptFile(promptFilePath);
+  const result = await spawnClaude(headlessLaunchArgs(role, prompt));
+  process.exitCode = result.code === null ? 0 : result.code;
 }
 
 async function main() {
   const [, , roleId, ...rest] = process.argv;
   const forceRestart = rest.includes('--restart');
+  const headless = rest.includes('--headless');
+  const promptFileFlagIndex = rest.indexOf('--prompt-file');
+  const promptFilePath = promptFileFlagIndex === -1 ? null : rest[promptFileFlagIndex + 1];
 
   const role = ROLES.find((r) => r.id === roleId);
   if (!role) {
@@ -90,21 +225,6 @@ async function main() {
     );
   }
 
-  // Req 6: deliberately worded differently from the not-on-PATH failure
-  // above so the two are never mistaken for each other. Req 6b: only a
-  // *confident* "credentials unusable" blocks here — an inconclusive
-  // probe proceeds with the launch rather than locking out a setup that
-  // might work fine. Req 6c: the block can legitimately come from either
-  // a genuine logout or a broken config directory (see auth.js), and this
-  // message can't tell which — so it states the observation and the
-  // remedy, not a cause it doesn't actually know.
-  if (checkAuth() === 'unauthenticated') {
-    fail(
-      "Claude reports no usable credentials. Open a normal terminal, run " +
-        "'claude', sign in, then re-run this task."
-    );
-  }
-
   const agentFile = agentFilePath(role.id);
   if (!fs.existsSync(agentFile)) {
     fail(
@@ -113,12 +233,47 @@ async function main() {
     );
   }
 
+  if (headless) {
+    if (!promptFilePath) {
+      fail('--headless requires --prompt-file <path>.');
+    }
+    await runHeadless(role, promptFilePath);
+    return;
+  }
+
+  // Req 6: only the interactive path checks the OPERATOR's own auth —
+  // headless never does (see runHeadless() above); it checks for its own
+  // credentials instead, and for a different reason (Req 4 forbids
+  // headless from ever falling back to this operator's session, rather
+  // than this check existing to protect the operator). Worded differently
+  // from the not-on-PATH failure above so the two are never mistaken for
+  // each other; only a *confident* "credentials unusable" blocks here, an
+  // inconclusive probe proceeds rather than locking out a setup that
+  // might work fine; the block can legitimately come from either a
+  // genuine logout or a broken config directory, and this message states
+  // the observation and the remedy, not a cause it doesn't actually know.
+  if (checkAuth() === 'unauthenticated') {
+    fail(
+      "Claude reports no usable credentials. Open a normal terminal, run " +
+        "'claude', sign in, then re-run this task."
+    );
+  }
+
   const repoName = path.basename(ROOT);
   const sessionTitle = `fc:${role.id}:${repoName}`;
   const { resume, sessionId: uuid } = resolveSession(role.id, ROOT, { restart: forceRestart });
 
   if (forceRestart) {
-    console.log(`Restarting ${role.label}: starting a brand-new session (any prior one is left alone).`);
+    // Sprint 11, Req 2: stderr, not stdout, unconditionally — this line
+    // (on the --restart path) was the one place the interactive path ever
+    // wrote to stdout outside the inherited child stream, and the one
+    // named offender in this sprint's own Context. It shows up in the
+    // same VS Code terminal pane either way (stdout and stderr are
+    // interleaved there), so this has no observable effect on the
+    // interactive path; what it does is keep this code path safe should
+    // a future headless variant ever reach it, rather than relying on
+    // headless simply never calling it today.
+    console.error(`Restarting ${role.label}: starting a brand-new session (any prior one is left alone).`);
     const result = await launchFresh(role, sessionTitle, uuid);
     process.exitCode = result.code === null ? 0 : result.code;
     return;
@@ -130,12 +285,20 @@ async function main() {
     return;
   }
 
-  const resumeArgs = ['--agent', role.id, '--resume', uuid];
-  if (role.id === 'dev-team-2') {
-    resumeArgs.push(devTeam2ResumePrompt(repoName));
-  }
-  const result = await spawnClaude(resumeArgs);
+  const result = await spawnClaude(resumeLaunchArgs(role, uuid, repoName));
   process.exitCode = result.code === null ? 0 : result.code;
 }
 
-main();
+// Sprint 11, Req 6: only runs main() (which parses real argv and, on
+// success, actually spawns claude) when this file is executed directly —
+// `node scripts/launcher/run-role.js ...`, exactly as every VS Code task
+// and every headless caller already does. Requiring this file as a
+// module (as the regression tests below do, to reach the pure argv
+// builders) does not trigger any of that. Zero behaviour change for the
+// real CLI: require.main === module is true for every existing way this
+// file is actually invoked.
+if (require.main === module) {
+  main();
+}
+
+module.exports = { freshLaunchArgs, resumeLaunchArgs, headlessLaunchArgs };
