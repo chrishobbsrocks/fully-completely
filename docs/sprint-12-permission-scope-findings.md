@@ -225,10 +225,12 @@ state file" plus its own persona. The desk design survived contact.
 that `.claude/agents/qa1.md` and `liveqa.md`'s `--notes-file` mandate is
 unusable headless** — both files require the Write tool for the
 `--notes-file` pattern, and Write is correctly disallowed for qa1/liveqa
-under this sprint's own Req 3 scoped profile. All three found working, safe
-alternatives on their own (a quoted heredoc via Bash; confirming notes
-contain no backtick/`$`/backslash before passing `--notes` inline) rather
-than being blocked or improvising something unsafe — but all three said
+under this sprint's own Req 3 scoped profile. All three proposed safe
+alternatives on their own rather than being blocked or improvising
+something unsafe: a quoted heredoc via Bash (later found, on QA1's own
+round-2 audit, not to actually execute under this profile — corrected
+above to the verified `printf` form), and confirming notes contain no
+backtick/`$`/backslash before passing `--notes` inline. All three said
 this should be fixed at the source, not worked around every time. Three
 independent roles reaching the identical conclusion, unprompted, is strong
 evidence this is real, not a fluke of one role's phrasing. See the round-5
