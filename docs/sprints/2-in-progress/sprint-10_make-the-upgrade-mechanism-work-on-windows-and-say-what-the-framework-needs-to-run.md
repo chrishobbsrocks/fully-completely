@@ -84,6 +84,12 @@ The user customised nothing. On macOS the identical upgrade replaces all six.
 - **macOS is unaffected.** Re-run the 0.1.2 → 0.1.10 upgrade on macOS and confirm it behaves as 0.1.9 did. This sprint must not fix one platform by breaking the other.
 - **A clean-machine prerequisite check.** On a Windows box without Python, run the installer and confirm the message names Python and the verification command.
 - **The commands run after a python.org install**, not only a Microsoft Store one, if a machine is available for it. If not, say so plainly rather than inferring.
+- **Req 6's determination — carried here on QA1's recommendation, because these criteria did not mention it and it would otherwise retire unrecorded.** *Amended by Master Controller after QA1's round-1 PASS; a fresh `/sprint-qa1` is required so the sign-off attests to this file rather than the one it audited.*
+  - **Five command files write to `/tmp`, not the three Req 6 named**: `sprint-abort.md`, `sprint-complete.md`, `sprint-qa1.md`, `sprint-new.md`, `sprint-liveqa.md`. `sprint-qa1` is the one that matters most — it runs every sprint, for every team.
+  - **Test from both PowerShell and Git Bash.** QA1 left a labeled hypothesis, which is a hypothesis and not a finding: cmd/PowerShell likely works unless `C:\tmp` is absent, while **Git Bash likely fails silently** because its `/tmp` mapping disagrees with Python's. Confirm or refute it by running. Do not record the hypothesis as the result.
+  - **Exercise a real command, not just a bare file write** — you will be running `/sprint-liveqa --notes-file` on this sprint anyway, and that is the test.
+  - **The determination is the deliverable here; the fix is not.** If `/tmp` proves broken on Windows, record it plainly and it becomes a follow-up sprint. **It does not fail this sprint** — a code change discovered at gate 2 would force a re-audit and re-ship for a defect that predates this release. State what was established, on which shell.
+
 
 ### Out of Scope
 
