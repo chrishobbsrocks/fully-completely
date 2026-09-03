@@ -2,7 +2,7 @@
 id: 10
 title: "Make the upgrade mechanism work on Windows, and say what the framework needs to run"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-09-01T19:11:59+00:00
 ---
 
