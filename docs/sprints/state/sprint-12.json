@@ -1,11 +1,11 @@
 {
   "id": 12,
   "title": "Settle the headless permission scope, then discover the six opening prompts by running them",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "211bfe15def1dc0ff44e6a08d37a8de6e3d6b510645a87aecad2ed31e34673c0",
   "qa1_audited_tree_hash": "e288b0cd1014ec47da145ac52eeae66a8a14a6d9",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "c50530cac0e74d720f71cdb494ae0feed1509a1e",
   "groundtruth_result": null,
   "audit_rounds": 2,
   "live_test_rounds": 0,
@@ -35,6 +35,12 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-03T21:58:32+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=c50530c"
     }
   ]
 }
