@@ -2,7 +2,7 @@
 id: 12
 title: "Settle the headless permission scope, then discover the six opening prompts by running them"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-09-02T18:52:30+00:00
 ---
 
