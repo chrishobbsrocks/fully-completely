@@ -70,8 +70,8 @@
     "12": {
       "title": "Settle the headless permission scope, then discover the six opening prompts by running them",
       "epic": "Framework rules and distribution",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-12_settle-the-headless-permission-scope-then-discover-the-six-opening-prompts-by-running-them.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-12_settle-the-headless-permission-scope-then-discover-the-six-opening-prompts-by-running-them.md"
     },
     "13": {
       "title": "Stop the lifecycle's own bookkeeping from breaking the lifecycle's own gates",

@@ -9,6 +9,8 @@ Usage: `/sprint-liveqa <sprint-id> --deployed-commit <sha> --verdict PASS|FAIL|C
 
 **Security note**: do not interpolate `$ARGUMENTS` (or any free-text notes, including exact page text or error strings you observed) directly into the bash command below. Write the notes to a temp file with the Write tool, then run:
 
+**Headless note (sprint 12):** if the Write tool is unavailable (a headless LiveQA session under sprint 12's scoped permission profile never has it), write the notes file with a quoted heredoc via Bash instead — `cat <<'EOF' > /tmp/liveqa-notes.txt` ... `EOF` — the quoted delimiter gives the identical protection, then pass the resulting path to `--notes-file` exactly as below.
+
 ```bash
 node scripts/run-lifecycle.js liveqa <sprint-id> --deployed-commit <sha> --verdict <verdict> --notes-file /tmp/liveqa-notes.txt
 ```

@@ -240,13 +240,110 @@ function readPromptFile(filePath) {
 // ~/.claude/projects/... anyway (confirmed: a real non-bare run left a
 // `.jsonl` transcript file behind) is its own avoidable side effect, fixed
 // here because a working, tested fix existed for it specifically.
+// Sprint 12, Req 3: DECIDED — a scoped profile, not blanket bypass. Full
+// evidence in docs/sprint-12-permission-scope-findings.md (sprint 12's own
+// worktree): `--permission-mode acceptEdits` auto-approves Edit/Write
+// WITHIN the launch directory (confirmed: a write outside it, to an
+// absolute /tmp path, was still blocked under acceptEdits — the directory
+// confinement Req 2 asked to test appears to already be inherent, not
+// something this file needs to configure separately) and ordinary git
+// (including a real push, confirmed against a bare local remote), but
+// still requires approval for `npm`, `curl`, and running any
+// interpreter-invoked script (`node scripts/*`, `python3 scripts/*`) —
+// the exact wall Dev Team 1 hit directly attempting `node
+// scripts/run-lifecycle.js status`. `--allowedTools "Bash(<pattern>)"`
+// was confirmed to narrow genuinely rather than nominally (allowlisting
+// npm never opened curl; allowlisting one script path never opened
+// script execution generally; multiple space-separated patterns in one
+// string — the shape used below — were confirmed to combine correctly).
+// `--disallowedTools "Edit,Write"` was confirmed to hard-disable those
+// tools outright ("No such tool available"), used for qa1 and liveqa
+// below since neither writes source.
+//
+// Every role needs the two lifecycle-script invocation patterns — every
+// slash command ultimately runs through one of them. Beyond that, each
+// role gets exactly what Req 1's own per-role breakdown named and Reqs
+// 1-2's testing confirmed it needs, nothing broader:
+//   - dev-team-1/2: writes source (covered by acceptEdits alone) and runs
+//     the test suite and tarball check.
+//   - qa1: runs tests, never writes source — Edit/Write hard-disabled.
+//   - pipeman: git (free under acceptEdits) plus npm, confirmed including
+//     `npm publish --dry-run` running cleanly (no permission block, only
+//     npm's own validation) under exactly this profile.
+//   - liveqa: records a verdict through the lifecycle script; the real
+//     browser-driving tools (Playwright/Chrome MCP) aren't scoped here —
+//     out of reach of a synthetic-agent scratch test, and untested as
+//     such, not assumed to need broader Bash access.
+//   - master-controller: writes a sprint file (covered by acceptEdits
+//     alone, confirmed directly — not inferred) and runs the lifecycle
+//     script's `new` command.
+const HEADLESS_PERMISSION_PROFILES = {
+  'master-controller': {
+    disallowedTools: [],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+  },
+  'dev-team-1': {
+    disallowedTools: [],
+    allowedTools: [
+      'Bash(node scripts/run-lifecycle.js *)',
+      'Bash(python3 scripts/sprint_lifecycle.py *)',
+      'Bash(node scripts/launcher_test.js)',
+      'Bash(bash scripts/verify-tarball.sh)',
+    ],
+  },
+  'dev-team-2': {
+    disallowedTools: [],
+    allowedTools: [
+      'Bash(node scripts/run-lifecycle.js *)',
+      'Bash(python3 scripts/sprint_lifecycle.py *)',
+      'Bash(node scripts/launcher_test.js)',
+      'Bash(bash scripts/verify-tarball.sh)',
+    ],
+  },
+  qa1: {
+    disallowedTools: ['Edit', 'Write'],
+    allowedTools: [
+      'Bash(node scripts/run-lifecycle.js *)',
+      'Bash(python3 scripts/sprint_lifecycle.py *)',
+      'Bash(node scripts/launcher_test.js)',
+      'Bash(bash scripts/verify-tarball.sh)',
+    ],
+  },
+  pipeman: {
+    disallowedTools: [],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)', 'Bash(npm *)'],
+  },
+  liveqa: {
+    disallowedTools: ['Edit', 'Write'],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+  },
+};
+
+function headlessPermissionArgs(role) {
+  const profile = HEADLESS_PERMISSION_PROFILES[role.id];
+  if (!profile) {
+    // Every ROLES entry (agents.js) has a profile above; this only fires
+    // if a role is ever added there without a matching update here —
+    // fail loudly rather than silently launching with no scope at all.
+    throw new Error(`No headless permission profile defined for role '${role.id}'.`);
+  }
+  const args = ['--permission-mode', 'acceptEdits'];
+  if (profile.allowedTools.length) {
+    args.push('--allowedTools', profile.allowedTools.join(' '));
+  }
+  if (profile.disallowedTools.length) {
+    args.push('--disallowedTools', profile.disallowedTools.join(','));
+  }
+  return args;
+}
+
 function headlessLaunchArgs(role, prompt, { bare, settings } = {}) {
   const meta = readAgentMeta(role.id);
   const body = agentBody(role.id);
   const definition = { description: (meta && meta.description) || role.label, prompt: body };
   if (meta && meta.model) definition.model = meta.model;
   const agentsJson = JSON.stringify({ [role.id]: definition });
-  const base = ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json'];
+  const base = ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json', ...headlessPermissionArgs(role)];
   if (bare) {
     const settingsArgs = settings ? ['--settings', settings] : [];
     return [...base, '--bare', ...settingsArgs, prompt];
@@ -451,4 +548,10 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { freshLaunchArgs, resumeLaunchArgs, headlessLaunchArgs, LAUNCHER_FAILURE_EXIT_CODE };
+module.exports = {
+  freshLaunchArgs,
+  resumeLaunchArgs,
+  headlessLaunchArgs,
+  headlessPermissionArgs,
+  LAUNCHER_FAILURE_EXIT_CODE,
+};
