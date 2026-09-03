@@ -746,4 +746,87 @@ grep -q "no QA1-audited commit on record" /tmp/out.txt || fail "ship's real-repo
 grep -q "not a git repository" /tmp/out.txt && fail "ship should never claim no repository exists when it's running inside a real one"
 rm -f /tmp/out.txt
 
+echo "== sprint 13, Req 1 (Finding A): a bookkeeping-only change (docs/sprints/) after QA1's PASS does NOT invalidate the audit =="
+SPRINT_BOOKKEEPING=$(new_sprint "Bookkeeping-only sprint")
+$SCRIPT start "$SPRINT_BOOKKEEPING" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_BOOKKEEPING initial work"
+$SCRIPT qa1 "$SPRINT_BOOKKEEPING" --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done "$SPRINT_BOOKKEEPING" > /dev/null
+# Real lifecycle bookkeeping lands after the PASS: an entirely unrelated
+# sprint gets created (a registry.json update plus a new file, both
+# entirely under docs/sprints/), then committed — exactly the shape of
+# what the lifecycle itself writes, and exactly what sprints 6, 8 and 10
+# each hit against this same sprint's real audit.
+new_sprint "Unrelated bookkeeping sprint" > /dev/null
+git add docs/sprints
+git commit -q -m "bookkeeping: registered another sprint"
+BOOKKEEPING_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_BOOKKEEPING" --commit "$BOOKKEEPING_COMMIT" > /tmp/out.txt 2>&1 || \
+  fail "ship refused a commit whose only change was under docs/sprints/ (Req 1 regression) — output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 13, Req 1: a source change (outside docs/sprints/) after QA1's PASS still refuses, no override — the preserved protection =="
+SPRINT_SOURCE_DRIFT=$(new_sprint "Source drift sprint (sprint 13)")
+$SCRIPT start "$SPRINT_SOURCE_DRIFT" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_SOURCE_DRIFT initial work"
+$SCRIPT qa1 "$SPRINT_SOURCE_DRIFT" --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done "$SPRINT_SOURCE_DRIFT" > /dev/null
+echo "unaudited source change" > "sprint13-sneaky-source.txt"
+git add "sprint13-sneaky-source.txt"
+git commit -q -m "unaudited SOURCE change after QA1 PASS"
+SOURCE_DRIFT_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_SOURCE_DRIFT" --commit "$SOURCE_DRIFT_COMMIT" > /tmp/out.txt 2>&1 && \
+  fail "ship succeeded on an unaudited SOURCE change — Req 1's relaxation leaked beyond docs/sprints/" || true
+grep -q "doesn't match what QA1 audited" /tmp/out.txt || fail "sprint 13 source-drift refusal message missing"
+rm -f /tmp/out.txt
+
+echo "== sprint 13, Req 2: verify-publish is a real, wired-up command — refuses cleanly with no shipped commit on record =="
+SPRINT_VERIFY_PUBLISH=$(new_sprint "Verify publish precondition sprint")
+$SCRIPT start "$SPRINT_VERIFY_PUBLISH" > /dev/null
+$SCRIPT verify-publish "$SPRINT_VERIFY_PUBLISH" > /tmp/out.txt 2>&1 && \
+  fail "verify-publish succeeded with no shipped commit on record (test setup broken)" || true
+grep -q "no shipped commit on record" /tmp/out.txt || fail "verify-publish's no-shipped-commit refusal message missing"
+rm -f /tmp/out.txt
+
+echo "== sprint 13, Req 3 (Finding C): status warns on a real cross-tree divergence, stays silent when trees agree, and never gates qa1 =="
+SPRINT_WT=$(new_sprint "Worktree divergence sprint")
+$SCRIPT start "$SPRINT_WT" > /dev/null
+git add -A
+git commit -q -m "commit sprint $SPRINT_WT's file so a second worktree can see it"
+
+OTHER_WT="$(mktemp -d "${TMPDIR:-/tmp}/fully-completely-smoke-wt.XXXXXX")"
+git worktree add -q -b smoke-wt-branch "$OTHER_WT" > /dev/null
+
+# No divergence yet: the second worktree's copy is byte-identical.
+$SCRIPT status "$SPRINT_WT" > /tmp/out.txt 2>&1
+grep -q "WARNING" /tmp/out.txt && fail "status warned about worktree divergence when the files are actually identical"
+rm -f /tmp/out.txt
+
+# Amend the sprint file in the OTHER worktree only — a real cross-tree
+# divergence, the exact scenario that had Dev Team building sprint 11
+# against a spec amended on a different branch.
+OTHER_WT_SPRINT_FILE=$(find "$OTHER_WT/docs/sprints/2-in-progress" -name "sprint-${SPRINT_WT}_*.md")
+echo "### amended only in the other worktree" >> "$OTHER_WT_SPRINT_FILE"
+
+$SCRIPT status "$SPRINT_WT" > /tmp/out.txt 2>&1 || fail "status failed once a second worktree existed with a diverged file"
+grep -q "WARNING" /tmp/out.txt || fail "status did not warn about a real cross-tree divergence"
+# Match on the mktemp basename, not the full $OTHER_WT path: the warning
+# names the RESOLVED path (worktree_divergence_warning() calls .resolve()
+# so /tmp vs /private/tmp-style symlink aliases compare equal), which can
+# legitimately differ textually from $OTHER_WT's own unresolved form on
+# macOS — the basename survives that resolution either way.
+grep -q "$(basename "$OTHER_WT")" /tmp/out.txt || fail "divergence warning did not name the diverging worktree"
+rm -f /tmp/out.txt
+
+# It must warn, never gate: qa1 must still be able to record a verdict,
+# and must surface the same warning rather than silently swallowing it.
+git commit -q --allow-empty -m "sprint $SPRINT_WT work"
+$SCRIPT qa1 "$SPRINT_WT" --verdict PASS --notes "worktree warning present but must not block" > /tmp/out.txt 2>&1 || \
+  fail "qa1 was blocked by a worktree divergence warning — Req 3 says warn, never gate"
+grep -q "WARNING" /tmp/out.txt || fail "qa1 did not surface the same divergence warning"
+rm -f /tmp/out.txt
+
+git worktree remove --force "$OTHER_WT" > /dev/null 2>&1 || rm -rf "$OTHER_WT"
+git branch -D smoke-wt-branch > /dev/null 2>&1 || true
+
 echo "ALL SMOKE TESTS PASSED"

@@ -102,6 +102,12 @@ REGISTRY_PATH = SPRINTS_DIR / "registry.json"
 TEMPLATE_PATH = ROOT / "templates" / "sprint-template.md"
 LOCK_DIR = SPRINTS_DIR / ".locks"
 
+# Sprint 13, Req 1: the one path git_tree_hash_excluding() strips from the
+# ship-time content comparison. A relative git-tree path (matching what
+# `git ls-tree` prints, not an OS path), not ROOT-anchored, since it's
+# compared against ls-tree output for arbitrary refs, not the filesystem.
+SHIP_HASH_EXCLUDE_PREFIX = "docs/sprints/"
+
 STATUS_FOLDERS = {
     "backlog": "0-backlog",
     "todo": "1-todo",
@@ -268,26 +274,67 @@ def locked(name: str):
         os.close(fd)
 
 
-def git_tree_hash(ref: str) -> Optional[str]:
-    """Resolve a git ref (branch, tag, commit hash, HEAD) to its tree hash,
-    the content-addressed hash of the files at that commit, independent of
-    commit metadata or history. Used to compare what QA1 audited against
-    what actually ships, in a way that tolerates Pipeman's legitimate
-    squash/rebase/merge (those change the commit SHA without changing any
-    file content, so the tree hash stays the same) while still catching
-    real content drift, new changes landed after the audit. Returns None
-    if the ref doesn't resolve (not a git repo, bad ref, etc.)."""
+def git_tree_hash_excluding(ref: str, exclude_prefix: str) -> Optional[str]:
+    """Sprint 13, Req 1 (Finding A): resolve a git ref (branch, tag,
+    commit hash, HEAD) to a content hash of everything EXCEPT paths under
+    exclude_prefix — used to compare what QA1 audited against what
+    actually ships without the lifecycle's own bookkeeping (docs/sprints/)
+    ever being able to invalidate an audit it never touched. `.npmignore`
+    already excludes docs/sprints/ from the published tarball; what ships
+    is the tarball's content, and the whole-tree comparison this replaced
+    was stricter than that, catching bookkeeping the lifecycle itself
+    wrote as if it were undisclosed source drift (sprints 6, 8, 10).
+
+    This is deliberately NOT `git rev-parse ref^{tree}`, which has no
+    "this tree minus a subtree" mode — there's no single git primitive
+    for that. Instead: `git ls-tree -r` lists every (mode, type,
+    blob-sha, path) entry in the tree recursively; entries under
+    exclude_prefix are dropped, the rest sorted for determinism, and
+    hashed with sha256. The result is NOT a real git object hash (nothing
+    reads it as one, e.g. `git cat-file`) — it only needs to support
+    equality comparison between two calls with the same exclude_prefix,
+    which a stable hash over the same deterministic listing does exactly
+    as reliably as a native tree hash would.
+
+    PRESERVED PROTECTION, stated explicitly per this requirement's own
+    instruction: the sprint FILE itself stays guarded by
+    qa1_audit_file_hash, a separate, unrelated gate checked by
+    cmd_dev_done (a stale-sprint-file mid-build amendment is caught
+    there, before this function is ever called). Excluding docs/sprints/
+    from THIS content hash removes an overlap between two gates that were
+    both independently guarding the same thing — this function's own gate
+    (cmd_ship's tree comparison) is only asking "did anything that ships
+    change since the audit," and docs/sprints/ never ships. Everything
+    outside exclude_prefix is still hashed and still compared exactly as
+    before; a source change landing between audit and ship is still
+    caught, with no override, unchanged.
+
+    Returns None if the ref doesn't resolve (not a git repo, bad ref,
+    etc.), collapsing every subprocess failure the same way
+    git_commit_sha() does, for the same reason: a caller here should
+    never have to distinguish "not a repo" from "bad ref" itself."""
     try:
         # Fixed argument list, no shell=True, nothing concatenated into a
         # shell string; "git" resolved via PATH is the same trust model
         # every other tool in this repo already uses.
         result = subprocess.run(  # nosec B603 B607
-            ["git", "rev-parse", f"{ref}^{{tree}}"],
+            ["git", "ls-tree", "-r", ref],
             cwd=ROOT, capture_output=True, text=True, check=True,
         )
-        return result.stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         return None
+    entries = []
+    for line in result.stdout.splitlines():
+        # Each line: "<mode> <type> <blob-sha>\t<path>" — split once on the
+        # tab so a path containing a space is never mis-parsed.
+        meta, sep, path = line.partition("\t")
+        if not sep:
+            continue  # malformed line, shouldn't happen; skip rather than crash
+        if path == exclude_prefix.rstrip("/") or path.startswith(exclude_prefix):
+            continue
+        entries.append(f"{meta}\t{path}")
+    entries.sort()
+    return hashlib.sha256("\n".join(entries).encode("utf-8")).hexdigest()
 
 
 def git_commit_sha(ref: str) -> Optional[str]:
@@ -311,7 +358,7 @@ def git_commit_sha(ref: str) -> Optional[str]:
 
 def is_git_repository() -> bool:
     """True only if ROOT is inside a real git working tree. Sprint 7, Req
-    12: git_tree_hash() and git_commit_sha() above both collapse two very
+    12: git_tree_hash_excluding() and git_commit_sha() above both collapse two very
     different causes into the same None — 'this isn't a git repository at
     all' and 'a ref inside a real repository doesn't resolve' — and every
     message downstream that reads one of those None results has to guess
@@ -383,6 +430,94 @@ def find_sprint_file(sprint_id: int) -> Optional[Path]:
         for f in d.glob(f"sprint-{sprint_id}_*.md"):
             return f
     return None
+
+
+def _find_sprint_file_under(sprints_dir: Path, sprint_id: int) -> Optional[Path]:
+    """Same search find_sprint_file() does, generalized to an arbitrary
+    docs/sprints/ directory instead of always this process's own
+    SPRINTS_DIR — needed by worktree_divergence_warning() below to look
+    for the same sprint's file inside OTHER worktrees, which live under a
+    different ROOT entirely."""
+    for folder in STATUS_FOLDERS.values():
+        d = sprints_dir / folder
+        if not d.exists():
+            continue
+        for f in d.glob(f"sprint-{sprint_id}_*.md"):
+            return f
+    return None
+
+
+def worktree_divergence_warning(sprint_id: int) -> Optional[str]:
+    """Sprint 13, Req 3 (Finding C): a sprint file amended in one working
+    tree is invisible to a gate running in another — the hash gates were
+    working exactly as designed while blind to this, since they only ever
+    read the tree they're invoked in. `git worktree list` is local,
+    enumerable, and needs no network; comparing against `origin/*` was
+    ruled out in sprint 7 and stays ruled out for the same reason: a
+    stale or unfetched remote ref produces a NEW confidently-wrong answer,
+    which is exactly the class of defect this epic exists to remove.
+
+    This WARNS ONLY. It must never gate anything — the roles working in
+    worktrees (Dev Team 2 always, Dev Team 1 when a sprint says to) is
+    the normal, correct use of this framework, not a problem to block.
+    Every failure mode collapses silently to None: no git, a single
+    worktree, another worktree missing docs/sprints/ entirely, a file
+    that can't be read — this must never be the reason a read-only or
+    gating command fails to answer, the same discipline every other
+    git-touching function in this file already follows.
+
+    Returns a human-readable warning if another worktree's copy of this
+    sprint's file has different BYTE CONTENT than the one this process
+    found, naming which worktree(s) diverge; None if there's nothing to
+    warn about."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+
+    other_roots = []
+    for line in result.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        candidate = Path(line[len("worktree "):]).resolve()
+        if candidate != ROOT.resolve():
+            other_roots.append(candidate)
+    if not other_roots:
+        return None
+
+    this_file = find_sprint_file(sprint_id)
+    if this_file is None:
+        return None
+    try:
+        this_content = this_file.read_bytes()
+    except OSError:
+        return None
+
+    diverging = []
+    for other_root in other_roots:
+        other_file = _find_sprint_file_under(other_root / "docs" / "sprints", sprint_id)
+        if other_file is None:
+            continue
+        try:
+            other_content = other_file.read_bytes()
+        except OSError:
+            continue
+        if other_content != this_content:
+            diverging.append(str(other_root))
+
+    if not diverging:
+        return None
+    plural = "worktree" if len(diverging) == 1 else "worktrees"
+    return (
+        f"WARNING: sprint {sprint_id}'s file differs from the copy in {len(diverging)} "
+        f"other {plural}: {', '.join(diverging)}. This read is from {ROOT} only — if "
+        "another session amended the sprint file elsewhere, this may be a stale copy. "
+        "Not gated: worktrees are exactly how this framework expects roles to work in "
+        "parallel, this only makes the divergence visible rather than silent."
+    )
 
 
 def update_frontmatter_status(path: Path, new_status: str) -> None:
@@ -522,6 +657,11 @@ def cmd_status(args) -> None:
         test_indices = [i for i, h in enumerate(history) if h["event"] == "live_test"]
         if ship_indices and test_indices and ship_indices[-1] > test_indices[-1]:
             print("Code has changed since the last recorded LiveQA verdict — not yet re-tested.")
+    # Sprint 13, Req 3 (Finding C): warns, never gates — see
+    # worktree_divergence_warning()'s own docstring.
+    divergence = worktree_divergence_warning(args.id)
+    if divergence:
+        print(divergence)
     if args.verbose:
         print("\nHistory:")
         for h in state["history"]:
@@ -583,6 +723,15 @@ def cmd_qa1(args) -> None:
     with locked(f"sprint-{args.id}"):
         state = load_state(args.id)
 
+        # Sprint 13, Req 3 (Finding C): surfaced here specifically because
+        # this is the moment QA1 is told to re-read the sprint file fresh
+        # (see this function's own review-process instruction) — a stale
+        # read here is exactly the damage this warning exists to prevent.
+        # Warns only; never gates, never blocks the audit below.
+        divergence = worktree_divergence_warning(args.id)
+        if divergence:
+            print(divergence)
+
         # Sprint 7, Req 1: a distinct branch for a sprint currently in the
         # LiveQA fix loop — QA1 can now record an audit performed during
         # that loop, but it can never reach the gate-1 logic below, and
@@ -614,7 +763,7 @@ def cmd_qa1(args) -> None:
         if verdict == "PASS":
             state["phase"] = "qa1_audit"
             state["qa1_audit_file_hash"] = file_hash(registry_sprint_file(args.id))
-            state["qa1_audited_tree_hash"] = git_tree_hash("HEAD")
+            state["qa1_audited_tree_hash"] = git_tree_hash_excluding("HEAD", SHIP_HASH_EXCLUDE_PREFIX)
             print(f"QA1 audit PASSED (round {state['audit_rounds']}).")
             if state["qa1_audited_tree_hash"] is None and not is_git_repository():
                 # Req 12: say so now, at the moment the gap is created,
@@ -687,7 +836,7 @@ def cmd_ship(args) -> None:
             die(f"{ROOT} is not a git repository. Run this from inside a real git repository — "
                 "there is nothing here for --commit to resolve against.")
 
-        shipped_tree = git_tree_hash(args.commit) if args.commit else None
+        shipped_tree = git_tree_hash_excluding(args.commit, SHIP_HASH_EXCLUDE_PREFIX) if args.commit else None
         audited_tree = state.get("qa1_audited_tree_hash")
         if shipped_tree is None:
             die(f"'{args.commit or ''}' does not resolve to a real commit in this repo. "
@@ -758,6 +907,211 @@ def cmd_reship(args) -> None:
         save_state(args.id, state)
     print(f"Sprint {args.id}: fix reshipped (commit {args.commit or '?'}). "
           "LiveQA: re-test and run /sprint-liveqa again.")
+
+
+def npm_registry_view(package: str, version: str) -> Optional[dict]:
+    """Sprint 13, Req 2: a real, network read of the public npm registry
+    via `npm view <package>@<version> --json` — never asserted by whoever
+    is reporting, per this requirement's own instruction. Returns the
+    parsed dict (which includes `gitHead` when the registry has one, and
+    always includes `dist.shasum`/`dist.tarball` for a real published
+    version), or None on any failure: npm missing, no network, the
+    version not actually published, or output that doesn't parse as JSON.
+    A verification helper must never crash the CLI for any of those."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["npm", "view", f"{package}@{version}", "--json"],
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+        return json.loads(result.stdout)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError,
+            json.JSONDecodeError, subprocess.TimeoutExpired):
+        return None
+
+
+def pack_commit_shasum(commit: str) -> Optional[str]:
+    """Sprint 13, Req 2's content-based fallback for when the registry has
+    no `gitHead` to compare — confirmed absent entirely on 0.1.11, likely
+    from publishing off a linked git worktree rather than a real clone.
+    Packs `commit`'s own tree — not the working tree, not HEAD, exactly
+    the commit named — via `git archive` into a throwaway directory, runs
+    `npm pack` there, and returns the shasum npm itself computes for the
+    result. That's directly comparable to the registry's own dist.shasum,
+    since dist.shasum records npm's identical computation performed at
+    publish time — a stronger proof than gitHead ever was: it confirms
+    the published bytes, not just a commit reference that may or may not
+    have been stamped correctly.
+
+    `git archive` rather than a real checkout or worktree: no .git
+    directory is needed for `npm pack` to run, and this avoids touching
+    the git worktree subsystem at all for what is fundamentally a
+    read-only export — sprint 12's own worktree was found gone entirely
+    partway through that sprint, worth not depending on that subsystem
+    here if a plain archive does the job.
+
+    Returns None on any failure (no git, no npm, no tar, the commit
+    doesn't resolve, npm pack itself fails) rather than raising — a
+    verification helper must never crash the CLI."""
+    if shutil.which("npm") is None or shutil.which("tar") is None:
+        return None
+    tmp = tempfile.mkdtemp(prefix="fc-verify-publish-")
+    try:
+        try:
+            archive = subprocess.run(  # nosec B603 B607
+                ["git", "archive", "--format=tar", commit],
+                cwd=ROOT, capture_output=True, check=True, timeout=30,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError,
+                subprocess.TimeoutExpired):
+            return None
+        try:
+            subprocess.run(  # nosec B603 B607
+                ["tar", "-x", "-C", tmp],
+                input=archive.stdout, capture_output=True, check=True, timeout=30,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError,
+                subprocess.TimeoutExpired):
+            return None
+        try:
+            pack = subprocess.run(  # nosec B603 B607
+                ["npm", "pack", "--pack-destination", tmp, "--json"],
+                cwd=tmp, capture_output=True, text=True, check=True, timeout=60,
+            )
+            pack_info = json.loads(pack.stdout)
+            return pack_info[0]["shasum"]
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError,
+                json.JSONDecodeError, KeyError, IndexError, subprocess.TimeoutExpired):
+            return None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def cmd_verify_publish(args) -> None:
+    """Sprint 13, Req 2 (Finding B), made mechanical rather than a
+    reporting instruction — sprint 9 fixed the equivalent gap with prose
+    in pipeman.md and it drifted on the very next release (0.1.10 needed
+    the post-hoc gitHead correction sprint 9 was built to eliminate).
+    This reads the registry itself and prints a definitive result; it
+    does not ask a role to run `npm view` by hand and assert what they
+    saw.
+
+    THE DETERMINATION THIS REQUIREMENT ASKED FOR, from actually reading
+    cmd_liveqa rather than reasoning about it: cmd_liveqa's own
+    --deployed-commit check is a PURE LOCAL IDENTITY comparison against
+    state["last_shipped_commit"] — the exact commit SHA Pipeman named via
+    --commit at ship/reship time. It never reads the npm registry and
+    never needs gitHead to be present, correct, or even published at all
+    to do its job. The registry-gitHead question this command answers is
+    a SEPARATE, additional confidence check every sprint's LiveQA
+    criteria have asked for in prose ("confirm gitHead matches
+    last_shipped_commit, from npm view") — real and worth answering
+    mechanically, but not something cmd_liveqa's own gate depends on.
+
+    Primary check: if the registry has gitHead, compare it to
+    last_shipped_commit exactly — a real, disk-based value now, not an
+    instruction to eyeball one.
+
+    Fallback, when gitHead is absent (recorded as a stated fact, not an
+    error — sprint 9's post-hoc correction may turn out to be the correct
+    workflow rather than a defect, and this command says which, plainly,
+    rather than presupposing): pack_commit_shasum() against the
+    registry's own dist.shasum.
+
+    Neither outcome is a gate — this command only reports and records via
+    log_event(); it never changes phase or blocks anything downstream.
+    Sprint 13's Req 2 asked for a first-class step, not a new refusal.
+
+    The slow parts (a network call, and possibly a full `npm pack`) run
+    BEFORE this takes the sprint's lock, deliberately — holding a lock
+    across a network round-trip would block every other command against
+    this sprint for however long the registry takes to answer. The lock
+    is only held for the final read-modify-write of the state file, with
+    a fresh load right before it, so a concurrent ship/reship that landed
+    during the slow part is never silently overwritten by a stale copy of
+    `state` read before this command's own network calls even started."""
+    # Read-only, unlocked: matches cmd_status's own "reads don't need the
+    # lock" precedent, and this needs last_shipped_commit only to know
+    # WHAT to verify, not to mutate anything yet.
+    state = load_state(args.id)
+    last_shipped = state.get("last_shipped_commit")
+    if last_shipped is None:
+        die(f"Sprint {args.id} has no shipped commit on record — run /sprint-ship "
+            "(or /sprint-reship) first, there is nothing here yet to verify against the "
+            "registry.")
+
+    package = args.package
+    if not package:
+        pkg_json_path = ROOT / "package.json"
+        try:
+            package = json.loads(pkg_json_path.read_text(encoding="utf-8"))["name"]
+        except (OSError, json.JSONDecodeError, KeyError):
+            die("Could not read a package name from package.json, and none was given via "
+                "--package. Pass --package explicitly.")
+
+    version = args.version
+    if not version:
+        try:
+            pkg_json_raw = subprocess.run(  # nosec B603 B607
+                ["git", "show", f"{last_shipped}:package.json"],
+                cwd=ROOT, capture_output=True, text=True, check=True, timeout=15,
+            ).stdout
+            version = json.loads(pkg_json_raw)["version"]
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError,
+                json.JSONDecodeError, KeyError, subprocess.TimeoutExpired):
+            die(f"Could not read package.json's version from the shipped commit "
+                f"({last_shipped}), and none was given via --version. Pass --version explicitly.")
+
+    registry = npm_registry_view(package, version)
+    if registry is None:
+        die(f"Could not read {package}@{version} from the npm registry — not published yet, "
+            "npm isn't available, or there's no network from here. Nothing to verify against.")
+
+    event_name = "gitHead_check"
+    registry_git_head = registry.get("gitHead")
+    if registry_git_head:
+        if registry_git_head == last_shipped:
+            detail = (f"MATCH: registry gitHead={registry_git_head} == "
+                      f"last_shipped_commit={last_shipped} for {package}@{version}.")
+        else:
+            detail = (f"MISMATCH: registry gitHead={registry_git_head} != "
+                      f"last_shipped_commit={last_shipped} for {package}@{version}.")
+    else:
+        event_name = "content_check"
+        # gitHead absent — a stated fact, not an error, then the content
+        # fallback, printed as its own line so it's visible even though
+        # only the final `detail` line below gets logged to history.
+        print(f"Registry has no gitHead recorded for {package}@{version} "
+              "(a real, published fact, not an error here — likely a linked-worktree "
+              "publish; falling back to content verification, which is the stronger "
+              "proof anyway).")
+        registry_shasum = (registry.get("dist") or {}).get("shasum")
+        if not registry_shasum:
+            detail = (f"INCONCLUSIVE: {package}@{version} has neither gitHead nor a "
+                      "readable dist.shasum on the registry — nothing here to verify against.")
+        else:
+            local_shasum = pack_commit_shasum(last_shipped)
+            if local_shasum is None:
+                detail = (f"INCONCLUSIVE: could not pack commit {last_shipped} locally to "
+                          f"compare against registry dist.shasum={registry_shasum} "
+                          "(npm/git/tar unavailable, or packing itself failed).")
+            elif local_shasum == registry_shasum:
+                detail = (f"MATCH (content): packing commit {last_shipped} locally "
+                          f"produces shasum={local_shasum}, identical to the registry's "
+                          f"dist.shasum for {package}@{version}. No gitHead needed — the "
+                          "published bytes are confirmed to be exactly this commit's content.")
+            else:
+                detail = (f"MISMATCH (content): packing commit {last_shipped} locally "
+                          f"produces shasum={local_shasum}, but the registry's dist.shasum "
+                          f"for {package}@{version} is {registry_shasum}. What's published "
+                          "does not match what was shipped.")
+
+    print(detail)
+    with locked(f"sprint-{args.id}"):
+        # Fresh load: state may have moved on (a reship, another
+        # verify-publish run) during the network/pack work above.
+        current_state = load_state(args.id)
+        log_event(current_state, "verify-publish", event_name, detail)
+        save_state(args.id, current_state)
 
 
 def cmd_liveqa(args) -> None:
@@ -954,7 +1308,7 @@ def cmd_override(args) -> None:
                 die(f"Sprint {args.id} is in phase '{state['phase']}', not ready to ship, "
                     "override doesn't change that, dev work must be agreed done first.")
             target_ref = args.commit or "HEAD"
-            current_tree = git_tree_hash(target_ref)
+            current_tree = git_tree_hash_excluding(target_ref, SHIP_HASH_EXCLUDE_PREFIX)
             if current_tree is None:
                 die(f"'{target_ref}' does not resolve to a real commit in this repo, "
                     "nothing to stamp.")
@@ -1199,6 +1553,17 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("ship"); s.add_argument("id", type=int); s.add_argument("--commit", default=""); s.set_defaults(func=cmd_ship)
 
     s = sub.add_parser("reship"); s.add_argument("id", type=int); s.add_argument("--commit", default=""); s.set_defaults(func=cmd_reship)
+
+    s = sub.add_parser("verify-publish",
+                        help="Sprint 13: mechanically verify a shipped sprint's registry "
+                        "publish against last_shipped_commit — gitHead when the registry "
+                        "has one, a content-based (npm pack) fallback when it doesn't. "
+                        "Read-only against the sprint's phase; only appends a history event.")
+    s.add_argument("id", type=int)
+    s.add_argument("--package", default="", help="Defaults to package.json's own \"name\".")
+    s.add_argument("--version", default="",
+                    help="Defaults to the version in the shipped commit's own package.json.")
+    s.set_defaults(func=cmd_verify_publish)
 
     # LiveQA was named GroundTruth before this rename. "groundtruth" is kept
     # as a deprecated alias for one transition period so an in-flight sprint
