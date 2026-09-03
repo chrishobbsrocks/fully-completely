@@ -5,7 +5,7 @@
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "47d85daae512568f627c394d60cdde97905ba4f94e5b0112f7201f3c280cdf99",
   "qa1_audited_tree_hash": "5e1b88982b41e6ae9360e61a3f80ae9937c2379e",
-  "last_shipped_commit": "21dcc8d95d00f946969b2ffeb77c9bd2cec696c1",
+  "last_shipped_commit": "6c1fc67acb47e813d7cc4623b2ce783279fc5f69",
   "groundtruth_result": null,
   "audit_rounds": 1,
   "live_test_rounds": 0,
@@ -35,6 +35,12 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=21dcc8d"
+    },
+    {
+      "ts": "2026-09-03T15:26:30+00:00",
+      "actor": "pipeman",
+      "event": "reshipped",
+      "detail": "commit=6c1fc67"
     }
   ]
 }
