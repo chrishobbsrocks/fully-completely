@@ -84,7 +84,7 @@ Requested by Fifty Mission Cap, an internal delivery system that installs this f
 **LiveQA verifies live, after Pipeman publishes:**
 
 - **Confirm 0.1.11 is on the registry** and its `gitHead` matches `last_shipped_commit`, from `npm view`.
-- **The real thing, end to end.** From a published 0.1.11 install in a scratch repo, launch each of the six roles headless and drive one throwaway sprint through both gates. This is Req 5's verification and there is no substitute for it.
+- **Narrowed to what 0.1.11 actually ships** — QA1 round 5: the prior wording ("launch each of the six roles headless and drive one throwaway sprint through both gates") is sprint 12's Req 4, gated on its own undecided permission-scope question, not this sprint's to satisfy or block on. From a published 0.1.11 install in a scratch repo, launch **one** real role headless and confirm it spawns as a genuinely separate process and completes — the launch path itself, which this sprint does ship. Stdout purity, exit codes, and operator-session auth are already their own criteria below; this one just confirms the mechanism runs for real. The six-role discovery pass through both gates is sprint 12's, verified there.
 - **stdout is parseable.** Pipe a headless run into a JSON parser and confirm it succeeds. Repeat on the `--restart` path, which is where the known stray write lives.
 - **Auth, per amended Req 4.** Run headless with **no `ANTHROPIC_API_KEY` set** and confirm it works on the operator's existing Claude session. A key must be optional, never a precondition.
 - **Exit codes end to end.** A recorded FAIL exits 0; a launcher-level failure exits in the reserved range with the cause on stderr.
