@@ -73,6 +73,7 @@ responsibly re-stamp.
 """
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -102,11 +103,42 @@ REGISTRY_PATH = SPRINTS_DIR / "registry.json"
 TEMPLATE_PATH = ROOT / "templates" / "sprint-template.md"
 LOCK_DIR = SPRINTS_DIR / ".locks"
 
-# Sprint 13, Req 1: the one path git_tree_hash_excluding() strips from the
-# ship-time content comparison. A relative git-tree path (matching what
-# `git ls-tree` prints, not an OS path), not ROOT-anchored, since it's
-# compared against ls-tree output for arbitrary refs, not the filesystem.
-SHIP_HASH_EXCLUDE_PREFIX = "docs/sprints/"
+# Sprint 13, Req 1 — QA1 round 1 caught this: excluding all of
+# "docs/sprints/" was WRONG, not just imprecise. .npmignore does NOT
+# exclude the phase folders' .gitkeep placeholders (seven of them,
+# confirmed in the published tarball) — only the specific patterns below
+# — so a blanket docs/sprints/ prefix let an unaudited change to a
+# shipped .gitkeep slip past the ship-time content comparison, the
+# opposite of what "the ship gate compares what ships" is supposed to
+# mean. These glob patterns (fnmatch syntax, matched against each
+# git-tree path from git_tree_hash_excluding() below) are copied EXACTLY
+# from .npmignore's own docs/sprints/-related lines — not "docs/sprints/"
+# as a shorthand for it. KEEP THESE TWO LISTS IN SYNC BY HAND: reading
+# .npmignore at runtime instead was considered and rejected as bigger
+# than what Req 1 actually asked for — .npmignore also excludes things
+# entirely unrelated to docs/sprints/ (__pycache__/, *.pyc, .DS_Store,
+# .claude/settings.local.json), and Req 1 is scoped to docs/sprints/
+# only; broadening the ship-time comparison to mirror the WHOLE
+# .npmignore file is a different, larger change nothing here asked for.
+# If .npmignore's docs/sprints/ patterns ever change, this list has to
+# change with them by hand, and nothing will warn if it doesn't — a real,
+# named limitation, not an assumed-away one.
+#
+# docs/sprints/.locks/* was missing from the first version of this list
+# (only the three "new for sprint 2" .npmignore lines were copied, not
+# the earlier docs/sprints/.locks/ line grouped with the OS/Python
+# cruft) — caught by this sprint's OWN smoke test failing, not by
+# inspection: a real bookkeeping-only commit that happened to create a
+# lock file tripped the "no regression" test the fix to THIS finding was
+# supposed to pass. Lock files are transient, per-invocation, and never
+# sprint data (see CLAUDE.md's "Sprint data persistence"); they belong in
+# this list for the same reason registry.json and the state files do.
+SHIP_HASH_EXCLUDE_PATTERNS = (
+    "docs/sprints/.locks/*",
+    "docs/sprints/registry.json",
+    "docs/sprints/state/*.json",
+    "docs/sprints/*/*.md",
+)
 
 STATUS_FOLDERS = {
     "backlog": "0-backlog",
@@ -274,40 +306,53 @@ def locked(name: str):
         os.close(fd)
 
 
-def git_tree_hash_excluding(ref: str, exclude_prefix: str) -> Optional[str]:
-    """Sprint 13, Req 1 (Finding A): resolve a git ref (branch, tag,
-    commit hash, HEAD) to a content hash of everything EXCEPT paths under
-    exclude_prefix — used to compare what QA1 audited against what
-    actually ships without the lifecycle's own bookkeeping (docs/sprints/)
-    ever being able to invalidate an audit it never touched. `.npmignore`
-    already excludes docs/sprints/ from the published tarball; what ships
-    is the tarball's content, and the whole-tree comparison this replaced
-    was stricter than that, catching bookkeeping the lifecycle itself
-    wrote as if it were undisclosed source drift (sprints 6, 8, 10).
+def git_tree_hash_excluding(ref: str, exclude_patterns) -> Optional[str]:
+    """Sprint 13, Req 1 (Finding A), corrected on QA1 round 1: resolve a
+    git ref (branch, tag, commit hash, HEAD) to a content hash of
+    everything EXCEPT paths matching exclude_patterns (fnmatch glob
+    syntax, matched with fnmatch.fnmatch against each git-tree path) —
+    used to compare what QA1 audited against what actually ships without
+    the lifecycle's own bookkeeping ever being able to invalidate an
+    audit it never touched.
+
+    Round 1 passed a single "docs/sprints/" PREFIX here instead of real
+    patterns, on the reasoning that ".npmignore already excludes
+    docs/sprints/ from the published tarball" — QA1 demonstrated that
+    claim false by publishing a real tarball and finding seven .gitkeep
+    placeholders inside it (install.js's phase-folder skeleton), which
+    the prefix version silently stopped guarding even though they
+    genuinely ship. SHIP_HASH_EXCLUDE_PATTERNS (module level, above) now
+    mirrors .npmignore's own three docs/sprints/-specific lines exactly,
+    not a shorthand for the whole directory — see that constant's own
+    comment for why a runtime read of .npmignore itself was considered
+    and rejected as broader than Req 1 asked for.
 
     This is deliberately NOT `git rev-parse ref^{tree}`, which has no
     "this tree minus a subtree" mode — there's no single git primitive
     for that. Instead: `git ls-tree -r` lists every (mode, type,
-    blob-sha, path) entry in the tree recursively; entries under
-    exclude_prefix are dropped, the rest sorted for determinism, and
+    blob-sha, path) entry in the tree recursively; entries matching any
+    exclude pattern are dropped, the rest sorted for determinism, and
     hashed with sha256. The result is NOT a real git object hash (nothing
     reads it as one, e.g. `git cat-file`) — it only needs to support
-    equality comparison between two calls with the same exclude_prefix,
+    equality comparison between two calls with the same exclude_patterns,
     which a stable hash over the same deterministic listing does exactly
     as reliably as a native tree hash would.
 
     PRESERVED PROTECTION, stated explicitly per this requirement's own
-    instruction: the sprint FILE itself stays guarded by
-    qa1_audit_file_hash, a separate, unrelated gate checked by
-    cmd_dev_done (a stale-sprint-file mid-build amendment is caught
-    there, before this function is ever called). Excluding docs/sprints/
-    from THIS content hash removes an overlap between two gates that were
-    both independently guarding the same thing — this function's own gate
-    (cmd_ship's tree comparison) is only asking "did anything that ships
-    change since the audit," and docs/sprints/ never ships. Everything
-    outside exclude_prefix is still hashed and still compared exactly as
-    before; a source change landing between audit and ship is still
-    caught, with no override, unchanged.
+    instruction, and re-confirmed on QA1 round 1 by inspecting the diff
+    directly: the sprint FILE itself stays guarded by qa1_audit_file_hash,
+    a separate, unrelated gate checked by cmd_dev_done (a stale-sprint-file
+    mid-build amendment is caught there, before this function is ever
+    called, and cmd_dev_done is untouched by this sprint). Excluding
+    exactly what .npmignore excludes from THIS content hash removes an
+    overlap between two gates that were both independently guarding the
+    same thing — this function's own gate (cmd_ship's tree comparison) is
+    only asking "did anything that ships change since the audit," and
+    these specific patterns never ship. Everything else is still hashed
+    and still compared exactly as before; a source change landing between
+    audit and ship is still caught, with no override, unchanged — QA1
+    round 1 demonstrated this directly against ten different source paths
+    on scratch repos, including a file that didn't exist at audit time.
 
     Returns None if the ref doesn't resolve (not a git repo, bad ref,
     etc.), collapsing every subprocess failure the same way
@@ -330,7 +375,7 @@ def git_tree_hash_excluding(ref: str, exclude_prefix: str) -> Optional[str]:
         meta, sep, path = line.partition("\t")
         if not sep:
             continue  # malformed line, shouldn't happen; skip rather than crash
-        if path == exclude_prefix.rstrip("/") or path.startswith(exclude_prefix):
+        if any(fnmatch.fnmatch(path, pattern) for pattern in exclude_patterns):
             continue
         entries.append(f"{meta}\t{path}")
     entries.sort()
@@ -763,7 +808,7 @@ def cmd_qa1(args) -> None:
         if verdict == "PASS":
             state["phase"] = "qa1_audit"
             state["qa1_audit_file_hash"] = file_hash(registry_sprint_file(args.id))
-            state["qa1_audited_tree_hash"] = git_tree_hash_excluding("HEAD", SHIP_HASH_EXCLUDE_PREFIX)
+            state["qa1_audited_tree_hash"] = git_tree_hash_excluding("HEAD", SHIP_HASH_EXCLUDE_PATTERNS)
             print(f"QA1 audit PASSED (round {state['audit_rounds']}).")
             if state["qa1_audited_tree_hash"] is None and not is_git_repository():
                 # Req 12: say so now, at the moment the gap is created,
@@ -836,7 +881,7 @@ def cmd_ship(args) -> None:
             die(f"{ROOT} is not a git repository. Run this from inside a real git repository — "
                 "there is nothing here for --commit to resolve against.")
 
-        shipped_tree = git_tree_hash_excluding(args.commit, SHIP_HASH_EXCLUDE_PREFIX) if args.commit else None
+        shipped_tree = git_tree_hash_excluding(args.commit, SHIP_HASH_EXCLUDE_PATTERNS) if args.commit else None
         audited_tree = state.get("qa1_audited_tree_hash")
         if shipped_tree is None:
             die(f"'{args.commit or ''}' does not resolve to a real commit in this repo. "
@@ -1308,7 +1353,7 @@ def cmd_override(args) -> None:
                 die(f"Sprint {args.id} is in phase '{state['phase']}', not ready to ship, "
                     "override doesn't change that, dev work must be agreed done first.")
             target_ref = args.commit or "HEAD"
-            current_tree = git_tree_hash_excluding(target_ref, SHIP_HASH_EXCLUDE_PREFIX)
+            current_tree = git_tree_hash_excluding(target_ref, SHIP_HASH_EXCLUDE_PATTERNS)
             if current_tree is None:
                 die(f"'{target_ref}' does not resolve to a real commit in this repo, "
                     "nothing to stamp.")

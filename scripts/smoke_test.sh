@@ -764,6 +764,38 @@ BOOKKEEPING_COMMIT=$(git rev-parse HEAD)
 $SCRIPT ship "$SPRINT_BOOKKEEPING" --commit "$BOOKKEEPING_COMMIT" > /tmp/out.txt 2>&1 || \
   fail "ship refused a commit whose only change was under docs/sprints/ (Req 1 regression) — output: $(cat /tmp/out.txt)"
 rm -f /tmp/out.txt
+# The commit just shipped also carries a genuine docs/sprints/.locks/*.lock
+# file — every qa1/dev-done/ship call above acquires and releases one, and
+# the lock FILE itself is never deleted (see locked()'s own docstring) —
+# so this same assertion already covers the exclusion list's .locks/*
+# pattern, not just registry.json/state/*.json/*/*.md. QA1's own first
+# version of this fix passed this exact test while excluding a whole
+# blanket "docs/sprints/" prefix; a real lock file created during THIS
+# test run is what caught that the narrowed list initially missed
+# docs/sprints/.locks/* too, before this comment or the fix existed.
+git ls-tree -r "$BOOKKEEPING_COMMIT" --name-only | grep -q "^docs/sprints/\.locks/" || \
+  fail "test setup broken: expected at least one docs/sprints/.locks/*.lock file in the shipped commit"
+
+echo "== sprint 13, Req 1 (QA1 round 1's own finding): a shipped .gitkeep file is NOT in the exclusion list — an unaudited change to one still refuses =="
+SPRINT_GITKEEP=$(new_sprint "Gitkeep regression sprint")
+$SCRIPT start "$SPRINT_GITKEEP" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_GITKEEP initial work"
+$SCRIPT qa1 "$SPRINT_GITKEEP" --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done "$SPRINT_GITKEEP" > /dev/null
+# A phase-folder .gitkeep genuinely ships (install.js's own skeleton,
+# confirmed against the real published tarball by QA1) — it is NOT one of
+# .npmignore's docs/sprints/-specific exclusions, unlike registry.json,
+# state/*.json, and the phase folders' own sprint *.md files. An
+# unaudited byte appended to one must still be caught.
+mkdir -p docs/sprints/4-blocked
+printf '\n' >> docs/sprints/4-blocked/.gitkeep
+git add docs/sprints/4-blocked/.gitkeep
+git commit -q -m "unaudited change to a SHIPPED .gitkeep file"
+GITKEEP_DRIFT_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_GITKEEP" --commit "$GITKEEP_DRIFT_COMMIT" > /tmp/out.txt 2>&1 && \
+  fail "ship succeeded on an unaudited change to a real, shipped .gitkeep file (Req 1's exclusion list is still too broad)" || true
+grep -q "doesn't match what QA1 audited" /tmp/out.txt || fail "gitkeep-drift refusal message missing"
+rm -f /tmp/out.txt
 
 echo "== sprint 13, Req 1: a source change (outside docs/sprints/) after QA1's PASS still refuses, no override — the preserved protection =="
 SPRINT_SOURCE_DRIFT=$(new_sprint "Source drift sprint (sprint 13)")
