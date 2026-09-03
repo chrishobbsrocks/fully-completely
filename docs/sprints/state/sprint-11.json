@@ -1,11 +1,11 @@
 {
   "id": 11,
   "title": "Launch a role headless, with its opening prompt read from a file",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "56ad7e65d8331a922c6283b8ea06cc432b8c0f31ef6ce5adf9758f0684611db7",
   "qa1_audited_tree_hash": "e6a641a723fbf91df45f71c011990720c0b6f5a2",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "8606700e3c5db4d06fc84a477ed0c3d13ec1786d",
   "groundtruth_result": null,
   "audit_rounds": 6,
   "live_test_rounds": 0,
@@ -59,6 +59,12 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-03T17:32:35+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=8606700"
     }
   ]
 }
