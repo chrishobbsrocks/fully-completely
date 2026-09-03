@@ -2,7 +2,7 @@
 id: 11
 title: "Launch a role headless, with its opening prompt read from a file"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-09-02T06:03:07+00:00
 ---
 

@@ -64,8 +64,8 @@
     "11": {
       "title": "Launch a role headless, with its opening prompt read from a file",
       "epic": "Framework rules and distribution",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-11_launch-a-role-headless-with-its-opening-prompt-read-from-a-file.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-11_launch-a-role-headless-with-its-opening-prompt-read-from-a-file--done.md"
     },
     "12": {
       "title": "Settle the headless permission scope, then discover the six opening prompts by running them",
