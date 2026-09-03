@@ -77,6 +77,12 @@
       "actor": "dev-team",
       "event": "sprint_closed",
       "detail": "user_said=Run /sprint-complete 11 --user-said \"...\" from the main checkout, /Users/chrishobbs/Programming/fully-completely."
+    },
+    {
+      "ts": "2026-09-03T23:14:00+00:00",
+      "actor": "verify-publish",
+      "event": "content_check",
+      "detail": "MATCH (content): packing commit 8606700e3c5db4d06fc84a477ed0c3d13ec1786d locally produces shasum=75e721fa9a55145f6d5847ff9a65bae8120ac5c0, identical to the registry's dist.shasum for fully-completely@0.1.11. No gitHead needed \u2014 the published bytes are confirmed to be exactly this commit's content."
     }
   ]
 }
