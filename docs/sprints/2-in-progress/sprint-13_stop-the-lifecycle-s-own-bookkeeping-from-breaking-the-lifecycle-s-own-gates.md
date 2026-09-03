@@ -2,7 +2,7 @@
 id: 13
 title: "Stop the lifecycle's own bookkeeping from breaking the lifecycle's own gates"
 epic: "Honest reporting"
-status: todo
+status: in_progress
 created: 2026-09-03T15:47:07+00:00
 ---
 
@@ -47,7 +47,7 @@ Three distinct findings, one thesis, **eight recorded instances between them**. 
    - **This warns; it does not gate.** Nothing should be blocked by a divergence — the roles must be able to work in worktrees, which is what worktrees are for.
    - If the compare is impossible or unreliable in some configuration, name the configuration rather than assuming it works everywhere.
 
-4. **Bump `package.json` to 0.1.13.** One line.
+4. **Bump `package.json` to 0.1.14.** One line.
 
 5. **Test coverage in `scripts/smoke_test.sh`.** At minimum: a bookkeeping-only change between audit and ship no longer refuses; a source change between audit and ship still refuses; whatever Req 2 decides is asserted; the worktree divergence warning appears when trees differ and stays silent when they don't.
 
@@ -59,13 +59,13 @@ Three distinct findings, one thesis, **eight recorded instances between them**. 
 - Req 1's rationale: confirm the comment states the preserved protection, and check the claim yourself. If `qa1_audit_file_hash` does not in fact still guard sprint files, the whole basis for this change is wrong and it should be a FAIL.
 - **Req 2: confirm the decision was reached by reading `cmd_liveqa`**, not by reasoning, and that the outcome is mechanical rather than an instruction in an agent file. Sprint 9's version was prose and it drifted on the next release; a fix of the same shape is not a fix.
 - Req 3: confirm it warns and never gates, and that no `origin/*` comparison was introduced.
-- Req 4: `package.json` is `0.1.13`, one-line diff.
+- Req 4: `package.json` is `0.1.14`, one-line diff.
 - Req 5: **run `scripts/smoke_test.sh`.**
 - Run `scripts/verify-tarball.sh`.
 
 **LiveQA verifies live, after Pipeman publishes:**
 
-- **Confirm 0.1.13 is on the registry** and its `gitHead` matches `last_shipped_commit` — **on the first attempt, with no post-hoc correction.** If a correction was still needed, Req 2 did not work and that is the finding.
+- **Confirm 0.1.14 is on the registry** and its `gitHead` matches `last_shipped_commit` — **on the first attempt, with no post-hoc correction.** If a correction was still needed, Req 2 did not work and that is the finding.
 - **Drive a real sprint through the real gates from a published install**, in a scratch repo, with bookkeeping commits actually landing between audit and ship. All three findings only appear once state is written mid-flight; a sprint with no bookkeeping proves nothing here.
 - **The relaxation did not open a hole.** Land a one-line source change between audit and ship and confirm `/sprint-ship` still refuses it.
 - **The worktree warning fires.** Create a worktree, amend a sprint file in one tree, and confirm the other names the divergence — the exact scenario that had Dev Team building against a stale spec.
@@ -82,7 +82,7 @@ Three distinct findings, one thesis, **eight recorded instances between them**. 
 ### Dependencies
 
 - **Blocks:** Nothing directly, but every future release pays the tax these findings impose until it lands.
-- **Blocked by:** Sprints 11 and 12 shipping, on the shared `package.json` version line. Sequential: 0.1.11, 0.1.12, then 0.1.13.
+- **Blocked by:** Sprints 11 and 12 shipping, on the shared `package.json` version line. Sequential: 0.1.11, 0.1.12, then 0.1.14.
 - **External:** None. All three findings are internal to this repo's own lifecycle.
 
 ### Team Assignments
