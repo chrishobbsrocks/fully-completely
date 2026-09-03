@@ -1,5 +1,5 @@
 {
-  "next_id": 13,
+  "next_id": 14,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -72,6 +72,12 @@
       "epic": "Framework rules and distribution",
       "status": "todo",
       "file": "docs/sprints/1-todo/sprint-12_settle-the-headless-permission-scope-then-discover-the-six-opening-prompts-by-running-them.md"
+    },
+    "13": {
+      "title": "Stop the lifecycle's own bookkeeping from breaking the lifecycle's own gates",
+      "epic": "Honest reporting",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-13_stop-the-lifecycle-s-own-bookkeeping-from-breaking-the-lifecycle-s-own-gates.md"
     }
   }
 }
