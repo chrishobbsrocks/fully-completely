@@ -1,11 +1,11 @@
 {
   "id": 13,
   "title": "Stop the lifecycle's own bookkeeping from breaking the lifecycle's own gates",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "a5d8a831964b2a776cb5697d7034e5117f68110f11bd0600bd7db80a0feee7f9",
   "qa1_audited_tree_hash": "c6ab88dc00e9b6f130053516ae2fbea70cfc0a3305747d8751f6e808b50750ae",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "e575d2133251b558fe492ef5af86df7a64be23b8",
   "groundtruth_result": null,
   "audit_rounds": 2,
   "live_test_rounds": 0,
@@ -35,6 +35,12 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-03T23:48:04+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=e575d21"
     }
   ]
 }
