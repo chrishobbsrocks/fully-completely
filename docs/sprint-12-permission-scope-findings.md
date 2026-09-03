@@ -49,12 +49,49 @@ sub-command against the allowlist ("This Bash command contains multiple
 operations. The following parts require approval: ...") — not a loophole
 for smuggling an unapproved command alongside an approved one.
 
-### `--disallowedTools "Edit,Write"` — CONFIRMED to hard-disable, not just discourage
+### `--disallowedTools "Edit,Write"` — CONFIRMED to hard-disable the TOOLS, not to prevent all writes
 
 With both tools disallowed, an attempted Edit call returned `No such tool
 available: Edit. Edit is disabled for this session` — the tool doesn't
 exist for that session at all, a stronger guarantee than a permission
 prompt that something might talk its way past.
+
+**Correction (QA1 round 1 on this sprint): this does NOT mean "writes
+nothing."** Disallowing Edit/Write only removes those two tools — Bash
+itself is untouched, and a plain single-line redirect (`printf '%s'
+"content" > file`) still succeeds under this exact profile, confirmed by
+running it. This is what qa1.md/liveqa.md's own headless fallback (see
+below) actually relies on, and QA1 correctly caught that the finding here
+previously described the scope as stronger than it is — the two artifacts
+contradicted each other, one saying "writes nothing," the other giving
+instructions for how to write a file.
+
+**The asymmetry QA1 flagged, checked**: does a Bash redirect stay confined
+to the working directory the same way the Write tool was found to be?
+CONFIRMED yes, symmetric — `printf ... > /tmp/outside-file.txt` from
+inside a different working directory was blocked with `Output redirection
+to '/tmp/...' was blocked. For security, Claude Code may only write to
+files in the allowed working directories for this session: ...` — the
+identical directory bound, enforced at the Bash-redirect level too, not
+only at the Write-tool level. This was a real, correctly-flagged gap in
+this document (asserted as a "free" bound from the Write-tool case alone,
+never checked against Bash) — now closed by running, not assumed.
+
+**A separate, narrower finding from the same round of testing: multi-line
+heredoc syntax (`cat <<'EOF' > file` ... `EOF`) is rejected outright**,
+regardless of location, with `Contains shell syntax (file_redirect) that
+cannot be statically analyzed` — a different, stricter rejection than the
+directory-confinement block above, and one that fires even for a write
+fully inside the working directory. A single-line `printf '%s\n' "line
+one" "line two" ... > file` (single-quoted format string, so the outer
+shell never touches `\n`) was confirmed to work instead, producing real
+newline bytes (verified with `od -c`) and correctly refusing to expand a
+literal backtick or `$VAR` passed as a quoted argument — the same safety
+property the original `--notes-file` mandate exists to protect, delivered
+by a command shape that actually executes under this profile. The
+qa1.md/liveqa.md/sprint-qa1.md/sprint-liveqa.md fallback previously
+recommended the heredoc form; it has been corrected to the verified
+`printf` form.
 
 ## Per-role scope, from the above
 
@@ -63,11 +100,14 @@ prompt that something might talk its way past.
   needs an explicit `--allowedTools "Bash(node scripts/launcher_test.js)"`
   (or the project's equivalent) — CONFIRMED pattern (the `./run-tests.sh`
   case), not yet run against the real command.
-- **QA1 (runs tests and reads code, writes nothing):**
+- **QA1 (runs tests and reads code, never writes SOURCE via Edit/Write —
+  but can still write its own notes/state files via Bash, confined to the
+  working directory):**
   `--permission-mode acceptEdits --disallowedTools "Edit,Write"` plus the
   same test-command allowlist as Dev Team — CONFIRMED as a combination
   (this exact profile was run: Edit hard-disabled, the allowlisted script
-  ran and produced real output).
+  ran and produced real output). See the corrected `--disallowedTools`
+  section above for what this profile does and does not actually prevent.
 - **Pipeman (git + npm):** git needs nothing beyond `acceptEdits` —
   CONFIRMED, including a real push. `npm` needs an explicit
   `--allowedTools "Bash(npm *)"` — CONFIRMED for `npm --version` and `npm

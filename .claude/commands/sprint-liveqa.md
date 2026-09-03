@@ -9,7 +9,7 @@ Usage: `/sprint-liveqa <sprint-id> --deployed-commit <sha> --verdict PASS|FAIL|C
 
 **Security note**: do not interpolate `$ARGUMENTS` (or any free-text notes, including exact page text or error strings you observed) directly into the bash command below. Write the notes to a temp file with the Write tool, then run:
 
-**Headless note (sprint 12):** if the Write tool is unavailable (a headless LiveQA session under sprint 12's scoped permission profile never has it), write the notes file with a quoted heredoc via Bash instead — `cat <<'EOF' > /tmp/liveqa-notes.txt` ... `EOF` — the quoted delimiter gives the identical protection, then pass the resulting path to `--notes-file` exactly as below.
+**Headless note (sprint 12):** if the Write tool is unavailable (a headless LiveQA session under sprint 12's scoped permission profile never has it), write the notes file with `printf` via Bash instead — `printf '%s\n' "line one" "line two" ... > /tmp/liveqa-notes.txt`, single-quoting the format string so the outer shell never touches `\n` — the identical protection, then pass the resulting path to `--notes-file` exactly as below. **Not a heredoc**: `cat <<'EOF' > file` was tried first and confirmed to fail under this profile with `Contains shell syntax (file_redirect) that cannot be statically analyzed`, regardless of location.
 
 ```bash
 node scripts/run-lifecycle.js liveqa <sprint-id> --deployed-commit <sha> --verdict <verdict> --notes-file /tmp/liveqa-notes.txt
