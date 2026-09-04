@@ -76,8 +76,8 @@
     "13": {
       "title": "Stop the lifecycle's own bookkeeping from breaking the lifecycle's own gates",
       "epic": "Honest reporting",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-13_stop-the-lifecycle-s-own-bookkeeping-from-breaking-the-lifecycle-s-own-gates.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-13_stop-the-lifecycle-s-own-bookkeeping-from-breaking-the-lifecycle-s-own-gates--done.md"
     },
     "14": {
       "title": "Make the commands work on a default Windows box, and stop headers hiding a testable gate",

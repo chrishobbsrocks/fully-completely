@@ -2,7 +2,7 @@
 id: 13
 title: "Stop the lifecycle's own bookkeeping from breaking the lifecycle's own gates"
 epic: "Honest reporting"
-status: in_progress
+status: done
 created: 2026-09-03T15:47:07+00:00
 ---
 
