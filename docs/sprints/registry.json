@@ -82,8 +82,8 @@
     "14": {
       "title": "Make the commands work on a default Windows box, and stop headers hiding a testable gate",
       "epic": "Framework rules and distribution",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-14_make-the-commands-work-on-a-default-windows-box-and-stop-headers-hiding-a-testable-gate.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-14_make-the-commands-work-on-a-default-windows-box-and-stop-headers-hiding-a-testable-gate.md"
     },
     "15": {
       "title": "Make the live-loop audit reachable when it is needed, and stop a killed launcher leaving a billed child alive",
