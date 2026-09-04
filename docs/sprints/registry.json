@@ -88,8 +88,8 @@
     "15": {
       "title": "Make the live-loop audit reachable when it is needed, and stop a killed launcher leaving a billed child alive",
       "epic": "Honest reporting",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-15_make-the-live-loop-audit-reachable-when-it-is-needed-and-stop-a-killed-launcher-leaving-a-billed-child-alive.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-15_make-the-live-loop-audit-reachable-when-it-is-needed-and-stop-a-killed-launcher-leaving-a-billed-child-alive.md"
     },
     "16": {
       "title": "Make the baseline table maintain itself, and stop tests breaking on its drift",
