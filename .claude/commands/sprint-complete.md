@@ -13,8 +13,10 @@ metacharacters in what the user said can break out and run unintended
 commands. Parse the sprint ID yourself (a safe, low-entropy value), write
 the `--user-said` text to a temp file with the Write tool, and run:
 
+**Headless note (sprint 14):** if the Write tool is unavailable, write the file with `printf` via Bash instead — `printf '%s\n' "line one" "line two" ... > sprint-complete-user-said.txt`, single-quoting the format string so the outer shell never touches `\n` — then pass the resulting path to `--user-said-file` exactly as below. Not a heredoc: `cat <<'EOF' > file` fails under a scoped permission profile. **Always a path inside your working directory, never `/tmp`**: `/tmp` doesn't exist on a default Windows box in PowerShell (`C:\tmp` is absent) — a relative path works unchanged there, in Git Bash, and on macOS.
+
 ```bash
-node scripts/run-lifecycle.js complete <sprint-id> --user-said-file /tmp/sprint-complete-user-said.txt
+node scripts/run-lifecycle.js complete <sprint-id> --user-said-file sprint-complete-user-said.txt
 ```
 
 This refuses to run unless all three are true:

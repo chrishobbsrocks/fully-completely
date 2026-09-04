@@ -198,11 +198,29 @@ def atomic_write(path: Path, content: str) -> None:
 
 def resolve_text(value: Optional[str], file_value: Optional[str]) -> str:
     """Prefer a --*-file value over a raw flag value. Reading free text
-    from a file (written by the Write tool) rather than interpolating it
-    into a shell command line avoids quote-breakout / injection when a
-    slash command builds the invocation from user-supplied text."""
+    from a file (written by the Write tool, or by Bash via `printf` when
+    Write is unavailable headless — see qa1.md/liveqa.md's own fallback)
+    rather than interpolating it into a shell command line avoids
+    quote-breakout / injection when a slash command builds the invocation
+    from user-supplied text.
+
+    Sprint 14, Req 1: this used to let a missing or unreadable file raise
+    a bare, unhandled FileNotFoundError straight out of this function —
+    exactly the failure LiveQA found on a default Windows box, where a
+    command file's own example path (historically /tmp/...) doesn't
+    exist and nothing gets recorded, just a stack trace. Now fails
+    legibly instead, naming the exact path that couldn't be read, via
+    die() — which itself writes to stderr and exits non-zero, never a
+    silent, unrecorded crash. Called from inside a `with locked(...)`
+    block at every real call site; die()'s sys.exit(1) still runs that
+    block's `finally` and releases the lock, the same as every other
+    die() call already made from inside one of those blocks."""
     if file_value:
-        return Path(file_value).read_text().strip()
+        try:
+            return Path(file_value).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            die(f"Could not read '{file_value}': {exc}. The text was expected there — "
+                "check the path exists and is readable, then try again.")
     return value or ""
 
 
@@ -586,8 +604,14 @@ def update_frontmatter_status(path: Path, new_status: str) -> None:
 # --------------------------------------------------------------------------
 
 def cmd_new(args) -> None:
-    title = Path(args.title_file).read_text().strip() if args.title_file else args.title
-    epic = Path(args.epic_file).read_text().strip() if args.epic_file else (args.epic or "")
+    # Sprint 14, Req 1: was its own duplicated, unguarded
+    # Path(...).read_text() pair — the exact same unhandled-crash shape
+    # resolve_text() above already fixed for every other --*-file
+    # argument. Reusing it here instead of a second copy means a missing
+    # --title-file/--epic-file now fails the same legible way (die(),
+    # naming the path) rather than reinventing that fix a second time.
+    title = resolve_text(args.title, args.title_file)
+    epic = resolve_text(args.epic, args.epic_file)
     if not title:
         die("Sprint title cannot be empty.")
 

@@ -581,23 +581,23 @@ test('install.js: a genuinely different CLAUDE.md is reported as a conflict', ()
 // -------------------------------------------------------------------------
 const REAL_RUN_ROLE_JS = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'launcher', 'run-role.js'), 'utf8');
 const REAL_QA1_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'qa1.md'), 'utf8');
-// master-controller.md, not qa1.md, liveqa.md, or pipeman.md, for the
-// tests below that assert a file matches the COMMITTED baseline table
-// (scripts/baselines/user-owned-content.json, generated from published
-// tarballs): this repo has now edited qa1.md (sprint 9, then sprint 11's
-// Req 7), liveqa.md (sprint 11's Req 7), and pipeman.md (sprint 11's Req
-// 11) ahead of the 0.1.10 publish that will regenerate that table, so none
-// of the three currently match any published version — a test proving
-// "matches a published baseline" needs a file this repo hasn't since
-// changed. master-controller.md is untouched since 0.1.8 (the table's
-// newest entry); confirmed by hash before relying on it here. (This is
-// the second time this exact swap has been needed in one sprint — first
-// liveqa.md replaced qa1.md as the held-out file, per QA1 round 1; now
-// pipeman.md needed replacing too, per QA1 round 2's own Req 11 fix. The
-// underlying fix — regenerating the baseline table at publish time — is
-// Pipeman's job once 0.1.10 actually ships, not something to chase further
-// here.)
-const REAL_MASTER_CONTROLLER_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'master-controller.md'), 'utf8');
+// dev-team-1.md, not qa1.md, liveqa.md, pipeman.md, or master-controller.md,
+// for the tests below that assert a file matches the COMMITTED baseline
+// table (scripts/baselines/user-owned-content.json, generated from
+// published tarballs, still topped out at 0.1.8): every one of those four
+// has since been edited (qa1.md: sprints 9, 11, 12; liveqa.md: sprints 11,
+// 12; pipeman.md: sprint 11; master-controller.md: sprint 14's own Req 4)
+// ahead of whatever publish next regenerates that table, so none of them
+// currently match any published version — a test proving "matches a
+// published baseline" needs a file this repo hasn't since changed.
+// dev-team-1.md (and dev-team-2.md, an equally-valid alternative) are
+// untouched since 0.1.8; confirmed by hash before relying on it here. This
+// exact swap has now been needed four times across sprints 11-14 — each
+// time because the previously-held-out file got a real, warranted edit —
+// and it will keep recurring until something regenerates the baseline
+// table at publish time, still Pipeman's job, not fixed by chasing the
+// symptom here again.
+const REAL_DEV_TEAM_1_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'dev-team-1.md'), 'utf8');
 const REAL_CURRENT_VERSION = require(path.join(REPO_ROOT, 'package.json')).version;
 
 function writeVersionMarker(dir, version) {
@@ -872,7 +872,7 @@ test('install.js: removing a dead gitignore line preserves the file\'s original 
 // rather than re-deriving it.
 // -------------------------------------------------------------------------
 const QA1_REL_PATH = path.join('.claude', 'agents', 'qa1.md');
-const MASTER_CONTROLLER_REL_PATH = path.join('.claude', 'agents', 'master-controller.md');
+const DEV_TEAM_1_REL_PATH = path.join('.claude', 'agents', 'dev-team-1.md');
 
 test('install.js: a fresh install writes a manifest recording every tracked user-owned file it wrote', () => {
   withFixture((dir) => {
@@ -972,31 +972,31 @@ test('install.js: a file matching a published baseline, with no manifest at all,
   // installs could ever have one. This repo's real, committed baseline
   // table (scripts/baselines/user-owned-content.json, generated from the
   // real published tarballs) is Req 1's second source of proof:
-  // master-controller.md's content here is exactly what shipped through
+  // dev-team-1.md's content here is exactly what shipped through
   // 0.1.8, so it must now be recognised and brought current, not
-  // conflicted. (master-controller.md, not qa1.md, liveqa.md, or
-  // pipeman.md — all three are edited this sprint (Req 7 and Req 11)
-  // ahead of the 0.1.10 publish that will regenerate this table, so none
+  // conflicted. (dev-team-1.md, not qa1.md, liveqa.md, pipeman.md, or
+  // master-controller.md — all four have been edited across sprints
+  // 11-14 ahead of whatever publish next regenerates this table, so none
   // of their current bytes are on record there right now; see
-  // REAL_MASTER_CONTROLLER_MD's own comment above. baselineHashesFor()
+  // REAL_DEV_TEAM_1_MD's own comment above. baselineHashesFor()
   // matches against any published version, not just the one in the
   // fixture's version marker, so 0.1.4 here doesn't need to be the
   // specific version whose hash matches.)
   withFixture((dir) => {
     writeVersionMarker(dir, '0.1.4');
-    const masterControllerPath = path.join(dir, MASTER_CONTROLLER_REL_PATH);
-    fs.mkdirSync(path.dirname(masterControllerPath), { recursive: true });
-    fs.writeFileSync(masterControllerPath, REAL_MASTER_CONTROLLER_MD);
+    const devTeam1Path = path.join(dir, DEV_TEAM_1_REL_PATH);
+    fs.mkdirSync(path.dirname(devTeam1Path), { recursive: true });
+    fs.writeFileSync(devTeam1Path, REAL_DEV_TEAM_1_MD);
 
     const output = runInstall(dir);
 
     assert.doesNotMatch(output, /Conflicts/, 'a baseline-proven file must not conflict');
-    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/master-controller\.md/);
-    assert.strictEqual(fs.readFileSync(masterControllerPath, 'utf8'), REAL_MASTER_CONTROLLER_MD);
+    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/dev-team-1\.md/);
+    assert.strictEqual(fs.readFileSync(devTeam1Path, 'utf8'), REAL_DEV_TEAM_1_MD);
     const manifest = readManifest(dir);
     assert.strictEqual(
-      manifest[MASTER_CONTROLLER_REL_PATH],
-      fcHash(REAL_MASTER_CONTROLLER_MD),
+      manifest[DEV_TEAM_1_REL_PATH],
+      fcHash(REAL_DEV_TEAM_1_MD),
       'a baseline-proven file must be recorded in the manifest as it is upgraded (Req 3), so the next run no longer needs the baseline sweep at all'
     );
   });
@@ -1074,35 +1074,35 @@ test('install.js: a valid manifest with no entry for a given user-owned file res
 test('install.js: a manifest entry stored under a backslash key never matches a real relPath, even by coincidence (Req 2/3)', () => {
   withFixture((dir) => {
     writeVersionMarker(dir, '0.1.0');
-    const masterControllerPath = path.join(dir, MASTER_CONTROLLER_REL_PATH);
-    fs.mkdirSync(path.dirname(masterControllerPath), { recursive: true });
-    fs.writeFileSync(masterControllerPath, REAL_MASTER_CONTROLLER_MD); // byte-identical to what we'd write
+    const devTeam1Path = path.join(dir, DEV_TEAM_1_REL_PATH);
+    fs.mkdirSync(path.dirname(devTeam1Path), { recursive: true });
+    fs.writeFileSync(devTeam1Path, REAL_DEV_TEAM_1_MD); // byte-identical to what we'd write
     // A manifest recording the CORRECT hash, but under the Windows-shaped
     // key a broken pre-fix run would have used instead of the real
     // forward-slash one. manifestHashFor() normalizes the QUERY key
     // (built from the real, forward-slash relPath on this machine), so it
-    // must look for '.claude/agents/master-controller.md' and find nothing here.
-    // master-controller.md, not qa1.md (this test's original fixture
-    // file, nor pipeman.md, its round-2 replacement) — sprint 11 edits
-    // qa1.md (Req 7) and pipeman.md (Req 11) live, so neither is on
-    // record in the committed baseline table until 0.1.10 publishes and
-    // regenerates it; see REAL_MASTER_CONTROLLER_MD's own comment above.
-    writeManifest(dir, { '.claude\\agents\\master-controller.md': fcHash(REAL_MASTER_CONTROLLER_MD) });
+    // must look for '.claude/agents/dev-team-1.md' and find nothing here.
+    // dev-team-1.md, not qa1.md (this test's original fixture file), nor
+    // pipeman.md or master-controller.md, its later replacements — all
+    // three have live edits across sprints 11-14, so none is on record
+    // in the committed baseline table until a future publish regenerates
+    // it; see REAL_DEV_TEAM_1_MD's own comment above.
+    writeManifest(dir, { '.claude\\agents\\dev-team-1.md': fcHash(REAL_DEV_TEAM_1_MD) });
 
     const output = runInstall(dir);
 
-    // No manifest match — but REAL_MASTER_CONTROLLER_MD also matches a real published
+    // No manifest match — but REAL_DEV_TEAM_1_MD also matches a real published
     // baseline, so Req 1's second proof source correctly takes over and
     // this still resolves to "already present", not a conflict. That's
     // the safe fallback working, not a failure to detect the stale key.
-    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/master-controller\.md/);
+    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/dev-team-1\.md/);
     assert.doesNotMatch(output, /Conflicts/);
     const manifest = readManifest(dir);
     assert.ok(
-      !Object.prototype.hasOwnProperty.call(manifest, '.claude\\agents\\master-controller.md'),
+      !Object.prototype.hasOwnProperty.call(manifest, '.claude\\agents\\dev-team-1.md'),
       'the stale backslash key must not survive into the new manifest'
     );
-    assert.strictEqual(manifest[MASTER_CONTROLLER_REL_PATH], fcHash(REAL_MASTER_CONTROLLER_MD), 'the real, forward-slash key must be written instead');
+    assert.strictEqual(manifest[DEV_TEAM_1_REL_PATH], fcHash(REAL_DEV_TEAM_1_MD), 'the real, forward-slash key must be written instead');
   });
 });
 

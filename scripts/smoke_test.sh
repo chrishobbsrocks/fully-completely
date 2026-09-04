@@ -861,4 +861,42 @@ rm -f /tmp/out.txt
 git worktree remove --force "$OTHER_WT" > /dev/null 2>&1 || rm -rf "$OTHER_WT"
 git branch -D smoke-wt-branch > /dev/null 2>&1 || true
 
+echo "== sprint 14, Req 1: a missing --*-file path fails legibly, naming the path, instead of an unhandled crash =="
+# This is resolve_text()'s own bug, fixed once and shared by every
+# --*-file argument in the CLI (qa1/liveqa notes, complete's user-said,
+# abort's reason, override's reason) — the failure LiveQA actually found
+# on a default Windows box, where the historical /tmp/... example path
+# doesn't exist and the whole process used to die with a bare Python
+# traceback and nothing recorded. Exercised here via --reason-file
+# (abort) and --user-said-file (complete), the two call sites that don't
+# need a prior PASS/phase to reach.
+MISSING_FILE_PATH="does-not-exist-$(date +%s).txt"
+[ ! -e "$MISSING_FILE_PATH" ] || fail "test setup broken: $MISSING_FILE_PATH unexpectedly exists"
+
+SPRINT_MISSING_FILE=$(new_sprint "Missing file sprint")
+$SCRIPT start "$SPRINT_MISSING_FILE" > /dev/null
+$SCRIPT abort "$SPRINT_MISSING_FILE" --reason-file "$MISSING_FILE_PATH" > /tmp/out.txt 2>&1 && \
+  fail "abort succeeded reading a --reason-file that doesn't exist (test setup broken)" || true
+grep -qF "Could not read '$MISSING_FILE_PATH'" /tmp/out.txt || fail "abort's missing-reason-file message doesn't name the path"
+grep -qi "traceback" /tmp/out.txt && fail "abort's missing-reason-file case raised a raw traceback instead of failing legibly"
+rm -f /tmp/out.txt
+
+# complete's own three-condition refusal is checked elsewhere; this only
+# needs to confirm resolve_text() itself fails legibly for user-said-file
+# specifically, so use a sprint that will refuse for an EARLIER reason
+# (no QA1 PASS yet) if the file-read somehow didn't fail first — the file
+# read happens before those checks, so this still isolates the right bug.
+$SCRIPT complete "$SPRINT_MISSING_FILE" --user-said-file "$MISSING_FILE_PATH" > /tmp/out.txt 2>&1 && \
+  fail "complete succeeded reading a --user-said-file that doesn't exist (test setup broken)" || true
+grep -qF "Could not read '$MISSING_FILE_PATH'" /tmp/out.txt || fail "complete's missing-user-said-file message doesn't name the path"
+grep -qi "traceback" /tmp/out.txt && fail "complete's missing-user-said-file case raised a raw traceback instead of failing legibly"
+rm -f /tmp/out.txt
+
+echo "== sprint 14, Req 1: a missing --title-file on 'new' fails legibly too, naming the path (cmd_new's own former duplicate bug) =="
+$SCRIPT new --title-file "$MISSING_FILE_PATH" > /tmp/out.txt 2>&1 && \
+  fail "new succeeded reading a --title-file that doesn't exist (test setup broken)" || true
+grep -qF "Could not read '$MISSING_FILE_PATH'" /tmp/out.txt || fail "new's missing-title-file message doesn't name the path"
+grep -qi "traceback" /tmp/out.txt && fail "new's missing-title-file case raised a raw traceback instead of failing legibly"
+rm -f /tmp/out.txt
+
 echo "ALL SMOKE TESTS PASSED"
