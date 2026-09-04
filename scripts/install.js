@@ -73,11 +73,19 @@
 // all (plain ASCII " - " in place of "—"), rather than make Node or the
 // console negotiate an encoding — the same "no required setup" bar Req 1
 // held /tmp to, and it needs no code-page change, no `chcp 65001`, no
-// terminal switch to hold. NOT YET CONFIRMED ON WINDOWS as of this commit
-// — see the sprint's own acceptance criterion ("by running it on Windows,
-// not by reasoning about code pages"); this reasoning is the basis for the
-// fix, not a substitute for that confirmation, which is pending real VM
-// access. Update this comment once it's run for real, either way.
+// terminal switch to hold. CONFIRMED ON WINDOWS: run for real on the VM
+// used for sprints 10/11 (a default PowerShell console, no chcp change),
+// producing a genuine conflict on CLAUDE.md so the conflicts-section
+// message actually printed. Every dash rendered as a plain single
+// character throughout — the conflicts header, the CLAUDE.md conflict
+// message, the Claude-login note — never as "ΓÇö". The Python-warning
+// message specifically wasn't re-triggered live in that same run (this
+// VM's simulated shape for Req 3 has a working `python`, so the
+// no-interpreter branch doesn't fire there); its ASCII content is instead
+// covered by the dynamic test in launcher_test.js, which spawns install.js
+// with all three candidates absent from PATH and asserts the real captured
+// stdout is pure ASCII — going through the identical console.log write
+// path as the messages that were confirmed live.
 // Scoped to install.js's own runtime output; scripts/sprint_lifecycle.py
 // prints far more em dashes across nearly every command, which would
 // mojibake the same way on the same console — that's a real, separate,
