@@ -58,6 +58,30 @@
 // baselineHashesFor() below; syncTrackedUserOwnedFile() only ever
 // consults baselines when there is no manifest entry at all, never as an
 // override for one that already disagrees with what's on disk.
+//
+// Sprint 14, Req 2: every em dash (U+2014) this file used to print at
+// runtime — in the conflicts section header, in individual conflict
+// messages, in the Claude-login note, in the Python prerequisite warning —
+// came back as "ΓÇö" on a default Windows console (the two named findings
+// LiveQA reported; the rest print through the same broken console the
+// same way, so fixed here together rather than one string at a time).
+// That's the UTF-8 bytes of an em dash (E2 80 94) getting decoded one byte
+// at a time under the console's active OEM code page (437/850), which is
+// what a fresh Windows terminal uses unless something has switched it to
+// UTF-8 — the code-page reasoning this Req explicitly says not to stop at.
+// The fix: stop emitting the one non-ASCII character this file used at
+// all (plain ASCII " - " in place of "—"), rather than make Node or the
+// console negotiate an encoding — the same "no required setup" bar Req 1
+// held /tmp to, and it needs no code-page change, no `chcp 65001`, no
+// terminal switch to hold. NOT YET CONFIRMED ON WINDOWS as of this commit
+// — see the sprint's own acceptance criterion ("by running it on Windows,
+// not by reasoning about code pages"); this reasoning is the basis for the
+// fix, not a substitute for that confirmation, which is pending real VM
+// access. Update this comment once it's run for real, either way.
+// Scoped to install.js's own runtime output; scripts/sprint_lifecycle.py
+// prints far more em dashes across nearly every command, which would
+// mojibake the same way on the same console — that's a real, separate,
+// much larger finding, out of scope for this Req and not fixed here.
 const fs = require('fs');
 const path = require('path');
 const { hasComments, parseJsonc } = require('./launcher/jsonc');
@@ -217,6 +241,45 @@ function readInstalledVersion() {
   }
 }
 
+// Sprint 14, Req 5: this is called exactly once, unconditionally, as the
+// last write of a successful run (see the call site near the bottom of
+// this file, after every copy/sync loop and every merge). That position is
+// what turns the marker from an incidental note into a documented
+// GUARANTEE, stated here because a downstream consumer already depends on
+// it and asked whether it's intended to hold:
+//
+//   If `.claude/fully-completely-version` says X, every FRAMEWORK_OWNED
+//   path — scripts/launcher included, the copy a target project's own
+//   launcher actually executes from — is byte-for-byte release X's
+//   content, right now, on this machine.
+//
+// Why it's safe to promise: every FRAMEWORK_OWNED file goes through
+// syncFrameworkPath()/overwriteFrameworkFile(), which has no conflict
+// branch and no swallowed-error branch — it either completes or throws.
+// Nothing between the top of this file and this call catches a copy
+// failure and continues; an fs error anywhere above aborts the whole
+// process before this line runs, so there is no path that reaches here
+// having silently left a framework-owned file stale or partially written.
+// (The read side, readInstalledVersion() just above, is intentionally the
+// opposite: any failure to read degrades to "unknown version" rather than
+// crashing — a torn or missing marker is not evidence the install is
+// broken, only that this run can't place it precisely.)
+//
+// This is what makes the "two copies of the launcher" case in a real
+// install checkable: a target ends up with the scaffolded launcher under
+// scripts/launcher/ (framework-owned, covered by this guarantee) AND a
+// separate pinned copy under node_modules/ (an npm dependency, not synced
+// by this installer at all, and NOT covered). A consumer comparing
+// `.claude/fully-completely-version` against its own build/release version
+// can trust the scaffolded copy matches that marker; it must not extend
+// that trust to the node_modules copy, which this file never touches.
+//
+// What this guarantee does NOT cover: USER_OWNED tracked files
+// (.claude/agents/*, CLAUDE.md). Those can be deliberately left un-synced
+// on an unresolved conflict (syncTrackedUserOwnedFile's `!proven` branch)
+// without aborting the run — that's Req 3's whole point, protecting a
+// customised file. The marker says nothing about whether those match
+// CURRENT_VERSION; check the `conflicts` list (or the manifest) for that.
 function writeInstalledVersion(version) {
   fs.mkdirSync(path.dirname(VERSION_MARKER_PATH), { recursive: true });
   fs.writeFileSync(VERSION_MARKER_PATH, `${version}\n`);
@@ -438,7 +501,7 @@ function copyUserOwnedFile(relPath) {
       skipped.push(relPath);
     } else {
       conflicts.push(
-        `${relPath} (yours — this framework never overwrites a file in this category. ` +
+        `${relPath} (yours - this framework never overwrites a file in this category. ` +
           'The upstream version has changed; review the difference and merge anything you want by hand.)'
       );
     }
@@ -498,17 +561,17 @@ function trackedConflictMessage(relPath, upstreamChanged, preciseToInstalledVers
     'protect anything you may have customised.';
   if (!upstreamChanged) {
     return (
-      `${relPath} (yours — ${reason} There's no upstream update pending for this file — if it looks ` +
+      `${relPath} (yours - ${reason} There's no upstream update pending for this file - if it looks ` +
       "different from what we'd install, that difference is entirely your own edit, not something we " +
       'changed. Nothing to reconcile; no action needed unless you want one.)'
     );
   }
   const since = preciseToInstalledVersion
     ? 'since the version you have'
-    : "at some point since it was first published — this installer doesn't have exact data for the " +
+    : "at some point since it was first published - this installer doesn't have exact data for the " +
       "version you're on to say precisely when";
   return (
-    `${relPath} (yours — ${reason} This file's shipped content has changed ${since}; to see exactly ` +
+    `${relPath} (yours - ${reason} This file's shipped content has changed ${since}; to see exactly ` +
     "what's different in the current release, run `npx fully-completely` again inside an empty " +
     'scratch directory to get a fresh copy, then diff it against your own file and merge anything ' +
     'you want by hand.)'
@@ -630,13 +693,13 @@ function readExistingJsonc(destPath, relPath, adviceIfMissing) {
   if (!fs.existsSync(destPath)) return { value: null, existed: false };
   const raw = fs.readFileSync(destPath, 'utf8');
   if (hasComments(raw)) {
-    conflicts.push(`${relPath} (has comments this tool can't preserve — ${adviceIfMissing} by hand instead)`);
+    conflicts.push(`${relPath} (has comments this tool can't preserve - ${adviceIfMissing} by hand instead)`);
     return { conflict: true };
   }
   try {
     return { value: parseJsonc(raw), existed: true };
   } catch {
-    conflicts.push(`${relPath} (couldn't parse as JSON, left untouched — ${adviceIfMissing} by hand instead)`);
+    conflicts.push(`${relPath} (couldn't parse as JSON, left untouched - ${adviceIfMissing} by hand instead)`);
     return { conflict: true };
   }
 }
@@ -697,7 +760,7 @@ function mergeTasks() {
 
   if (collisions.length > 0) {
     conflicts.push(
-      `${relPath} (task label(s) already exist here with different content: ${collisions.join(', ')} — ` +
+      `${relPath} (task label(s) already exist here with different content: ${collisions.join(', ')} - ` +
         'rename one side before installing; nothing written)'
     );
     return;
@@ -754,7 +817,7 @@ function removeDeadGitignoreLines() {
   const stillPresent = deadLines.some((dead) => raw.includes(dead));
   if (stillPresent) {
     notes.push(
-      `${relPath} (found a reference to ${deadLines.join(', ')} that isn't a plain standalone line — ` +
+      `${relPath} (found a reference to ${deadLines.join(', ')} that isn't a plain standalone line - ` +
         'left untouched; remove it by hand if you no longer need it)'
     );
   }
@@ -823,6 +886,10 @@ mergeSettings();
 mergeTasks();
 mergeGitignore();
 
+// Sprint 14, Req 5: everything above this line either finished or the
+// process already aborted — see writeInstalledVersion()'s own comment
+// above for what that guarantees and what it doesn't.
+
 writeInstalledVersion(CURRENT_VERSION);
 writeManifest(newManifest);
 
@@ -854,7 +921,7 @@ if (installedVersion && installedVersion !== CURRENT_VERSION) {
 } else if (installedVersion && didUpgradeWork) {
   const repairedCount = replaced.length + removed.length;
   console.log(
-    `Already at ${CURRENT_VERSION}, but repaired ${repairedCount} file(s) that had drifted from it — see below`
+    `Already at ${CURRENT_VERSION}, but repaired ${repairedCount} file(s) that had drifted from it - see below`
   );
 } else if (installedVersion) {
   console.log(`Already at ${CURRENT_VERSION} (re-run, nothing to upgrade)`);
@@ -874,11 +941,11 @@ section('Removed (no longer part of the framework, backed up first)', removed);
 section('Copied', copied);
 section('Already present, unchanged', skipped);
 section('Notes', notes);
-section('Conflicts — left untouched, review by hand', conflicts);
+section('Conflicts - left untouched, review by hand', conflicts);
 console.log(
   '\nBefore first running the launcher: log in to Claude once, in a normal ' +
-    "terminal — run 'claude', complete login, then exit. The launcher's " +
-    'preflight check blocks only when Claude reports no usable credentials — ' +
+    "terminal - run 'claude', complete login, then exit. The launcher's " +
+    'preflight check blocks only when Claude reports no usable credentials - ' +
     'it otherwise proceeds, so this is a courtesy check, not a hard requirement ' +
     'this script can verify.'
 );
@@ -902,7 +969,7 @@ if (findPython3Interpreter() === null) {
     '\nWARNING: no Python 3 interpreter found on PATH (tried python3, python, py). Every ' +
       '/sprint-* slash command needs one to do anything. Install Python 3 from ' +
       'https://python.org (the Microsoft Store listing works too), then confirm it with ' +
-      'one of `python3 --version`, `python --version`, or `py --version` — any of those ' +
+      'one of `python3 --version`, `python --version`, or `py --version` - any of those ' +
       'printing a "Python 3.x.y" line means you are ready. The files above were still ' +
       'written; only running the slash commands needs this.'
   );

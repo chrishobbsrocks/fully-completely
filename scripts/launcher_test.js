@@ -1354,6 +1354,59 @@ test('python-interpreter: no candidate resolves to a real Python 3 -> null, not 
 });
 
 // -------------------------------------------------------------------------
+// install.js: Req 2 (sprint 14) — no non-ASCII byte in the installer's own
+// runtime output, since that's exactly what a default Windows console
+// (OEM code page 437/850) mangles into "ΓÇö" for an em dash. Two tests:
+// a static scan of the source for a cheap blanket regression guard, and a
+// dynamic run that actually triggers the two named findings (the
+// conflicts section, the Python warning) plus a third conflict shape, and
+// checks the real captured output rather than the source.
+// -------------------------------------------------------------------------
+test('install.js: no non-ASCII character on any line outside a `//` comment (Req 2 regression guard)', () => {
+  const src = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'install.js'), 'utf8');
+  const offenders = [];
+  src.split('\n').forEach((line, i) => {
+    if (/^\s*\/\//.test(line)) return; // a whole-line comment; install.js has no /* */ block comments to worry about
+    if (/[^\x00-\x7f]/.test(line)) offenders.push(`line ${i + 1}: ${line.trim()}`);
+  });
+  assert.deepStrictEqual(offenders, [], `non-ASCII character(s) found outside comments:\n${offenders.join('\n')}`);
+});
+
+test('install.js: the actual runtime output (conflicts + Python warning) is pure ASCII, not just the source', () => {
+  withFixture((dir) => {
+    // Two conflict shapes at once (a genuinely different CLAUDE.md, and a
+    // colliding tasks.json label — the same triggers as the two existing
+    // tests above), plus a PATH with no python3/python/py at all so the
+    // Req 2's second named message (the Python warning) fires too. Uses
+    // process.execPath rather than the bare string 'node' so the child
+    // process is still reachable once PATH is replaced entirely.
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), '# Something else entirely\n');
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, '.vscode', 'tasks.json'),
+      JSON.stringify({ version: '2.0.0', tasks: [{ label: 'Shell', type: 'shell', command: 'make devshell' }] }, null, 2) +
+        '\n'
+    );
+    const emptyPathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-no-python-'));
+    let output;
+    try {
+      output = execFileSync(process.execPath, [path.join(REPO_ROOT, 'scripts', 'install.js')], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: emptyPathDir },
+      });
+    } finally {
+      fs.rmSync(emptyPathDir, { recursive: true, force: true });
+    }
+    // Confirm the two named findings' code paths were actually hit, not
+    // just that whatever ran happened to be ASCII-clean.
+    assert.match(output, /Conflicts - left untouched, review by hand/);
+    assert.match(output, /WARNING: no Python 3 interpreter found/);
+    assert.doesNotMatch(output, /[^\x00-\x7f]/, `non-ASCII byte in real install.js output:\n${output}`);
+  });
+});
+
+// -------------------------------------------------------------------------
 // run-role.js (Sprint 11: headless launch, Req 9 coverage)
 // -------------------------------------------------------------------------
 const { ROLES: RUN_ROLE_ROLES, readAgentMeta, agentBody } = require('./launcher/agents');

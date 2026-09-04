@@ -45,9 +45,14 @@ The practical consequence is sharp. The workshop checklist points students at th
 
 4. **A sprint header that names a required environment must require the attempt before permitting silence.** Add to `.claude/agents/master-controller.md`: a header may state what environment a gate needs, but must direct the role to attempt to obtain it and to name what was tried if it cannot — never state an impossibility and offer "record nothing" as the immediate alternative. Sprint 10's header is the worked example and should be cited as one. This is the same rule as sprint 9's Req 4, applied to the artifact rather than the conversation.
 
-5. **Bump `package.json` to 0.1.15.** One line.
+5. **Document the version marker as a guarantee, or decline to give one.** `install.js:826` calls `writeInstalledVersion(CURRENT_VERSION)` **unconditionally, after every file copy**, so `.claude/fully-completely-version` always reflects the version whose files were just written. **A downstream consumer depends on that today** as a version-skew check, and has asked whether it is intended to stay true.
+   - State it at the write site as an invariant rather than an incidental. `install.js` has been substantially rewritten in sprints 6, 8 and 10; a future edit could make that call conditional and silently break a consumer with no test failing anywhere.
+   - **This is also the mitigation for a real shape in our install.** A target ends up with **two copies of the launcher** — the scaffolded one under `<target>/scripts/launcher/` that executes, and the pinned dependency under `node_modules/` that does not — and nothing compares them. That cost the consumer a false ROOT-resolution finding, since `path.resolve(__dirname, '..', '..')` is correct from the scaffolded copy and wrong from the other. They fixed it their side by refusing to invoke on skew, which only works because the marker is reliable. Documenting the invariant is what makes that detectable by anyone else.
+   - **If we are not willing to guarantee it, say that instead.** An undocumented invariant a consumer depends on is worse than a documented refusal.
 
-6. **Test coverage.** For Req 1, cover the path resolution in `scripts/launcher_test.js` or `scripts/smoke_test.sh` as fits the mechanism chosen. Reqs 2–4 are verified by running and by reading; if no test is appropriate, say so rather than adding one for its own sake.
+6. **Bump `package.json` to 0.1.15.** One line.
+
+7. **Test coverage.** For Req 1, cover the path resolution in `scripts/launcher_test.js` or `scripts/smoke_test.sh` as fits the mechanism chosen. Reqs 2–4 are verified by running and by reading; if no test is appropriate, say so rather than adding one for its own sake.
 
 ### Acceptance Criteria
 
@@ -55,11 +60,13 @@ The practical consequence is sharp. The workshop checklist points students at th
 
 - Req 1: confirm **no command file anywhere** contains a hardcoded `/tmp` — grep all twelve rather than the three named, because this enumeration has now been wrong twice in opposite directions (short by two originally, long by two after sprint 12 fixed some). Confirm the three outstanding files follow sprint 12's shipped working-directory-relative pattern rather than a second invented one, and that the failure path names the attempted location rather than raising.
 - Req 1, second half: confirm `sprint-new.md` no longer depends on the Write tool, and that a headless Master Controller can actually create a sprint under the scoped profile. **If that was reasoned rather than run, it is not met** — it is the exact inference sprint 12 disproved.
-- Req 2: confirm the encoding fix was established **by running on Windows**, not derived from code-page reasoning, and that the notes say which.
+- **Req 2 has a clearable path, added after QA1 flagged it as a precondition Dev Team could not clear.** *The asymmetry with Req 3 was an oversight, not a decision.* Confirm the encoding fix was established **by running on Windows**, not derived from code-page reasoning. **If no Windows console is obtainable, the change does not ship** — record what was attempted, what is blocked, and what was and was not established, and Req 2 moves to the next sprint with the rest of the sprint proceeding without it.
+  - **The escape hatch is 'do not ship it', not 'ship it unverified'.** Code pages look settled on paper and are not, and this fix lands in the conflict message and the Python warning — the two messages a stuck user reads. An unverified change there is worse than the mojibake it replaces. Inferring the result from code-page reasoning remains a **FAIL**.
 - Req 3: confirm this was attempted and that the outcome — established or not obtainable — is recorded plainly. **An inference from the macOS proof is a FAIL**, not a CONDITIONAL.
 - Req 4: read the new wording cold against sprint 10's header. If that header would still pass under the new rule, the rule is not written correctly yet.
-- Req 5: `package.json` is `0.1.15`, one-line diff.
-- Req 6: run whichever suite applies.
+- Req 5: confirm the invariant is stated at the write site and matches what the code does. If the wording promises more than the code delivers, that is the defect.
+- Req 6: `package.json` is `0.1.15`, one-line diff.
+- Req 7: run whichever suite applies.
 - Run `scripts/verify-tarball.sh`.
 
 **LiveQA verifies live, on a real Windows machine, after Pipeman publishes:**
