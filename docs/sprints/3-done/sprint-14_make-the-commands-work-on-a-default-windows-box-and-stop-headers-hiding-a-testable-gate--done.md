@@ -2,7 +2,7 @@
 id: 14
 title: "Make the commands work on a default Windows box, and stop headers hiding a testable gate"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-09-03T21:44:11+00:00
 ---
 
