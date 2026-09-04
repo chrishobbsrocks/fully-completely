@@ -47,6 +47,12 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=aef6db9"
+    },
+    {
+      "ts": "2026-09-04T14:32:35+00:00",
+      "actor": "verify-publish",
+      "event": "gitHead_check",
+      "detail": "MATCH: registry gitHead=aef6db92ef201472e267ac557ee401bb2dc0a78b == last_shipped_commit=aef6db92ef201472e267ac557ee401bb2dc0a78b for fully-completely@0.1.15."
     }
   ]
 }
