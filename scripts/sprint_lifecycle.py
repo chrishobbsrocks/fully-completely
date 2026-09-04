@@ -170,6 +170,37 @@ LIVEQA_PHASES = (LIVEQA_PHASE, _LEGACY_LIVEQA_PHASE)
 # is untouched by this sprint).
 LIVE_LOOP_AUDIT_EVENT = "live_loop_audit"
 
+# Sprint 15, Req 1: the live-loop audit's own dispatch phases in cmd_qa1,
+# widened beyond LIVEQA_PHASES to also include complete_ready — the exact
+# moment a sprint has passed both gates but isn't closed yet, which is
+# precisely when an audit performed during the fix loop (sprint 12's own
+# outstanding case: QA1 audited a reshipped commit and had nowhere to put
+# it) becomes unrecordable. LIVEQA_PHASES' own phases end the instant
+# LiveQA records a PASS — straight to complete_ready, no transition moves
+# backward — so nothing downstream of that point could ever reach this
+# branch without this widening. LIVEQA_PHASES itself is untouched: every
+# other use of it below (cmd_status, cmd_reship, cmd_liveqa) is about a
+# sprint still actively mid-live-test, a different question than "can an
+# audit still be recorded here", so widening LIVEQA_PHASES directly would
+# have changed answers to questions this sprint never asked.
+#
+# "complete" is deliberately NOT included here, and the boundary is
+# narrower than "nothing writes to a closed sprint": what a closed sprint
+# must never gain is an AUDIT event — a judgement about whether code is
+# sound, exactly the kind of entry a late addition could use to launder an
+# inconvenient gate-1 verdict after the sprint is already shut. It MAY
+# gain a VERIFICATION event — a record that a mechanical comparison ran
+# against an artifact that still exists, with no judgement call in it.
+# cmd_verify_publish (sprint 13) already does exactly this: it appends
+# gitHead_check/content_check events to closed sprints (11 and 12, in its
+# first real use) with no phase gate at all, because "does the registry's
+# published content match what shipped" has a fixed yes/no answer forever,
+# unlike "is this code sound", which is only ever true as of the moment
+# QA1 last looked. Verdicts close with the sprint; comparisons remain
+# runnable. That distinction, not a blanket "closed means frozen", is why
+# this tuple stops at complete_ready.
+LIVE_LOOP_AUDIT_PHASES = LIVEQA_PHASES + ("complete_ready",)
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -219,7 +250,7 @@ def resolve_text(value: Optional[str], file_value: Optional[str]) -> str:
         try:
             return Path(file_value).read_text(encoding="utf-8").strip()
         except OSError as exc:
-            die(f"Could not read '{file_value}': {exc}. The text was expected there — "
+            die(f"Could not read '{file_value}': {exc}. The text was expected there - "
                 "check the path exists and is readable, then try again.")
     return value or ""
 
@@ -705,7 +736,7 @@ def cmd_status(args) -> None:
             print(f"No sprints yet in {tree_description()}. Use /sprint-new to create one.")
             return
         for sid, entry in sorted(reg["sprints"].items(), key=lambda kv: int(kv[0])):
-            print(f"Sprint {sid}: {entry['title']} — {entry['status']}")
+            print(f"Sprint {sid}: {entry['title']} - {entry['status']}")
         return
 
     state = load_state(args.id)
@@ -725,7 +756,7 @@ def cmd_status(args) -> None:
         ship_indices = [i for i, h in enumerate(history) if h["event"] in ("shipped", "reshipped")]
         test_indices = [i for i, h in enumerate(history) if h["event"] == "live_test"]
         if ship_indices and test_indices and ship_indices[-1] > test_indices[-1]:
-            print("Code has changed since the last recorded LiveQA verdict — not yet re-tested.")
+            print("Code has changed since the last recorded LiveQA verdict - not yet re-tested.")
     # Sprint 13, Req 3 (Finding C): warns, never gates — see
     # worktree_divergence_warning()'s own docstring.
     divergence = worktree_divergence_warning(args.id)
@@ -739,7 +770,12 @@ def cmd_status(args) -> None:
 
 def _qa1_live_loop_audit(args, state) -> None:
     """Sprint 7, Req 1: records an audit QA1 performed during the LiveQA
-    fix loop, without touching anything either gate reads.
+    fix loop, without touching anything either gate reads. Sprint 15,
+    Req 1: also reachable from complete_ready (see LIVE_LOOP_AUDIT_PHASES'
+    own comment for why that phase and not "complete") — the function
+    itself needed no change for that widening, which is the point: it was
+    already generic over "which phase got us here", touching nothing
+    phase-specific except what it prints, below.
 
     This function must NEVER assign to state["phase"],
     state["qa1_audit_result"], state["audit_rounds"],
@@ -773,7 +809,7 @@ def _qa1_live_loop_audit(args, state) -> None:
         resolved = git_commit_sha(args.commit)
         if resolved is None:
             die(f"'{args.commit}' does not resolve to a real commit in this repo. "
-                "--commit, if given, must be an actual commit hash — a live-loop audit "
+                "--commit, if given, must be an actual commit hash - a live-loop audit "
                 "record naming a commit that doesn't exist is worse than one naming none.")
         detail += f" | commit={resolved}"
 
@@ -782,10 +818,26 @@ def _qa1_live_loop_audit(args, state) -> None:
     # Req 3: printed plainly as a record, not a verdict — a reader must
     # not be able to mistake this for gate 1 passing or failing. Neither
     # gate moves: phase stays exactly what it was above.
+    #
+    # Sprint 15, Req 1: the second sentence is phase-conditional, because
+    # this branch now fires from two genuinely different situations. Mid
+    # LiveQA fix loop (LIVEQA_PHASES), there IS a next live-test retest
+    # still to come, so saying so is accurate and useful. At
+    # complete_ready, both gates have already passed and nothing further
+    # is pending — telling that reader to wait on another LiveQA retest
+    # would be describing a step that isn't going to happen, the exact
+    # kind of misleading gate language Req 2 exists to stop elsewhere in
+    # this same sprint.
+    if state["phase"] in LIVEQA_PHASES:
+        next_step = ("LiveQA's live-test retest remains what actually gates this code; "
+                     "run /sprint-liveqa once Pipeman has reshipped.")
+    else:
+        next_step = ("Both gates already passed for this sprint before this record was made; "
+                     "this adds an audit record for a commit reached during the fix loop, it "
+                     "does not reopen or re-gate anything.")
     print(f"Sprint {args.id}: live-loop audit recorded ({verdict}). This is a RECORD, not a "
-          "gate verdict — it does not change the sprint's phase and does not substitute for "
-          "either gate. LiveQA's live-test retest remains what actually gates this code; "
-          "run /sprint-liveqa once Pipeman has reshipped.")
+          f"gate verdict - it does not change the sprint's phase and does not substitute for "
+          f"either gate. {next_step}")
 
 
 def cmd_qa1(args) -> None:
@@ -806,8 +858,10 @@ def cmd_qa1(args) -> None:
         # that loop, but it can never reach the gate-1 logic below, and
         # the gate-1 logic below can never run for a sprint in this phase
         # either. See _qa1_live_loop_audit()'s own docstring for the
-        # safety argument.
-        if state["phase"] in LIVEQA_PHASES:
+        # safety argument. Sprint 15, Req 1: widened from LIVEQA_PHASES to
+        # LIVE_LOOP_AUDIT_PHASES (adds complete_ready, deliberately stops
+        # short of "complete" — see that constant's own comment).
+        if state["phase"] in LIVE_LOOP_AUDIT_PHASES:
             _qa1_live_loop_audit(args, state)
             return
 
@@ -819,7 +873,7 @@ def cmd_qa1(args) -> None:
         if state["phase"] not in ("dev_build", "qa1_audit", "dev_agreed_done"):
             die(f"Sprint {args.id} is in phase '{state['phase']}'. QA1's first audit only runs "
                 "during dev_build/qa1_audit/dev_agreed_done; a live-loop audit record "
-                f"only runs during {'/'.join(LIVEQA_PHASES)}. Neither applies to this phase.")
+                f"only runs during {'/'.join(LIVE_LOOP_AUDIT_PHASES)}. Neither applies to this phase.")
         verdict = args.verdict.upper()
         if verdict not in VALID_VERDICTS:
             die(f"Verdict must be one of {sorted(VALID_VERDICTS)}.")
@@ -842,7 +896,7 @@ def cmd_qa1(args) -> None:
                 # for a tree hash to exist in.
                 print(f"WARNING: {ROOT} is not a git repository, so no audited commit hash "
                       "could be recorded. /sprint-ship will refuse until this sprint is in a "
-                      "real git repository and re-audited — that refusal will not be a QA1 "
+                      "real git repository and re-audited - that refusal will not be a QA1 "
                       "failure, there is simply nothing yet for ship to check a commit against.")
             print("Dev Team: run /sprint-dev-done when ready to tell Master Controller "
                   "the coding side is agreed done. This does NOT mark the sprint complete.")
@@ -902,7 +956,7 @@ def cmd_ship(args) -> None:
         # unaffected: is_git_repository() is True there, so this never
         # fires and every check below runs exactly as before.
         if not is_git_repository():
-            die(f"{ROOT} is not a git repository. Run this from inside a real git repository — "
+            die(f"{ROOT} is not a git repository. Run this from inside a real git repository - "
                 "there is nothing here for --commit to resolve against.")
 
         shipped_tree = git_tree_hash_excluding(args.commit, SHIP_HASH_EXCLUDE_PATTERNS) if args.commit else None
@@ -929,14 +983,20 @@ def cmd_ship(args) -> None:
 
         shipped_commit = git_commit_sha(args.commit)
         if shipped_commit is None:
-            die(f"'{args.commit}' resolved a tree hash but not a full commit SHA — "
+            die(f"'{args.commit}' resolved a tree hash but not a full commit SHA - "
                 "unexpected, please investigate before shipping.")
 
         state["phase"] = LIVEQA_PHASE
         state["last_shipped_commit"] = shipped_commit
         log_event(state, "pipeman", "shipped", f"commit={args.commit or ''}")
         save_state(args.id, state)
-    print(f"Sprint {args.id}: shipped (commit {args.commit or '?'}). Phase: {LIVEQA_PHASE}.")
+    # Sprint 15, Req 4: shipped_commit (the resolved SHA, already computed
+    # above and what's actually stored as last_shipped_commit) rather than
+    # args.commit (the raw ref Pipeman typed — often literally "HEAD").
+    # LiveQA's --deployed-commit has to match last_shipped_commit exactly;
+    # printing "HEAD" here left no way to read back which real commit that
+    # was without going and looking at the state file by hand.
+    print(f"Sprint {args.id}: shipped (commit {shipped_commit}). Phase: {LIVEQA_PHASE}.")
     print("LiveQA: run /sprint-liveqa once you've live-tested the deploy.")
 
 
@@ -965,7 +1025,7 @@ def cmd_reship(args) -> None:
         # bad ref but misleading for a missing repository. Unaffected
         # inside a real repository.
         if not is_git_repository():
-            die(f"{ROOT} is not a git repository. Run this from inside a real git repository — "
+            die(f"{ROOT} is not a git repository. Run this from inside a real git repository - "
                 "there is nothing here for --commit to resolve against.")
         reshipped_commit = git_commit_sha(args.commit) if args.commit else None
         if reshipped_commit is None:
@@ -974,8 +1034,25 @@ def cmd_reship(args) -> None:
         state["last_shipped_commit"] = reshipped_commit
         log_event(state, "pipeman", "reshipped", f"commit={args.commit or ''}")
         save_state(args.id, state)
-    print(f"Sprint {args.id}: fix reshipped (commit {args.commit or '?'}). "
-          "LiveQA: re-test and run /sprint-liveqa again.")
+    # Sprint 15, Req 2: says, at the moment reship runs (not buried in an
+    # agent file nobody re-reads mid-loop), that this exact commit is
+    # unaudited and that the live-loop audit exists for it — sprint 7's own
+    # lesson, that naming a thing at the point of the wrong conclusion is
+    # what works. Deliberately does NOT say LiveQA's retest checks the same
+    # thing QA1 would: that conflation has reached three separate handoffs
+    # despite the code never having said it, per this requirement's own
+    # note, so this is worded to foreclose it rather than merely avoid
+    # repeating it. reshipped_commit (resolved), not args.commit (the raw
+    # ref) — the same fix Req 4 makes to cmd_ship's print, incidental here
+    # (not itself asked for) but the identical bug on the identical line
+    # this requirement already has open, so fixed rather than left for a
+    # future sprint to rediscover.
+    print(f"Sprint {args.id}: fix reshipped (commit {reshipped_commit}). "
+          "This commit has NOT been through QA1's static audit -- LiveQA's live test is a "
+          "different check of different things, not a substitute for one. If QA1 wants to "
+          "look at this commit, /sprint-qa1 will record a live-loop audit while this sprint "
+          "stays in the fix loop; it is a record, not a gate, and does not replace the retest "
+          "below. LiveQA: re-test and run /sprint-liveqa again.")
 
 
 def npm_registry_view(package: str, version: str) -> Optional[dict]:
@@ -1104,7 +1181,7 @@ def cmd_verify_publish(args) -> None:
     state = load_state(args.id)
     last_shipped = state.get("last_shipped_commit")
     if last_shipped is None:
-        die(f"Sprint {args.id} has no shipped commit on record — run /sprint-ship "
+        die(f"Sprint {args.id} has no shipped commit on record - run /sprint-ship "
             "(or /sprint-reship) first, there is nothing here yet to verify against the "
             "registry.")
 
@@ -1132,7 +1209,7 @@ def cmd_verify_publish(args) -> None:
 
     registry = npm_registry_view(package, version)
     if registry is None:
-        die(f"Could not read {package}@{version} from the npm registry — not published yet, "
+        die(f"Could not read {package}@{version} from the npm registry - not published yet, "
             "npm isn't available, or there's no network from here. Nothing to verify against.")
 
     event_name = "gitHead_check"
@@ -1150,7 +1227,7 @@ def cmd_verify_publish(args) -> None:
         # fallback, printed as its own line so it's visible even though
         # only the final `detail` line below gets logged to history.
         print(f"Registry has no gitHead recorded for {package}@{version} "
-              "(a real, published fact, not an error here — likely a linked-worktree "
+              "(a real, published fact, not an error here - likely a linked-worktree "
               "publish; falling back to content verification, which is the stronger "
               "proof anyway).")
         registry_shasum = (registry.get("dist") or {}).get("shasum")
@@ -1197,7 +1274,7 @@ def cmd_liveqa(args) -> None:
         # surface as "doesn't resolve to a real commit" below. Unaffected
         # inside a real repository.
         if not is_git_repository():
-            die(f"{ROOT} is not a git repository. Run this from inside a real git repository — "
+            die(f"{ROOT} is not a git repository. Run this from inside a real git repository - "
                 "there is nothing here for --deployed-commit to resolve against.")
 
         # Identity check, not a content check: unlike the QA1-to-ship
@@ -1244,7 +1321,7 @@ def cmd_liveqa(args) -> None:
                   f"Sprint {args.id} is complete-ready.")
             print("Dev Team: tell the user the sprint is ready and wait. "
                   "/sprint-complete requires the user's explicit, real-time "
-                  "go-ahead (--user-said) — both gates passing is not that.")
+                  "go-ahead (--user-said) - both gates passing is not that.")
         else:
             print(f"LiveQA live test {verdict} (round {state['live_test_rounds']}). "
                   "Dev Team: fix, then Pipeman: /sprint-reship.")
@@ -1443,7 +1520,7 @@ def cmd_gates(args) -> None:
     ids = [s["id"] for s in completed]
     print(f"Gates aggregate over {n} completed sprint{'s' if n != 1 else ''}: {ids}")
     if n == 1:
-        print("Only one completed sprint on record — treat every number below as a "
+        print("Only one completed sprint on record - treat every number below as a "
               "single data point, not a rate.")
     print()
 
@@ -1523,10 +1600,10 @@ def cmd_gates(args) -> None:
                                           "with no qa1 audit PASS found in the preceding window"))
 
     print("1. Crossover (LiveQA catching what shipped, split by audit provenance):")
-    print(f"   Audited miss — QA1 passed fresh, LiveQA still caught it: "
-          f"{len(audited_miss)} — sprints: {counts_str(audited_miss)}")
-    print(f"   Unaudited-fix miss — fix reshipped without a fresh QA1 re-audit, not evidence "
-          f"QA1 missed anything: {len(unaudited_fix_miss)} — sprints: {counts_str(unaudited_fix_miss)}")
+    print(f"   Audited miss - QA1 passed fresh, LiveQA still caught it: "
+          f"{len(audited_miss)} - sprints: {counts_str(audited_miss)}")
+    print(f"   Unaudited-fix miss - fix reshipped without a fresh QA1 re-audit, not evidence "
+          f"QA1 missed anything: {len(unaudited_fix_miss)} - sprints: {counts_str(unaudited_fix_miss)}")
     if unclassified:
         print("   UNCLASSIFIED (doesn't match the expected shipped/reshipped state machine, "
               "check by hand):")
@@ -1565,8 +1642,8 @@ def cmd_gates(args) -> None:
     liveqa_catch = sprints_with_non_pass("live_test")
 
     print("2. Per-gate catch rate (completed sprints where the gate ever returned non-PASS):")
-    print(f"   QA1: {len(qa1_catch)} of {n} — sprints: {qa1_catch or '(none)'}")
-    print(f"   LiveQA: {len(liveqa_catch)} of {n} — sprints: {liveqa_catch or '(none)'}")
+    print(f"   QA1: {len(qa1_catch)} of {n} - sprints: {qa1_catch or '(none)'}")
+    print(f"   LiveQA: {len(liveqa_catch)} of {n} - sprints: {liveqa_catch or '(none)'}")
     print("   Round-count distribution (audit_rounds / live_test_rounds), per completed sprint:")
     for state in completed:
         print(f"     sprint {state['id']}: audit_rounds={state.get('audit_rounds', 0)}, "
@@ -1585,9 +1662,9 @@ def cmd_gates(args) -> None:
     ship_hash_events = override_event_sprints("ship_hash_override")
 
     print("3. Hash-drift override frequency (content-drift safety net manually cleared, "
-          "NOT a QA1/LiveQA override — no such override exists):")
-    print(f"   dev-done-hash overrides: {len(dev_done_hash_events)} — sprints: {counts_str(dev_done_hash_events)}")
-    print(f"   ship-hash overrides: {len(ship_hash_events)} — sprints: {counts_str(ship_hash_events)}")
+          "NOT a QA1/LiveQA override - no such override exists):")
+    print(f"   dev-done-hash overrides: {len(dev_done_hash_events)} - sprints: {counts_str(dev_done_hash_events)}")
+    print(f"   ship-hash overrides: {len(ship_hash_events)} - sprints: {counts_str(ship_hash_events)}")
 
 
 def build_parser() -> argparse.ArgumentParser:

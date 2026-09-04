@@ -16,7 +16,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const assert = require('assert');
-const { execFileSync, spawnSync } = require('child_process');
+const { execFileSync, spawnSync, spawn } = require('child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 let failures = 0;
@@ -1421,6 +1421,7 @@ const {
   headlessLaunchArgs,
   headlessPermissionArgs,
   LAUNCHER_FAILURE_EXIT_CODE,
+  installOrphanGuard,
 } = require('./launcher/run-role');
 
 const QA1_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'qa1');
@@ -1952,6 +1953,140 @@ test('run-role CLI: the child\'s own non-zero exit code passes through UNMODIFIE
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// -------------------------------------------------------------------------
+// installOrphanGuard (Sprint 15, Req 3): demonstrated against a real
+// process table, not reasoned about signal semantics -- the same
+// discipline QA1/LiveQA's own criteria for this requirement demand.
+// POSIX-only by construction (see the function's own comment in
+// run-role.js for why SIGKILL and Windows are both named limits, not
+// silently assumed away); skipped on win32 here rather than asserting a
+// mechanism that doesn't apply there at all.
+// -------------------------------------------------------------------------
+if (process.platform === 'win32') {
+  console.log("SKIP installOrphanGuard tests: POSIX-signal mechanism, doesn't apply on win32 (see run-role.js)");
+} else {
+  // Node has no true synchronous sleep; Atomics.wait on a throwaway
+  // SharedArrayBuffer is the standard way to block the thread for a real
+  // wall-clock interval without spawning a subprocess just to wait. This
+  // blocks the whole event loop, which is exactly why the two wrapper
+  // scripts below communicate a PID via a FILE rather than piping their
+  // stdout back to this process: a stream 'data' event would never fire
+  // while this process is inside one of these sleeps.
+  const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+  // A real `ps` query, not process.kill(pid, 0) -- discovered by running
+  // this: kill(pid, 0) still reports a ZOMBIE child as alive (its PID slot
+  // is still allocated until reaped), and this test's own wrapper process
+  // is a direct child of THIS test runner, whose reaping is exactly what
+  // sleepMs() above blocks while it sleeps. `ps -o state=` distinguishes
+  // "gone" (ps itself fails) from a real running state from "Z" (zombie,
+  // dead in every way that matters here, just not yet collected) --
+  // treating a zombie as alive was a false negative this test hit on its
+  // own first run, not a hypothetical.
+  const isPidAlive = (pid) => {
+    let state;
+    try {
+      state = execFileSync('ps', ['-p', String(pid), '-o', 'state='], { encoding: 'utf8' }).trim();
+    } catch {
+      return false; // ps itself failing means no such process
+    }
+    return !state.startsWith('Z');
+  };
+
+  const waitUntil = (fn, timeoutMs, intervalMs = 100) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (fn()) return true;
+      sleepMs(intervalMs);
+    }
+    return fn();
+  };
+
+  // Writes a small standalone wrapper script that spawns a long-running
+  // dummy child (never exits on its own), optionally installs the real
+  // orphan guard on it, then writes the child's PID to a file and idles.
+  // `guarded` toggles the one line that matters, so the guarded and
+  // unguarded scenarios below are identical in every other respect --
+  // the comparison isolates exactly the variable this requirement fixed.
+  function writeWrapper(dir, guarded) {
+    const pidFile = path.join(dir, 'child-pid.txt');
+    const lines = [
+      "const fs = require('fs');",
+      "const { spawn } = require('child_process');",
+      guarded ? `const { installOrphanGuard } = require(${JSON.stringify(RUN_ROLE_PATH)});` : '',
+      "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)']);",
+      guarded ? 'installOrphanGuard(child);' : '',
+      `fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+      'setInterval(() => {}, 1000);', // keep the wrapper itself alive to be killed
+    ].filter(Boolean);
+    const wrapperFile = path.join(dir, 'wrapper.js');
+    fs.writeFileSync(wrapperFile, lines.join('\n') + '\n');
+    return { wrapperFile, pidFile };
+  }
+
+  // Runs one scenario end to end: spawn the wrapper (simulating the
+  // launcher), wait for it to report its own child's PID, send the
+  // wrapper a real SIGTERM by PID -- the exact `kill <launcher-pid>`
+  // shape the original bug report used, not a self-inflicted signal --
+  // then report back whether the child was still alive ~2 seconds later.
+  // Always cleans up both PIDs in `finally`, regardless of outcome, so a
+  // failing assertion never leaks a live process out of the test run.
+  function runOrphanScenario(guarded) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-orphan-guard-'));
+    let wrapper;
+    let childPid = null;
+    try {
+      const { wrapperFile, pidFile } = writeWrapper(dir, guarded);
+      wrapper = spawn(process.execPath, [wrapperFile], { stdio: 'ignore' });
+      const gotPidFile = waitUntil(() => fs.existsSync(pidFile), 5000);
+      assert.ok(gotPidFile, 'wrapper never wrote its child PID file within 5s -- test setup broken');
+      childPid = parseInt(fs.readFileSync(pidFile, 'utf8'), 10);
+      assert.ok(Number.isInteger(childPid) && childPid > 0, `unexpected child PID file content: ${childPid}`);
+      assert.ok(isPidAlive(wrapper.pid), 'wrapper process not alive right after spawning -- test setup broken');
+      assert.ok(isPidAlive(childPid), 'dummy child not alive right after spawning -- test setup broken');
+
+      process.kill(wrapper.pid, 'SIGTERM');
+      waitUntil(() => !isPidAlive(wrapper.pid), 3000);
+      assert.ok(!isPidAlive(wrapper.pid), 'wrapper still alive 3s after SIGTERM -- test setup broken');
+
+      // Real wait, not an instant check: signal delivery and process
+      // teardown are asynchronous, and the original field report itself
+      // measured the child still alive at both 5s and 56s post-kill, so
+      // this window has to be long enough to distinguish "gone" from
+      // "hasn't been reaped yet" either way.
+      const childDiedInTime = waitUntil(() => !isPidAlive(childPid), 3000);
+      return { childDiedInTime, childPid };
+    } finally {
+      if (wrapper && isPidAlive(wrapper.pid)) {
+        try { process.kill(wrapper.pid, 'SIGKILL'); } catch { /* already gone */ }
+      }
+      if (childPid && isPidAlive(childPid)) {
+        try { process.kill(childPid, 'SIGKILL'); } catch { /* already gone */ }
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test('installOrphanGuard: WITHOUT the guard, SIGTERM to the launcher orphans the child (negative control -- proves this test methodology actually detects the bug)', () => {
+    const { childDiedInTime, childPid } = runOrphanScenario(false);
+    assert.strictEqual(
+      childDiedInTime, false,
+      `expected the unguarded child (pid ${childPid}) to survive its launcher's SIGTERM (the real, ` +
+      'reported bug) but it died anyway -- either the repro no longer reproduces, or this test is not ' +
+      'measuring what it claims to'
+    );
+  });
+
+  test('installOrphanGuard: WITH the guard, SIGTERM to the launcher kills the child too -- no survivor (Req 3, by process table)', () => {
+    const { childDiedInTime, childPid } = runOrphanScenario(true);
+    assert.strictEqual(
+      childDiedInTime, true,
+      `expected installOrphanGuard to relay SIGTERM to the child (pid ${childPid}) and kill it within 3s, ` +
+      'but it was still alive -- the fix did not hold'
+    );
+  });
+}
 
 if (failures > 0) {
   console.error(`\n${failures} test(s) failed.`);

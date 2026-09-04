@@ -98,10 +98,100 @@ function claudeOnPath() {
   return probe.status === 0;
 }
 
+// Sprint 15, Req 3: fixes a real, confirmed orphan, established by running
+// it rather than by reasoning about signal semantics. Repro before this
+// fix (POSIX; this file's `spawn()` never passes `detached`, so the child
+// starts in the same process group as this launcher): start a role, note
+// the child claude PID from `ps`, `kill -TERM <this-launcher's-own-pid>`
+// from a second shell, watch `ps -o ppid= -p <child-pid>` — the child's
+// ppid flips to 1 within about five seconds and it is still running past
+// a minute, unkilled and still billing. Matches the sprint file's own
+// field report from published 0.1.13 exactly (a real orphan, not a
+// hypothetical one).
+//
+// Cause: `kill <pid>` (a plain kill, and what a timeout-based external
+// orchestrator's own kill() call does) signals exactly the one PID it's
+// given — never the process group. With no handler registered here,
+// Node's default SIGTERM disposition terminates only THIS process; the
+// child is never sent anything at all, so it's simply abandoned mid-run,
+// gets reparented to PID 1 by the kernel, and keeps going.
+//
+// Ctrl-C in an interactive terminal is a genuinely different delivery
+// path, and was never broken: a terminal's job control signals the whole
+// foreground PROCESS GROUP, which this launcher and its child already
+// share (again, never detached) — both processes already receive Ctrl-C's
+// SIGINT directly and independently from the terminal, with or without
+// anything registered below. Established by running it, not by reasoning
+// about terminal semantics: a real pseudo-terminal (Python's stdlib
+// `pty.fork()`, since an actual keypress isn't scriptable) running a
+// stand-in launcher+child pair, sent the real Ctrl-C byte (0x03) on the
+// pty's master side so the kernel's own tty line discipline is what turns
+// it into SIGINT — not a direct kill() from the test. Both processes gone
+// afterward (checked via `ps` from outside the pty), run once with the
+// guard installed on the child and once without: identical outcome, both
+// times — this fix changes nothing about that path.
+//
+// So the fix only needs to cover the path Ctrl-C doesn't reach: a signal
+// that arrives at this launcher process and nowhere else. SIGINT is
+// deliberately NOT handled here — registering a listener for it would
+// suppress Node's own default SIGINT action on THIS process, and this
+// process already gets Ctrl-C's SIGINT delivered directly by the
+// terminal's process-group signalling above; adding a second, redundant
+// forwarding path for it would only risk racing behaviour that already
+// works, for no benefit.
+//
+// Named limits, not implied coverage (Req 3's own instruction):
+//   - SIGKILL cannot be caught by any process, by POSIX definition — no
+//     code anywhere can make a SIGKILL'd launcher clean up its child.
+//     An orchestrator that wants this cleanup to run MUST use SIGTERM
+//     (the default signal both plain `kill` and Node's own
+//     child_process .kill() send), not -9/SIGKILL.
+//   - Windows has no POSIX signal delivery at all; Node's own docs are
+//     explicit that SIGTERM/SIGHUP aren't meaningfully deliverable there.
+//     This mechanism is POSIX-only (macOS/Linux) and unverified on
+//     Windows — not assumed to also cover it. A `taskkill` there is closer
+//     in effect to SIGKILL than SIGTERM: nothing intercepts it. `claude`
+//     also runs as a grandchild of `cmd.exe` on Windows (see
+//     claude-cmd.js), one more layer this mechanism doesn't reach.
+function installOrphanGuard(child) {
+  // child.exitCode/signalCode both stay null while the process is still
+  // alive (Node's own documented meaning); checked so a signal arriving
+  // after the child has already exited on its own never calls kill() on
+  // a PID that may since have been reused by something unrelated.
+  const relay = (signal) => () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      try {
+        child.kill(signal);
+      } catch {
+        // Already gone between the check above and this call — nothing
+        // left to signal, not an error worth surfacing on the way out.
+      }
+    }
+    // Matches the shell convention (128 + signal number) rather than 0 or
+    // 1, so a caller inspecting this launcher's own exit code can tell
+    // "died to a forwarded signal" apart from either a normal exit or an
+    // unrelated failure.
+    process.exit(signal === 'SIGTERM' ? 143 : 129);
+  };
+  const onTerm = relay('SIGTERM');
+  const onHup = relay('SIGHUP');
+  process.on('SIGTERM', onTerm);
+  process.on('SIGHUP', onHup);
+  // Removed once the child has exited on its own (the normal, unkilled
+  // path every existing run already takes) so these listeners never
+  // outlive the run they were installed for and never fire a redundant
+  // kill() at a process that's already gone.
+  child.on('exit', () => {
+    process.removeListener('SIGTERM', onTerm);
+    process.removeListener('SIGHUP', onHup);
+  });
+}
+
 function spawnClaude(args) {
   return new Promise((resolve) => {
     const [cmd, fullArgs] = claudeCommand(args);
     const child = spawn(cmd, fullArgs, { stdio: 'inherit', cwd: ROOT });
+    installOrphanGuard(child);
     child.on('error', (err) => {
       fail(`Failed to start claude: ${err.message}`);
     });
@@ -554,4 +644,5 @@ module.exports = {
   headlessLaunchArgs,
   headlessPermissionArgs,
   LAUNCHER_FAILURE_EXIT_CODE,
+  installOrphanGuard,
 };

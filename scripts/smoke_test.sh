@@ -104,11 +104,28 @@ git commit -q --allow-empty -m "address QA1 feedback for sprint $SPRINT_1"
 $SCRIPT qa1 "$SPRINT_1" --verdict PASS --notes "ok" > /dev/null
 $SCRIPT dev-done "$SPRINT_1" > /dev/null
 AUDITED_COMMIT_1=$(git rev-parse HEAD)
-$SCRIPT ship "$SPRINT_1" --commit "$AUDITED_COMMIT_1" > /dev/null
+
+echo "== sprint 15, Req 4: ship --commit HEAD prints the resolved SHA, not the literal ref =="
+SHIP_OUT_1=$($SCRIPT ship "$SPRINT_1" --commit HEAD 2>&1)
+echo "$SHIP_OUT_1" | grep -qF "shipped (commit ${AUDITED_COMMIT_1})" || \
+  fail "ship --commit HEAD should print the resolved SHA ($AUDITED_COMMIT_1) -- got: $SHIP_OUT_1"
+echo "$SHIP_OUT_1" | grep -qF "shipped (commit HEAD)" && \
+  fail "ship --commit HEAD printed the raw ref 'HEAD' instead of resolving it -- Req 4 regression"
+
 $SCRIPT liveqa "$SPRINT_1" --deployed-commit "$AUDITED_COMMIT_1" --verdict FAIL --notes "expected fail" > /dev/null
 git commit -q --allow-empty -m "fix for sprint $SPRINT_1"
 FIX_COMMIT_1=$(git rev-parse HEAD)
-$SCRIPT reship "$SPRINT_1" --commit "$FIX_COMMIT_1" > /dev/null
+
+echo "== sprint 15, Req 2: reship states plainly that the commit is unaudited and the live-loop audit is available, without implying LiveQA substitutes for QA1 =="
+RESHIP_OUT_1=$($SCRIPT reship "$SPRINT_1" --commit "$FIX_COMMIT_1" 2>&1)
+echo "$RESHIP_OUT_1" | grep -qF "fix reshipped (commit ${FIX_COMMIT_1})" || \
+  fail "reship should also print the resolved SHA, same fix as ship -- got: $RESHIP_OUT_1"
+echo "$RESHIP_OUT_1" | grep -q "has NOT been through QA1's static audit" || \
+  fail "reship's output should say plainly this commit hasn't been through QA1's audit"
+echo "$RESHIP_OUT_1" | grep -q "/sprint-qa1 will record a live-loop audit" || \
+  fail "reship's output should name that the live-loop audit is available for this commit"
+echo "$RESHIP_OUT_1" | grep -q "not a substitute for one" || \
+  fail "reship's output should foreclose the LiveQA-substitutes-for-QA1 conflation, not just avoid repeating it"
 $SCRIPT liveqa "$SPRINT_1" --deployed-commit "$FIX_COMMIT_1" --verdict PASS --notes "ok" > /dev/null
 
 echo "== complete refuses (no override) without a non-empty --user-said, even with both gates PASS =="
@@ -138,10 +155,10 @@ GATES_OUT=$($SCRIPT gates)
 GATES_HASH_AFTER=$(sprints_hash)
 [ "$GATES_HASH_BEFORE" = "$GATES_HASH_AFTER" ] || fail "gates modified docs/sprints/ (should be strictly read-only)"
 echo "$GATES_OUT" | grep -q "single data point, not a rate" || fail "gates didn't flag a single completed sprint as non-statistical"
-echo "$GATES_OUT" | grep -q "Audited miss.*: 1 — sprints: ${SPRINT_1}$" || fail "gates didn't count sprint $SPRINT_1's GT fail (after a normal ship) as an audited miss"
+echo "$GATES_OUT" | grep -q "Audited miss.*: 1 - sprints: ${SPRINT_1}$" || fail "gates didn't count sprint $SPRINT_1's GT fail (after a normal ship) as an audited miss"
 echo "$GATES_OUT" | grep -q "Unaudited-fix miss.*: 0 " || fail "gates should show zero unaudited-fix misses so far"
-echo "$GATES_OUT" | grep -q "LiveQA: 1 of 1 — sprints: \[${SPRINT_1}\]" || fail "gates didn't record sprint $SPRINT_1 under LiveQA's non-PASS catch"
-echo "$GATES_OUT" | grep -q "QA1: 1 of 1 — sprints: \[${SPRINT_1}\]" || fail "gates should count sprint $SPRINT_1 under QA1's non-PASS catch (it had an initial FAIL round)"
+echo "$GATES_OUT" | grep -q "LiveQA: 1 of 1 - sprints: \[${SPRINT_1}\]" || fail "gates didn't record sprint $SPRINT_1 under LiveQA's non-PASS catch"
+echo "$GATES_OUT" | grep -q "QA1: 1 of 1 - sprints: \[${SPRINT_1}\]" || fail "gates should count sprint $SPRINT_1 under QA1's non-PASS catch (it had an initial FAIL round)"
 
 echo "== refusal paths =="
 SPRINT_2=$(new_sprint "Edge case sprint")
@@ -410,8 +427,8 @@ echo "$FINAL_GATES_OUT" | grep -q "Audited miss.*sprints: ${SPRINT_1}, ${SPRINT_
 echo "$FINAL_GATES_OUT" | grep -q "Unaudited-fix miss.*sprints: ${SPRINT_UNAUDITED}\$" || fail "gates' unaudited-fix-miss bucket should list only sprint $SPRINT_UNAUDITED, never sprint $SPRINT_1 or sprint $SPRINT_SHIP_OVR_MISS"
 echo "$FINAL_GATES_OUT" | grep -q "UNCLASSIFIED" || fail "gates should flag the ship-hash-overridden sprint's GT fail as unclassified, not silently fold it into audited miss"
 echo "$FINAL_GATES_OUT" | grep -q "sprint ${SPRINT_SHIP_OVR_MISS}: .*ship-hash.*was human-overridden" || fail "gates' unclassified note for sprint $SPRINT_SHIP_OVR_MISS should explain why (ship-hash override), not just flag it"
-echo "$FINAL_GATES_OUT" | grep -q "dev-done-hash overrides: 1 — sprints: ${SPRINT_GATES_OVR}" || fail "gates should count sprint $SPRINT_GATES_OVR's dev-done-hash override under hash-drift frequency"
-echo "$FINAL_GATES_OUT" | grep -q "ship-hash overrides: 1 — sprints: ${SPRINT_SHIP_OVR_MISS}" || fail "gates should count sprint $SPRINT_SHIP_OVR_MISS's ship-hash override under hash-drift frequency"
+echo "$FINAL_GATES_OUT" | grep -q "dev-done-hash overrides: 1 - sprints: ${SPRINT_GATES_OVR}" || fail "gates should count sprint $SPRINT_GATES_OVR's dev-done-hash override under hash-drift frequency"
+echo "$FINAL_GATES_OUT" | grep -q "ship-hash overrides: 1 - sprints: ${SPRINT_SHIP_OVR_MISS}" || fail "gates should count sprint $SPRINT_SHIP_OVR_MISS's ship-hash override under hash-drift frequency"
 echo "$FINAL_GATES_OUT" | grep -qE "sprint ${SPRINT_GATES_OVR}: audit_rounds=1, live_test_rounds=1" || fail "gates' round-count distribution for sprint $SPRINT_GATES_OVR is wrong"
 
 echo "== gates: an unparseable verdict format is flagged and excluded, never silently counted as a catch =="
@@ -487,7 +504,7 @@ echo "== status: stale-test line appears once a reship lands after the last reco
 git commit -q --allow-empty -m "fix for sprint $SPRINT_GT_CHECK"
 GT_FIX_COMMIT=$(git rev-parse HEAD)
 $SCRIPT reship "$SPRINT_GT_CHECK" --commit "$GT_FIX_COMMIT" > /dev/null
-$SCRIPT status "$SPRINT_GT_CHECK" 2>/dev/null | grep -q "Code has changed since the last recorded LiveQA verdict — not yet re-tested." || \
+$SCRIPT status "$SPRINT_GT_CHECK" 2>/dev/null | grep -q "Code has changed since the last recorded LiveQA verdict - not yet re-tested." || \
   fail "status did not show the stale-test line after a reship with no fresh verdict yet"
 
 echo "== status: stale-test line clears once a fresh verdict is recorded against the reshipped commit =="
@@ -670,7 +687,43 @@ git commit -q --allow-empty -m "fix for sprint $SPRINT_LL after the live loop"
 LL_FIX_COMMIT=$(git rev-parse HEAD)
 $SCRIPT reship "$SPRINT_LL" --commit "$LL_FIX_COMMIT" > /dev/null
 $SCRIPT liveqa "$SPRINT_LL" --deployed-commit "$LL_FIX_COMMIT" --verdict PASS --notes ok > /dev/null
+
+echo "== sprint 15, Req 1: the live-loop audit branch now also accepts complete_ready -- QA1's own method: seed exactly this shape, diff the WHOLE state file, only history may change =="
+[ "$(python3 -c "import json; print(json.load(open('$LL_STATE'))['phase'])")" = "complete_ready" ] || \
+  fail "test setup broken: sprint $SPRINT_LL should be at complete_ready after its PASS above, before /sprint-complete runs"
+cp "$LL_STATE" /tmp/ll_ready_before.json
+
+READY_OUT=$($SCRIPT qa1 "$SPRINT_LL" --verdict PASS --notes "live-loop audit at complete_ready" 2>&1)
+echo "$READY_OUT" | grep -q "RECORD, not a" || fail "complete_ready live-loop audit output should say plainly it's a record, not a gate verdict"
+echo "$READY_OUT" | grep -q "Both gates already passed" || fail "complete_ready live-loop audit output should say both gates already passed, not point at another LiveQA retest that isn't coming"
+
+python3 -c "
+import json
+before = json.load(open('/tmp/ll_ready_before.json'))
+after = json.load(open('$LL_STATE'))
+protected = ['phase', 'qa1_audit_result', 'audit_rounds', 'qa1_audit_file_hash', 'qa1_audited_tree_hash']
+for field in protected:
+    if before[field] != after[field]:
+        raise SystemExit(f'protected field {field} changed: {before[field]!r} -> {after[field]!r}')
+before_no_history = {k: v for k, v in before.items() if k != 'history'}
+after_no_history = {k: v for k, v in after.items() if k != 'history'}
+if before_no_history != after_no_history:
+    raise SystemExit(f'a field outside the five named ones changed too: before={before_no_history} after={after_no_history}')
+if len(after['history']) != len(before['history']) + 1:
+    raise SystemExit(f'expected exactly one new history event, before={len(before[\"history\"])} after={len(after[\"history\"])}')
+if after['history'][-1]['event'] == 'audit':
+    raise SystemExit('a complete_ready live-loop audit must use a name distinct from gate 1\'s \"audit\", or cmd_gates would count it')
+" || fail "complete_ready live-loop audit state diff check failed -- see message above"
+rm -f /tmp/ll_ready_before.json
+
 $SCRIPT complete "$SPRINT_LL" --user-said "close it, the live-loop audits above are just records" > /dev/null
+
+echo "== sprint 15, Req 1: complete is NOT included -- a live-loop audit against an already-closed sprint is refused, and nothing is written =="
+cp "$LL_STATE" /tmp/ll_closed_before.json
+$SCRIPT qa1 "$SPRINT_LL" --verdict PASS --notes "trying to audit a closed sprint" > /tmp/out.txt 2>&1 && \
+  fail "qa1 succeeded recording a live-loop audit against sprint $SPRINT_LL, already complete" || true
+diff -q /tmp/ll_closed_before.json "$LL_STATE" > /dev/null || fail "a refused live-loop audit against a closed sprint must not write anything"
+rm -f /tmp/out.txt /tmp/ll_closed_before.json
 GATES_AFTER_LL=$($SCRIPT gates)
 echo "$GATES_AFTER_LL" | grep "^   QA1:" > /tmp/qa1_line.txt
 grep -qE "\b${SPRINT_LL}\b" /tmp/qa1_line.txt && \
