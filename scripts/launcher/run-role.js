@@ -64,6 +64,7 @@ const { ROOT, ROLES, agentFilePath, readAgentMeta, agentBody } = require('./agen
 const { initialPrompt, devTeam2ResumePrompt, headlessPrompt } = require('./prompts');
 const { resolveSession } = require('./session');
 const { checkAuth } = require('./auth');
+const { parseJsonc } = require('./jsonc');
 const { claudeCommand } = require('./claude-cmd');
 
 // Req 10: every launcher-level failure — claude not on PATH, an unreadable
@@ -336,37 +337,95 @@ function readPromptFile(filePath) {
 // WITHIN the launch directory (confirmed: a write outside it, to an
 // absolute /tmp path, was still blocked under acceptEdits — the directory
 // confinement Req 2 asked to test appears to already be inherent, not
-// something this file needs to configure separately) and ordinary git
-// (including a real push, confirmed against a bare local remote), but
-// still requires approval for `npm`, `curl`, and running any
-// interpreter-invoked script (`node scripts/*`, `python3 scripts/*`) —
-// the exact wall Dev Team 1 hit directly attempting `node
-// scripts/run-lifecycle.js status`. `--allowedTools "Bash(<pattern>)"`
-// was confirmed to narrow genuinely rather than nominally (allowlisting
-// npm never opened curl; allowlisting one script path never opened
-// script execution generally; multiple space-separated patterns in one
-// string — the shape used below — were confirmed to combine correctly).
-// `--disallowedTools "Edit,Write"` was confirmed to hard-disable those
-// tools outright ("No such tool available"), used for qa1 and liveqa
-// below since neither writes source.
+// something this file needs to configure separately), but still requires
+// approval for `npm`, `curl`, and running any interpreter-invoked script
+// (`node scripts/*`, `python3 scripts/*`) — the exact wall Dev Team 1 hit
+// directly attempting `node scripts/run-lifecycle.js status`.
+// `--allowedTools "Bash(<pattern>)"` was confirmed to narrow genuinely
+// rather than nominally (allowlisting npm never opened curl; allowlisting
+// one script path never opened script execution generally; multiple
+// space-separated patterns in one string — the shape used below — were
+// confirmed to combine correctly). `--disallowedTools "Edit,Write"` was
+// confirmed to hard-disable those TOOLS outright ("No such tool
+// available"), used for qa1 and liveqa below since neither writes source.
+//
+// Sprint 17, Req 2 — the boundary this file kept getting wrong, stated
+// once, plainly, here: **`acceptEdits` governs TOOL use (Edit, Write). It
+// says nothing about Bash.** Every Bash command, including git, needs its
+// own `--allowedTools` entry or it isn't approved — full stop, regardless
+// of `--permission-mode`. This is the third time this exact conflation
+// produced a real, shipped defect: sprint 12 itself found the sibling
+// case (QA1's own finding, re-checked against this new wording as this
+// Req's own criterion requires) — a plain Bash redirect (`echo x > file`)
+// still WRITES even with `--disallowedTools "Edit,Write"` set, because
+// disallowing the Edit/Write TOOLS never touched Bash's own ability to
+// redirect output; and this sprint found the mirror image — this file's
+// own comment claimed git was "free under acceptEdits" and pipeman's
+// profile had no git entry at all, so a headless ship attempt was denied
+// and correctly reported BLOCKED. Tools and Bash are two independent
+// axes; neither `--permission-mode` nor `--disallowedTools` reaches
+// across to the other, in either direction. State it once, here, so the
+// next person extending a profile doesn't have to rediscover it a fourth
+// time.
+//
+// Sprint 17, Req 1 finding, recorded honestly rather than smoothed over:
+// re-testing the git-push denial directly against the CURRENT `claude`
+// CLI (2.1.261 — a point release newer than 2.1.260, recorded during
+// sprint 14's own testing days earlier) in the DEFAULT, non-`--bare`
+// headless path, `git push` to a real bare local remote succeeded with
+// ZERO permission_denials, using pipeman's OLD profile with no git entry
+// at all — the exact opposite of this sprint's own Context claim, and of
+// the denial LiveQA actually observed. Reproduced three times (a bare
+// `git push`, a ten-command git sweep, a bare `git status`), all clean.
+// This was NOT re-tested under `--bare` mode (no ANTHROPIC_API_KEY
+// available in this environment) — an external, unattended orchestrator
+// like Fifty Mission Cap is exactly the caller likely to use `--bare`,
+// and that mode's Bash behavior was never independently confirmed here to
+// match the default path's. Given that gap, and given the whole point of
+// Req 2 above is that undocumented, version-dependent "it happens to work
+// today" behavior is not something to build on, git is allowlisted
+// explicitly below regardless of whether the symptom currently
+// reproduces in default mode — the CLI already changed once inside this
+// same investigation; relying on its current unlisted-git behavior
+// staying this way would just be next sprint's instance of this same
+// mistake.
 //
 // Every role needs the two lifecycle-script invocation patterns — every
 // slash command ultimately runs through one of them. Beyond that, each
-// role gets exactly what Req 1's own per-role breakdown named and Reqs
-// 1-2's testing confirmed it needs, nothing broader:
+// role gets exactly what Req 1's own per-role breakdown named, nothing
+// broader:
 //   - dev-team-1/2: writes source (covered by acceptEdits alone) and runs
-//     the test suite and tarball check.
-//   - qa1: runs tests, never writes source — Edit/Write hard-disabled.
-//   - pipeman: git (free under acceptEdits) plus npm, confirmed including
-//     `npm publish --dry-run` running cleanly (no permission block, only
-//     npm's own validation) under exactly this profile.
-//   - liveqa: records a verdict through the lifecycle script; the real
-//     browser-driving tools (Playwright/Chrome MCP) aren't scoped here —
-//     out of reach of a synthetic-agent scratch test, and untested as
-//     such, not assumed to need broader Bash access.
+//     THIS PROJECT'S OWN declared test command (readDeclaredTestCommand()
+//     below — the sprint's own "if the honest answer is that the target
+//     must declare it, say so and define where": defined in
+//     .vscode/settings.json's `fullyCompletely.testCommand`, merged in by
+//     install.js with no default value, since no single command is
+//     correct across every downstream project). No declaration -> no
+//     test-running Bash permission at all, an honest gap rather than a
+//     guess. The old hardcoded `Bash(node scripts/launcher_test.js)` and
+//     `Bash(bash scripts/verify-tarball.sh)` patterns are gone entirely —
+//     both are THIS repo's own dev tooling (see CLAUDE.md's "Changes to
+//     this repo's own tooling"), never a downstream project's, and
+//     verify-tarball.sh specifically has no downstream equivalent at all.
+//   - qa1: the identical test-running mechanism as dev-team, for the
+//     identical reason — QA1's own process (qa1.md) requires demonstrating
+//     a FAIL with "a command whose output shows the defect," which means
+//     running the target's own tests, not this repo's.
+//   - pipeman: git, enumerated by subcommand rather than `Bash(git *)`
+//     (Req 3's own named example) — status/log/diff/fetch (branch review,
+//     step 2), add/commit (step 9.3 and conflict resolution), rebase/merge
+//     (step 5), checkout (conflict resolution, step 4), push (steps 6 and
+//     9.3, the headline gap) — plus npm, confirmed including `npm publish
+//     --dry-run` running cleanly under exactly this profile.
+//   - liveqa: npm and npx added and TESTED (not inferred from the
+//     definition, per this Req's own instruction) — `npx <published
+//     package>` into a scratch directory, confirmed clean under exactly
+//     this profile. The real browser-driving tools (Playwright/Chrome
+//     MCP) still aren't scoped here — out of reach of a synthetic-agent
+//     scratch test, untested as such, not assumed to need broader Bash.
 //   - master-controller: writes a sprint file (covered by acceptEdits
-//     alone, confirmed directly — not inferred) and runs the lifecycle
-//     script's `new` command.
+//     alone, confirmed directly in sprint 14 — not inferred, and
+//     re-confirmed unregressed here). Unchanged by this sprint.
 const HEADLESS_PERMISSION_PROFILES = {
   'master-controller': {
     disallowedTools: [],
@@ -374,40 +433,82 @@ const HEADLESS_PERMISSION_PROFILES = {
   },
   'dev-team-1': {
     disallowedTools: [],
-    allowedTools: [
-      'Bash(node scripts/run-lifecycle.js *)',
-      'Bash(python3 scripts/sprint_lifecycle.py *)',
-      'Bash(node scripts/launcher_test.js)',
-      'Bash(bash scripts/verify-tarball.sh)',
-    ],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    needsTestCommand: true,
   },
   'dev-team-2': {
     disallowedTools: [],
-    allowedTools: [
-      'Bash(node scripts/run-lifecycle.js *)',
-      'Bash(python3 scripts/sprint_lifecycle.py *)',
-      'Bash(node scripts/launcher_test.js)',
-      'Bash(bash scripts/verify-tarball.sh)',
-    ],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    needsTestCommand: true,
   },
   qa1: {
     disallowedTools: ['Edit', 'Write'],
-    allowedTools: [
-      'Bash(node scripts/run-lifecycle.js *)',
-      'Bash(python3 scripts/sprint_lifecycle.py *)',
-      'Bash(node scripts/launcher_test.js)',
-      'Bash(bash scripts/verify-tarball.sh)',
-    ],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    needsTestCommand: true,
   },
   pipeman: {
     disallowedTools: [],
-    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)', 'Bash(npm *)'],
+    allowedTools: [
+      'Bash(node scripts/run-lifecycle.js *)',
+      'Bash(python3 scripts/sprint_lifecycle.py *)',
+      'Bash(npm *)',
+      'Bash(git status *)',
+      'Bash(git log *)',
+      'Bash(git diff *)',
+      'Bash(git fetch *)',
+      'Bash(git add *)',
+      'Bash(git commit *)',
+      'Bash(git rebase *)',
+      'Bash(git merge *)',
+      'Bash(git checkout *)',
+      'Bash(git push *)',
+    ],
   },
   liveqa: {
     disallowedTools: ['Edit', 'Write'],
-    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    allowedTools: [
+      'Bash(node scripts/run-lifecycle.js *)',
+      'Bash(python3 scripts/sprint_lifecycle.py *)',
+      'Bash(npm *)',
+      'Bash(npx *)',
+    ],
   },
 };
+
+// Sprint 17, Req 1: reads the target project's own declared test command
+// from its .vscode/settings.json (merged in by install.js's
+// mergeSettings(), see that function's own comment) — the framework
+// cannot know a downstream project's test command in advance, so this is
+// the one place that project gets to say what it is, rather than this
+// file hardcoding its own. Read from ROOT (this file's own two-levels-up
+// resolution in agents.js), which is the actual installed project root
+// at runtime, not wherever this session happens to be invoked from.
+// Returns null on anything short of a real, non-empty declared string —
+// missing file, unparseable JSONC, wrong type, blank — every one of those
+// means "not declared," and the caller's job is to grant no test-running
+// permission at all rather than guess, same conservative-default shape
+// resolve_text()/readBaselines() already use elsewhere in this project.
+// `root` defaults to the module-level ROOT (real production behavior) but
+// is overridable so tests can point this at a scratch directory instead
+// of this repo's own real, off-limits .vscode/settings.json.
+function readDeclaredTestCommand(root = ROOT) {
+  const settingsPath = path.join(root, '.vscode', 'settings.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(settingsPath, 'utf8');
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = parseJsonc(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const value = parsed['fullyCompletely.testCommand'];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
 
 function headlessPermissionArgs(role) {
   const profile = HEADLESS_PERMISSION_PROFILES[role.id];
@@ -417,9 +518,17 @@ function headlessPermissionArgs(role) {
     // fail loudly rather than silently launching with no scope at all.
     throw new Error(`No headless permission profile defined for role '${role.id}'.`);
   }
+  const allowedTools = [...profile.allowedTools];
+  if (profile.needsTestCommand) {
+    const testCommand = readDeclaredTestCommand();
+    // A trailing ` *` wildcard, matching every other multi-word pattern in
+    // this file — confirmed (sprint 17) to also match the bare command
+    // with no trailing arguments at all, not just one-or-more.
+    if (testCommand) allowedTools.push(`Bash(${testCommand} *)`);
+  }
   const args = ['--permission-mode', 'acceptEdits'];
-  if (profile.allowedTools.length) {
-    args.push('--allowedTools', profile.allowedTools.join(' '));
+  if (allowedTools.length) {
+    args.push('--allowedTools', allowedTools.join(' '));
   }
   if (profile.disallowedTools.length) {
     args.push('--disallowedTools', profile.disallowedTools.join(','));
@@ -645,4 +754,6 @@ module.exports = {
   headlessPermissionArgs,
   LAUNCHER_FAILURE_EXIT_CODE,
   installOrphanGuard,
+  readDeclaredTestCommand,
+  HEADLESS_PERMISSION_PROFILES,
 };

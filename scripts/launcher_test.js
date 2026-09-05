@@ -514,6 +514,42 @@ test('install.js: fresh project gets the framework and an 8-task tasks.json', ()
   });
 });
 
+test('install.js: a fresh install adds fullyCompletely.testCommand, empty, with a note explaining what it is for (Req 1)', () => {
+  withFixture((dir) => {
+    const output = runInstall(dir);
+    const settings = JSON.parse(fs.readFileSync(path.join(dir, '.vscode', 'settings.json'), 'utf8'));
+    assert.strictEqual(settings['fullyCompletely.testCommand'], '', 'testCommand should be added, empty, with no guessed default');
+    assert.strictEqual(settings['fullyCompletely.autoLaunch'], false, 'autoLaunch must still be added exactly as before this sprint');
+    assert.match(output, /fullyCompletely\.testCommand.*was added, empty/, 'the note explaining the new key should print on a fresh install');
+  });
+});
+
+test('install.js: an existing settings.json with only autoLaunch set still gains testCommand (the early-return gap this sprint fixed)', () => {
+  withFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'), JSON.stringify({ 'fullyCompletely.autoLaunch': true }, null, 2) + '\n');
+    const output = runInstall(dir);
+    const settings = JSON.parse(fs.readFileSync(path.join(dir, '.vscode', 'settings.json'), 'utf8'));
+    assert.strictEqual(settings['fullyCompletely.autoLaunch'], true, "the user's own existing autoLaunch value must survive untouched");
+    assert.strictEqual(settings['fullyCompletely.testCommand'], '', 'testCommand should still be added even though autoLaunch already existed');
+    assert.match(output, /added fullyCompletely\.testCommand key\(s\) to your existing file/);
+  });
+});
+
+test('install.js: re-running once testCommand is already declared leaves it untouched and is a no-op', () => {
+  withFixture((dir) => {
+    runInstall(dir);
+    const settingsPath = path.join(dir, '.vscode', 'settings.json');
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    settings['fullyCompletely.testCommand'] = 'npm test';
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    const second = runInstall(dir);
+    assert.doesNotMatch(second, /testCommand.*was added/, "a re-run must not re-report a key that's already set");
+    const after = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    assert.strictEqual(after['fullyCompletely.testCommand'], 'npm test', "a user's declared command must never be overwritten by a re-install");
+  });
+});
+
 test('install.js: re-running against its own output is a no-op', () => {
   withFixture((dir) => {
     runInstall(dir);
@@ -1422,6 +1458,8 @@ const {
   headlessPermissionArgs,
   LAUNCHER_FAILURE_EXIT_CODE,
   installOrphanGuard,
+  readDeclaredTestCommand,
+  HEADLESS_PERMISSION_PROFILES,
 } = require('./launcher/run-role');
 
 const QA1_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'qa1');
@@ -1601,6 +1639,147 @@ test('run-role: headlessPermissionArgs grants every role the two lifecycle-scrip
 
 test('run-role: headlessPermissionArgs throws for an unknown role rather than launching with no scope at all', () => {
   assert.throws(() => headlessPermissionArgs({ id: 'not-a-real-role', label: 'Nope' }), /No headless permission profile/);
+});
+
+// -------------------------------------------------------------------------
+// Sprint 17: no profile hardcodes a path specific to THIS repository (Req
+// 5's own instruction: "that second assertion is the one that would have
+// caught this" -- the launcher_test.js/verify-tarball.sh patterns this
+// sprint removed). Every real headless mechanism (declared test command,
+// pipeman's git scope, liveqa's npm/npx) was also confirmed by actually
+// running it against a real scratch install during this sprint's build --
+// not repeated here as a launcher_test.js assertion, since faking that
+// mechanism convincingly would mean re-implementing claude's own
+// permission enforcement rather than testing this file's own logic.
+// -------------------------------------------------------------------------
+const REPO_SPECIFIC_PATTERNS = [/launcher_test\.js/, /verify-tarball\.sh/, /smoke_test\.sh/];
+
+test('run-role: no role\'s static allowedTools hardcodes a path specific to this repository (Req 5)', () => {
+  for (const [roleId, profile] of Object.entries(HEADLESS_PERMISSION_PROFILES)) {
+    for (const pattern of profile.allowedTools) {
+      for (const repoSpecific of REPO_SPECIFIC_PATTERNS) {
+        assert.ok(
+          !repoSpecific.test(pattern),
+          `${roleId}: allowedTools entry '${pattern}' hardcodes a path specific to this repository (matches ${repoSpecific})`
+        );
+      }
+    }
+  }
+});
+
+test('run-role: every role still gets the two lifecycle-script patterns, unaffected by this sprint\'s changes', () => {
+  // Re-asserts what the pre-existing test above already covers, scoped
+  // here to the static profile object directly (not through
+  // headlessPermissionArgs(), which now also depends on a real
+  // .vscode/settings.json read) -- confirms the removal of the two
+  // repo-specific patterns above didn't take these two with them.
+  for (const profile of Object.values(HEADLESS_PERMISSION_PROFILES)) {
+    assert.ok(profile.allowedTools.includes('Bash(node scripts/run-lifecycle.js *)'));
+    assert.ok(profile.allowedTools.includes('Bash(python3 scripts/sprint_lifecycle.py *)'));
+  }
+});
+
+test('run-role: pipeman is allowlisted the specific git subcommands its documented flow uses, not blanket git (Req 3)', () => {
+  const pipemanArgs = HEADLESS_PERMISSION_PROFILES.pipeman.allowedTools;
+  for (const sub of ['status', 'log', 'diff', 'fetch', 'add', 'commit', 'rebase', 'merge', 'checkout', 'push']) {
+    assert.ok(pipemanArgs.some((a) => a === `Bash(git ${sub} *)`), `pipeman missing git ${sub}`);
+  }
+  assert.ok(!pipemanArgs.includes('Bash(git *)'), 'pipeman must not be granted blanket git access (Req 3\'s own named example)');
+  // Narrower still: nothing here should ever grant a destructive/unrelated
+  // git subcommand pipeman's documented process never names.
+  for (const dangerous of ['reset', 'clean', 'filter-branch', 'gc', 'reflog', 'config', 'remote']) {
+    assert.ok(
+      !pipemanArgs.some((a) => a.includes(`git ${dangerous}`)),
+      `pipeman should not have git ${dangerous} -- not part of its documented flow`
+    );
+  }
+});
+
+test('run-role: liveqa is allowlisted both npm and npx (Req 1, confirmed by running npx against a real scratch install)', () => {
+  const liveqaArgs = HEADLESS_PERMISSION_PROFILES.liveqa.allowedTools;
+  assert.ok(liveqaArgs.some((a) => a.includes('Bash(npm *)')), 'liveqa missing npm');
+  assert.ok(liveqaArgs.some((a) => a.includes('Bash(npx *)')), 'liveqa missing npx');
+});
+
+test('run-role: dev-team-1/2 and qa1 are marked as needing a declared test command; other roles are not', () => {
+  for (const roleId of ['dev-team-1', 'dev-team-2', 'qa1']) {
+    assert.strictEqual(HEADLESS_PERMISSION_PROFILES[roleId].needsTestCommand, true, `${roleId} should need a declared test command`);
+  }
+  for (const roleId of ['master-controller', 'pipeman', 'liveqa']) {
+    assert.ok(!HEADLESS_PERMISSION_PROFILES[roleId].needsTestCommand, `${roleId} should not need a declared test command`);
+  }
+});
+
+// -------------------------------------------------------------------------
+// readDeclaredTestCommand() -- the mechanism itself, unit-tested against a
+// scratch root (never this repo's own real, off-limits .vscode/settings.json,
+// which stays untouched by every test in this file).
+// -------------------------------------------------------------------------
+function withScratchSettings(settingsContentOrNull, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-test-command-'));
+  try {
+    if (settingsContentOrNull !== null) {
+      fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'), settingsContentOrNull);
+    }
+    fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('readDeclaredTestCommand: no .vscode/settings.json at all -> null, not a throw', () => {
+  withScratchSettings(null, (dir) => {
+    assert.strictEqual(readDeclaredTestCommand(dir), null);
+  });
+});
+
+test('readDeclaredTestCommand: key present but empty string -> null (install.js\'s own default, "not declared")', () => {
+  withScratchSettings('{"fullyCompletely.testCommand": ""}', (dir) => {
+    assert.strictEqual(readDeclaredTestCommand(dir), null);
+  });
+});
+
+test('readDeclaredTestCommand: key absent entirely -> null', () => {
+  withScratchSettings('{"fullyCompletely.autoLaunch": false}', (dir) => {
+    assert.strictEqual(readDeclaredTestCommand(dir), null);
+  });
+});
+
+test('readDeclaredTestCommand: a real declared value is returned, trimmed', () => {
+  withScratchSettings('{"fullyCompletely.testCommand": "  npm test  "}', (dir) => {
+    assert.strictEqual(readDeclaredTestCommand(dir), 'npm test');
+  });
+});
+
+test('readDeclaredTestCommand: JSONC comments in the file do not break parsing (this file is written by install.js as JSONC)', () => {
+  withScratchSettings(
+    '{\n  // a comment above the key\n  "fullyCompletely.testCommand": "pytest tests/",\n}\n',
+    (dir) => {
+      assert.strictEqual(readDeclaredTestCommand(dir), 'pytest tests/');
+    }
+  );
+});
+
+test('readDeclaredTestCommand: unparseable JSON -> null, not a throw', () => {
+  withScratchSettings('{ this is not json', (dir) => {
+    assert.strictEqual(readDeclaredTestCommand(dir), null);
+  });
+});
+
+test('readDeclaredTestCommand: a non-string value (e.g. a stray boolean) -> null, not a crash', () => {
+  withScratchSettings('{"fullyCompletely.testCommand": true}', (dir) => {
+    assert.strictEqual(readDeclaredTestCommand(dir), null);
+  });
+});
+
+test('readDeclaredTestCommand: the array/root-not-an-object shapes both degrade to null', () => {
+  withScratchSettings('[1, 2, 3]', (dir) => {
+    assert.strictEqual(readDeclaredTestCommand(dir), null);
+  });
+  withScratchSettings('null', (dir) => {
+    assert.strictEqual(readDeclaredTestCommand(dir), null);
+  });
 });
 
 test('run-role: headlessLaunchArgs prompt stays the final positional argument in every mode', () => {

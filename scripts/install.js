@@ -712,22 +712,61 @@ function readExistingJsonc(destPath, relPath, adviceIfMissing) {
   }
 }
 
+// Sprint 17, Req 1: `fullyCompletely.testCommand` is the second key this
+// merges in, alongside `autoLaunch` -- the "define where" half of Req 1's
+// own instruction (dev-team-1/2 and qa1 all need to run THIS project's
+// tests headless, and the framework has no way to know what that command
+// is in advance; see readDeclaredTestCommand() in
+// scripts/launcher/run-role.js, which reads this exact key at launch
+// time). Deliberately given NO default value -- unlike autoLaunch, which
+// has one safe default (off) that's correct for every project, there is
+// no single test command that's correct across JS/Python/Go/whatever a
+// downstream project turns out to be, so guessing one would be worse than
+// leaving it visibly blank for the user to fill in. Left unset, headless
+// dev-team/qa1 simply get no test-running permission at all -- an honest
+// "not declared" rather than a wrong guess presented as a working default.
 function mergeSettings() {
   const relPath = path.join('.vscode', 'settings.json');
   const destPath = path.join(DEST_ROOT, relPath);
-  const parsed = readExistingJsonc(destPath, relPath, 'add "fullyCompletely.autoLaunch": false');
+  const parsed = readExistingJsonc(destPath, relPath, 'add "fullyCompletely.autoLaunch": false and "fullyCompletely.testCommand": ""');
   if (parsed.conflict) return;
   const obj = parsed.value || {};
   const existed = parsed.existed;
 
-  if (Object.prototype.hasOwnProperty.call(obj, 'fullyCompletely.autoLaunch')) {
-    skipped.push(`${relPath} (fullyCompletely.autoLaunch already set)`);
+  // Each key is added independently -- an existing file with one already
+  // set (autoLaunch, from before this sprint) must still get the other
+  // added, not skip entirely the way this function did before this sprint
+  // (a real gap: a pre-sprint-17 install would never have gained
+  // testCommand at all under the old early-return shape).
+  const added = [];
+  if (!Object.prototype.hasOwnProperty.call(obj, 'fullyCompletely.autoLaunch')) {
+    obj['fullyCompletely.autoLaunch'] = false;
+    added.push('fullyCompletely.autoLaunch');
+  }
+  if (!Object.prototype.hasOwnProperty.call(obj, 'fullyCompletely.testCommand')) {
+    obj['fullyCompletely.testCommand'] = '';
+    added.push('fullyCompletely.testCommand');
+  }
+  if (added.length === 0) {
+    skipped.push(`${relPath} (fullyCompletely.autoLaunch and fullyCompletely.testCommand already set)`);
     return;
   }
-  obj['fullyCompletely.autoLaunch'] = false;
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
   fs.writeFileSync(destPath, JSON.stringify(obj, null, 2) + '\n');
-  copied.push(existed ? `${relPath} (added fullyCompletely.autoLaunch key to your existing file)` : relPath);
+  copied.push(existed ? `${relPath} (added ${added.join(', ')} key(s) to your existing file)` : relPath);
+  // Sprint 17, Req 1: the JSON write above carries no comments (a plain
+  // JSON.stringify round-trip, unlike this repo's own hand-annotated dev
+  // copy), so a freshly-added, still-empty testCommand key would otherwise
+  // ship with no explanation anywhere a user would actually see it. This
+  // is that explanation, printed once, at the moment it matters.
+  if (added.includes('fullyCompletely.testCommand')) {
+    notes.push(
+      `${relPath}: "fullyCompletely.testCommand" was added, empty. Set it to this project's real test ` +
+        'command (e.g. "npm test" or "pytest tests/") to let headless Dev Team and QA1 run it during a ' +
+        'sprint -- left blank, neither gets permission to run any test command at all, on purpose, ' +
+        'rather than the framework guessing wrong.'
+    );
+  }
 }
 
 function mergeTasks() {
