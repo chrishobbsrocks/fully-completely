@@ -1,11 +1,11 @@
 {
   "id": 16,
   "title": "Make the baseline table maintain itself, and stop tests breaking on its drift",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "38e5248a55c96823f7dbf9674568c3b6d584b48ec106e0f077b825478df4fdb5",
   "qa1_audited_tree_hash": "91a494fe17ba55b210d8220db6e2e7d6c9a29ea875e77d4066bdac06b55f2745",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "6f08bad9b2918965e88947eefb71a1a7e3718754",
   "groundtruth_result": null,
   "audit_rounds": 1,
   "live_test_rounds": 0,
@@ -29,6 +29,12 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-05T14:33:40+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=6f08bad"
     }
   ]
 }
