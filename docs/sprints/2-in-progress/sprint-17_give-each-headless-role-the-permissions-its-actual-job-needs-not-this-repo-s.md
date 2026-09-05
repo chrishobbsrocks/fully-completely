@@ -2,7 +2,7 @@
 id: 17
 title: "Give each headless role the permissions its actual job needs, not this repo's"
 epic: "Framework rules and distribution"
-status: todo
+status: in_progress
 created: 2026-09-05T04:00:40+00:00
 ---
 
