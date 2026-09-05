@@ -1,0 +1,22 @@
+{
+  "id": 19,
+  "title": "Let an operator declare a repository as their own, and grant a broader profile only there",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-09-05T14:53:57+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-09-05T14:53:57+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ]
+}

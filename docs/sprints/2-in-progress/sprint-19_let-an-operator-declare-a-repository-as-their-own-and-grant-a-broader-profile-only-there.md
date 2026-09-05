@@ -2,7 +2,7 @@
 id: 19
 title: "Let an operator declare a repository as their own, and grant a broader profile only there"
 epic: "Framework rules and distribution"
-status: todo
+status: in_progress
 created: 2026-09-05T14:44:11+00:00
 ---
 
