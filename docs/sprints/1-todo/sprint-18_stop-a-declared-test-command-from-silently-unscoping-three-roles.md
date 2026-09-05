@@ -41,7 +41,7 @@ This was correctly recorded as a finding rather than a FAIL: no role can do anyt
 
 3. **Decide the compound-command cost, explicitly.** `git push origin main 2>&1; echo "EXIT:$?"` is denied because the matcher matches one command, and **that behaviour is correct and stays.** The question is whether headless roles should be told not to append `; echo $?` — the templates from sprint 12 are the natural place — or whether the denial-and-retry is an acceptable cost. Either answer is fine; deciding by omission is not.
 
-4. **Bump `package.json` to 0.1.19.** One line. *Sprint 16 keeps 0.1.18 and ships first.*
+4. **Bump `package.json` to 0.1.20.** One line. *Sprint 16 keeps 0.1.18 and ships first.*
 
 5. **Test coverage in `scripts/launcher_test.js`.** At minimum: a bare interpreter declaration is rejected; a real project-shaped command is accepted; a rejected declaration produces the loud failure and no test-running permission at all.
 
@@ -53,13 +53,13 @@ This was correctly recorded as a finding rather than a FAIL: no role can do anyt
 - Req 1: confirm rejection is loud. A silent rejection is a different defect, not a fix.
 - Req 2: confirm the comment now matches what was established. **If it still generalises from one verb, it fails** — this is the third comment in this epic to assert a bound the evidence did not reach.
 - Req 3: confirm a decision was made and recorded either way, and that the matcher's single-command behaviour is unchanged.
-- Req 4: `package.json` is `0.1.19`, one-line diff.
+- Req 4: `package.json` is `0.1.20`, one-line diff.
 - Req 5: **run the suite.**
 - Run `scripts/verify-tarball.sh`.
 
 **LiveQA verifies live, after Pipeman publishes:**
 
-- **Confirm 0.1.19 is on the registry**, verifying published bytes against the audited commit per sprint 13's rule.
+- **Confirm 0.1.20 is on the registry**, verifying published bytes against the audited commit per sprint 13's rule.
 - **The hostile declaration.** In a scratch repo, declare `testCommand: "node"` and launch `dev-team-1`. Confirm it is rejected loudly and that the role has **no** test-running permission — not that it merely behaved well.
 - **The honest declaration still works.** A real project-shaped command in a downstream repo, with the role running the target's own tests, as sprint 17 established.
 - **Force a denial on dev-team if it can be done.** Its bound currently rests on argument inspection rather than observation, and two attempts to provoke one failed because the role behaved correctly. **If it cannot be forced, say so plainly** — an unobservable bound recorded as unobserved is worth more than one assumed sound.
@@ -77,7 +77,7 @@ This was correctly recorded as a finding rather than a FAIL: no role can do anyt
 ### Dependencies
 
 - **Blocks:** Nothing hard, but Fifty Mission Cap declares test commands in downstream client repos, which is precisely where a plausible shortening unscopes three roles.
-- **Blocked by:** Sprint 16 shipping as 0.1.18. **Sprint 16 goes first** — its threshold was passed twice already and deferring it again for a hole that needs a misconfiguration would repeat the mistake this project has been correcting all epic.
+- **Blocked by:** Sprints 16 and 19. **Req 1 was absorbed into sprint 19's Req 6** — the declared-test-command validator belongs with the ownership declaration's validator, in one place, by one rule. This sprint shrinks to the `:543` comment and the compound-command decision. **Sprint 16 goes first** — its threshold was passed twice already and deferring it again for a hole that needs a misconfiguration would repeat the mistake this project has been correcting all epic.
 - **External:** Worth telling Fifty Mission Cap what a safe declaration looks like before they write one per client repo.
 
 ### Team Assignments
