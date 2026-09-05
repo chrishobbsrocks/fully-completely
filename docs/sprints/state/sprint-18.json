@@ -35,6 +35,12 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=5277607"
+    },
+    {
+      "ts": "2026-09-05T20:58:59+00:00",
+      "actor": "verify-publish",
+      "event": "gitHead_check",
+      "detail": "MATCH: registry gitHead=527760799bf160135393960a7017a644a77a660a == last_shipped_commit=527760799bf160135393960a7017a644a77a660a for fully-completely@0.1.20."
     }
   ]
 }
