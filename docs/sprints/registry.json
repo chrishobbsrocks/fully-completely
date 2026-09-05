@@ -106,8 +106,8 @@
     "18": {
       "title": "Stop a declared test command from silently unscoping three roles",
       "epic": "Framework rules and distribution",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-18_stop-a-declared-test-command-from-silently-unscoping-three-roles.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-18_stop-a-declared-test-command-from-silently-unscoping-three-roles.md"
     },
     "19": {
       "title": "Let an operator declare a repository as their own, and grant a broader profile only there",
