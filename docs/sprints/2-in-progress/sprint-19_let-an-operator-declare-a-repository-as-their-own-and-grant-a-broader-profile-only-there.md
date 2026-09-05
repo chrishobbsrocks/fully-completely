@@ -26,7 +26,26 @@ Sprint 17 gave each role the permissions its job needs and was verified in a dow
 
 - *"Building should stay where a human is watching."* An interactive session already runs with full permissions and nobody audits each Bash call. A session a human launches and walks away from is functionally unattended. **The delta is not reviewed-versus-unreviewed; it is that someone could interrupt.**
 - *"A broader declaration is a scope hole, because `testCommand: \"node\"` unscopes three roles."* That is an argument for **validating** declarations, not abandoning them. Sprint 12 did not sanitise `../..`; it rejected it. A validator is checkable and a sanitiser is a puzzle.
-- *"A directory-confined broad grant is blanket bypass in a different hat."* **Refuted by this project's own findings document.** Sprint 12 tested it: `printf ... > /tmp/outside-file.txt` from inside a different working directory was blocked with the identical directory bound, *"enforced at the Bash-redirect level too, not only at the Write-tool level."* The confinement this grant rests on is verified by running, not assumed.
+- *"A directory-confined broad grant is blanket bypass in a different hat."* Sprint 12's evidence was cited against this — a redirect to an absolute path outside the working directory was blocked at the Bash level, not only the Write-tool level. **That citation was wrong, and this sprint's own round-1 audit disproved it.**
+
+**CORRECTED MID-SPRINT — the bound this sprint was argued from does not exist.** *Master Controller generalised sprint 12's verified* **redirect** *confinement into* **write** *confinement. They are not the same thing.* Dev Team demonstrated four escapes with zero permission denials: `bash -c 'echo x > /tmp/x'` (a redirect inside a quoted argument), `python3 -c "open('/tmp/x','w').write('x')"` and `node -e "require('fs').writeFileSync(...)"` (native write APIs, no redirect at all), and `curl -o /tmp/x` (a tool carrying its own write-to-path argument). The confinement check sees literal `>`/`>>` in the **outer** command Claude Code parses, and nothing past that boundary. The entry list was not exhaustively probed and almost certainly extends further.
+
+**Dev Team's handling is why this is recorded rather than patched.** The cheap response was to drop four interpreter entries and call the finding closed. They checked `curl` instead, found it reaches identically, and named the real boundary — *any tool with its own write-to-path argument sits outside what the redirect check was ever built to see.* Narrowing by four entries would have looked like a fix and changed nothing.
+
+**What actually bounds this grant, and what Master Controller has authorized it on:**
+- **Git recoverability**, except for uncommitted work and `.env`.
+- **`.env`'s own OS-level protection** (Req 3) — which is why that requirement deliberately does not use Bash pattern matching. It is the one control in this sprint built for exactly this class of escape.
+- **The operator's explicit declaration**, on their own machine, about their own property.
+
+**It is not a technical sandbox and must not be described as one.** The argument that survives is not confinement — it is that **an interactive session already has every one of these escapes and nobody audits a single Bash call in it.** This grant creates no capability that is not already exercised daily; what it removes is the property that someone *could* interrupt.
+
+**CORRECTED AGAIN, IN THE SAME AMENDMENT.** *This paragraph originally claimed the grant "adds a budget cap, loop breakers, a timeout and process-group teardown that the interactive path has never had."* **None of those four ship with this framework.** QA1 checked each against the code: no budget cap and no loop breakers exist here at all; the only timeout in the launcher is a 5-second auth probe, with none on the spawned child; and sprint 15 shipped `child.kill(signal)`, a single-PID kill whose own comment at `run-role.js:115` reads *"signals exactly the one PID it's given — never the process group."* **All four are the consuming orchestrator's driver-side controls**, which sprint 15's notes already identified as driver-side, and which `run-role.js:113` is explicitly reasoning *about* rather than providing.
+
+That clause was load-bearing: "no new capability, **and** it adds protections the interactive path lacks" is what made the trade read as favourable, and a reader would have believed the shipped artifact carried them. **It was the same generalisation this amendment opens by correcting** — Master Controller fixed redirect-into-write confinement, then attributed a consumer's controls to this framework one paragraph later.
+
+**The first half needs no second half.** That an interactive session already has these escapes, unaudited, is true, checkable, and sufficient on its own.
+
+**This makes the client-repository exclusion in Out of Scope weigh more, not less.**
 
 **The bound that actually matters is git, and it is not universal.** Every downstream gate — QA1 on the code, Pipeman as the only pusher, LiveQA on the deployed result — assumes a mistake is recoverable, and that assumption is entirely git's. **`.env` sits outside git by convention in every target project.** The file whose loss costs most is the one git cannot restore, and no gate in this framework runs early enough to prevent it.
 
