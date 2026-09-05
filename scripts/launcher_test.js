@@ -1814,6 +1814,20 @@ test('readDeclaredTestCommand: the array/root-not-an-object shapes both degrade 
   });
 });
 
+test('readDeclaredTestCommand: a bare interpreter is rejected end to end -- no permission granted (Req 6)', () => {
+  for (const bare of ['node', 'bash', 'sh', 'python3']) {
+    withScratchSettings(`{"fullyCompletely.testCommand": "${bare}"}`, (dir) => {
+      assert.strictEqual(readDeclaredTestCommand(dir), null, `a bare "${bare}" must resolve to null, not be granted`);
+    });
+  }
+});
+
+test('readDeclaredTestCommand: a real command starting with an interpreter name still works (only the BARE form is rejected)', () => {
+  withScratchSettings('{"fullyCompletely.testCommand": "node test/all.js"}', (dir) => {
+    assert.strictEqual(readDeclaredTestCommand(dir), 'node test/all.js');
+  });
+});
+
 test('run-role: headlessLaunchArgs prompt stays the final positional argument in every mode', () => {
   assert.strictEqual(headlessLaunchArgs(QA1_ROLE, 'X').slice(-1)[0], 'X');
   assert.strictEqual(headlessLaunchArgs(QA1_ROLE, 'X', { bare: true }).slice(-1)[0], 'X');
@@ -2360,6 +2374,298 @@ test('check-staleness: real regeneration only adds versions, never changes an ex
   for (const v of ['0.1.0', '0.1.1', '0.1.2', '0.1.3', '0.1.4', '0.1.5', '0.1.6', '0.1.7', '0.1.8']) {
     assert.ok(table.versions.includes(v), `regenerated table lost pre-existing version ${v}`);
   }
+});
+
+// -------------------------------------------------------------------------
+// Sprint 19: the owned-repository broad grant. isBareInterpreter,
+// isGitRepository, readOwnedRepositoryDeclaration, and
+// validateOwnedRepositoryDeclaration are all pure or read-only against a
+// scratch fixture -- no fail(), no process.exit(), safe to call directly
+// in this same process. resolveOwnedRepositoryGrant() itself DOES call
+// fail() on an invalid declaration (real process.exit -- calling it
+// in-process for the invalid case would kill this entire test run), so
+// that specific behaviour is exercised via a real subprocess instead,
+// using a scratch copy of scripts/launcher/ + .claude/agents/ so its own
+// __dirname-resolved ROOT points at the scratch fixture rather than this
+// repo's real, off-limits checkout -- the established discipline from
+// smoke_test.sh's own comment: never operate a destructive/exit-triggering
+// test against the repo this session is actually standing in.
+// -------------------------------------------------------------------------
+const {
+  isBareInterpreter,
+  isGitRepository,
+  readOwnedRepositoryDeclaration,
+  validateOwnedRepositoryDeclaration,
+  envFilesIn,
+  protectEnvFiles,
+  unprotectEnvFiles,
+  OWNED_REPOSITORY_ALLOWED_TOOLS,
+  OWNED_REPOSITORY_DISALLOWED_TOOLS,
+} = require('./launcher/run-role');
+
+test('isBareInterpreter: the exact interpreters named in the sprint file, and common neighbours, are caught', () => {
+  for (const cmd of ['node', 'bash', 'sh', 'python3', 'python', 'ruby', 'perl']) {
+    assert.ok(isBareInterpreter(cmd), `${cmd} should be caught as a bare interpreter`);
+  }
+});
+
+test('isBareInterpreter: a real script/test command is NOT caught', () => {
+  for (const cmd of ['node test/all.js', 'npm test', 'python3 -m pytest', 'bash setup.sh', './run-tests.sh']) {
+    assert.ok(!isBareInterpreter(cmd), `${cmd} should NOT be treated as a bare interpreter`);
+  }
+});
+
+test('isBareInterpreter: whitespace around a bare interpreter is still caught (matches the trim() readDeclaredTestCommand already applies)', () => {
+  assert.ok(isBareInterpreter('  node  '));
+});
+
+test('isGitRepository: true inside a real git working tree, false outside one', () => {
+  withFixture((dir) => {
+    assert.ok(!isGitRepository(dir), 'a fresh scratch directory is not a git repository yet');
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    assert.ok(isGitRepository(dir), 'after git init, the same directory should be recognised');
+  });
+});
+
+test('readOwnedRepositoryDeclaration: absent file, absent key, non-string, and blank all resolve to null', () => {
+  withFixture((dir) => {
+    assert.strictEqual(readOwnedRepositoryDeclaration(dir), null, 'no .claude/settings.local.json at all');
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), '{"unrelated": true}');
+    assert.strictEqual(readOwnedRepositoryDeclaration(dir), null, 'key absent');
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), '{"fullyCompletely.ownedRepository": true}');
+    assert.strictEqual(readOwnedRepositoryDeclaration(dir), null, 'non-string value');
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), '{"fullyCompletely.ownedRepository": "   "}');
+    assert.strictEqual(readOwnedRepositoryDeclaration(dir), null, 'blank string');
+  });
+});
+
+test('readOwnedRepositoryDeclaration: a real declared value is returned, trimmed', () => {
+  withFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), `{"fullyCompletely.ownedRepository": "  ${dir}  "}`);
+    assert.strictEqual(readOwnedRepositoryDeclaration(dir), dir);
+  });
+});
+
+test('validateOwnedRepositoryDeclaration: Req 1 adversarial sweep -- every input that should be refused, is', () => {
+  withFixture((dir) => {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    const parent = path.dirname(dir);
+
+    assert.strictEqual(validateOwnedRepositoryDeclaration('relative/path', dir).valid, false, 'a relative path must be refused');
+    assert.strictEqual(
+      validateOwnedRepositoryDeclaration(path.join(dir, 'does-not-exist'), dir).valid,
+      false,
+      "a path that doesn't resolve to anything real must be refused"
+    );
+    assert.strictEqual(validateOwnedRepositoryDeclaration(parent, dir).valid, false, 'a declaration naming the PARENT of the repository must be refused');
+    assert.strictEqual(
+      validateOwnedRepositoryDeclaration(path.join(parent, 'some-sibling-dir'), dir).valid,
+      false,
+      "a declaration naming a SIBLING (a path the operator doesn't own here) must be refused"
+    );
+
+    // Symlink: a link elsewhere that happens to point AT the real
+    // directory must still resolve to the real, canonical path and pass
+    // -- but a link that's simply a DIFFERENT path than what was declared
+    // (pointing at a sibling, not this repo) must fail, covered above by
+    // realpath resolution already differing. Directly exercised here: a
+    // symlink TO this repo, declared BY that symlink path, still matches
+    // once both sides are realpath-resolved.
+    const symlinkPath = path.join(parent, `fc-symlink-${Date.now()}`);
+    fs.symlinkSync(dir, symlinkPath);
+    try {
+      const viaSymlink = validateOwnedRepositoryDeclaration(symlinkPath, dir);
+      assert.strictEqual(viaSymlink.valid, true, 'a symlink that genuinely resolves to this exact repository should be accepted');
+    } finally {
+      fs.unlinkSync(symlinkPath);
+    }
+
+    // Non-git directory: a path that's real, absolute, and matches exactly
+    // -- but isn't a git repository.
+    const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-non-git-'));
+    try {
+      assert.strictEqual(validateOwnedRepositoryDeclaration(nonGitDir, nonGitDir).valid, false, 'a non-git directory must be refused (Req 2)');
+    } finally {
+      fs.rmSync(nonGitDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('validateOwnedRepositoryDeclaration: the exact matching declaration, in a real git repo, is accepted', () => {
+  withFixture((dir) => {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    const verdict = validateOwnedRepositoryDeclaration(dir, dir);
+    assert.strictEqual(verdict.valid, true, verdict.reason);
+  });
+});
+
+test('validateOwnedRepositoryDeclaration: every refusal names what was wrong, not a generic message', () => {
+  withFixture((dir) => {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    const relative = validateOwnedRepositoryDeclaration('relative/path', dir);
+    assert.match(relative.reason, /not an absolute path/);
+    const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-non-git-msg-'));
+    try {
+      const notGit = validateOwnedRepositoryDeclaration(nonGitDir, nonGitDir);
+      assert.match(notGit.reason, /not a real git repository/);
+    } finally {
+      fs.rmSync(nonGitDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('headlessPermissionArgs: no ownership declaration leaves dev-team-1/2 and qa1 on exactly today\'s narrow profile (the default is unchanged, Req 1)', () => {
+  withFixture((dir) => {
+    for (const role of RUN_ROLE_ROLES.filter((r) => ['dev-team-1', 'dev-team-2', 'qa1'].includes(r.id))) {
+      const allowedIdx = headlessPermissionArgs(role, dir).indexOf('--allowedTools');
+      const allowed = headlessPermissionArgs(role, dir)[allowedIdx + 1];
+      for (const broad of OWNED_REPOSITORY_ALLOWED_TOOLS) {
+        assert.ok(!allowed.includes(broad), `${role.id}: no declaration should never grant ${broad}`);
+      }
+    }
+  });
+});
+
+test('headlessPermissionArgs: a valid ownership declaration grants the broad profile, including the git-push carve-out', () => {
+  withFixture((dir) => {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), JSON.stringify({ 'fullyCompletely.ownedRepository': dir }));
+    const args = headlessPermissionArgs(RUN_ROLE_ROLES.find((r) => r.id === 'dev-team-1'), dir);
+    const allowedIdx = args.indexOf('--allowedTools');
+    const allowed = args[allowedIdx + 1];
+    for (const broad of OWNED_REPOSITORY_ALLOWED_TOOLS) {
+      assert.ok(allowed.includes(broad), `expected the broad grant to include ${broad}`);
+    }
+    const disallowedIdx = args.indexOf('--disallowedTools');
+    assert.ok(disallowedIdx !== -1, 'a valid grant must also carry the disallowedTools carve-out');
+    const disallowed = args[disallowedIdx + 1];
+    for (const carveOut of OWNED_REPOSITORY_DISALLOWED_TOOLS) {
+      assert.ok(disallowed.includes(carveOut), `expected the carve-out ${carveOut} to be present even under the broad grant (Req 7)`);
+    }
+  });
+});
+
+test('headlessPermissionArgs: a role NOT eligible for the grant (pipeman) ignores a declaration entirely (Req 7)', () => {
+  withFixture((dir) => {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), JSON.stringify({ 'fullyCompletely.ownedRepository': dir }));
+    const before = headlessPermissionArgs(RUN_ROLE_ROLES.find((r) => r.id === 'pipeman'));
+    const after = headlessPermissionArgs(RUN_ROLE_ROLES.find((r) => r.id === 'pipeman'), dir);
+    assert.deepStrictEqual(before, after, "pipeman's profile must be identical whether or not a declaration exists");
+  });
+});
+
+test('envFilesIn: finds .env and .env.* variants, ignores unrelated dotfiles, does not recurse', () => {
+  withFixture((dir) => {
+    fs.writeFileSync(path.join(dir, '.env'), 'A=1');
+    fs.writeFileSync(path.join(dir, '.env.local'), 'B=2');
+    fs.writeFileSync(path.join(dir, '.environment-notes.txt'), 'not an env file');
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'irrelevant');
+    fs.mkdirSync(path.join(dir, 'sub'));
+    fs.writeFileSync(path.join(dir, 'sub', '.env'), 'C=3');
+    const found = envFilesIn(dir).map((f) => path.basename(f)).sort();
+    assert.deepStrictEqual(found, ['.env', '.env.local']);
+  });
+});
+
+if (process.platform !== 'darwin' && process.platform !== 'linux') {
+  console.log(`SKIP .env protection tests: no known immutable-flag mechanism on ${process.platform} (see run-role.js's own comment)`);
+} else {
+  test('protectEnvFiles/unprotectEnvFiles: .env becomes unwritable and undeletable, stays readable, and is fully restored after (Req 3, real OS enforcement)', () => {
+    withFixture((dir) => {
+      fs.writeFileSync(path.join(dir, '.env'), 'SECRET=abc123');
+      const { protected: protectedFiles, failed } = protectEnvFiles(dir);
+      try {
+        assert.deepStrictEqual(failed, [], 'protection should be verified, not just attempted, on a supported platform');
+        assert.strictEqual(protectedFiles.length, 1);
+
+        // Read still works.
+        assert.strictEqual(fs.readFileSync(path.join(dir, '.env'), 'utf8'), 'SECRET=abc123');
+
+        // Write, via a real subprocess (not this process's own fs calls,
+        // which run as the file's owner and could behave differently from
+        // how an actual spawned Bash command would) fails.
+        const writeAttempt = spawnSync('sh', ['-c', `printf overwritten > ${JSON.stringify(path.join(dir, '.env'))}`]);
+        assert.notStrictEqual(writeAttempt.status, 0, 'a write to the protected .env must fail');
+        assert.strictEqual(fs.readFileSync(path.join(dir, '.env'), 'utf8'), 'SECRET=abc123', '.env content must be unchanged after the failed write');
+
+        // Delete fails too -- the harder case, since POSIX deletion is
+        // normally a directory-permission operation, not a file one; this
+        // is exactly why Req 3 needed the immutable flag rather than a
+        // plain chmod.
+        const deleteAttempt = spawnSync('rm', [path.join(dir, '.env')]);
+        assert.notStrictEqual(deleteAttempt.status, 0, 'deleting the protected .env must fail');
+        assert.ok(fs.existsSync(path.join(dir, '.env')), '.env must still exist after the failed delete');
+      } finally {
+        unprotectEnvFiles(protectedFiles);
+      }
+
+      // After unprotecting, normal operations must work again -- proving
+      // this is a scoped, reversible grant-duration protection, not a
+      // permanent lockout of the operator's own file.
+      fs.writeFileSync(path.join(dir, '.env'), 'restored');
+      assert.strictEqual(fs.readFileSync(path.join(dir, '.env'), 'utf8'), 'restored');
+    });
+  });
+
+  test('protectEnvFiles: no .env* files present is not a failure -- nothing to protect, nothing fails', () => {
+    withFixture((dir) => {
+      const { protected: protectedFiles, failed } = protectEnvFiles(dir);
+      assert.deepStrictEqual(protectedFiles, []);
+      assert.deepStrictEqual(failed, []);
+    });
+  });
+}
+
+// resolveOwnedRepositoryGrant()'s fail()-triggering path: a real
+// subprocess, against a scratch COPY of scripts/launcher/ and
+// .claude/agents/ (never this repo's own real checkout -- see this
+// section's own opening comment), so its __dirname-resolved ROOT points
+// at the scratch fixture and an invalid declaration there is exactly what
+// a real downstream project's own invalid declaration would look like.
+function withScratchLauncherInstall(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-scratch-launcher-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'scripts', 'launcher'), { recursive: true });
+    for (const entry of fs.readdirSync(path.join(REPO_ROOT, 'scripts', 'launcher'))) {
+      if (!entry.endsWith('.js')) continue;
+      fs.copyFileSync(path.join(REPO_ROOT, 'scripts', 'launcher', entry), path.join(dir, 'scripts', 'launcher', entry));
+    }
+    fs.mkdirSync(path.join(dir, '.claude', 'agents'), { recursive: true });
+    for (const entry of fs.readdirSync(path.join(REPO_ROOT, '.claude', 'agents'))) {
+      fs.copyFileSync(path.join(REPO_ROOT, '.claude', 'agents', entry), path.join(dir, '.claude', 'agents', entry));
+    }
+    fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('resolveOwnedRepositoryGrant (real subprocess): an invalid declaration refuses the whole headless launch, naming what was wrong, before claude is ever spawned', () => {
+  withScratchLauncherInstall((scratchRoot) => {
+    fs.mkdirSync(path.join(scratchRoot, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(scratchRoot, '.claude', 'settings.local.json'),
+      JSON.stringify({ 'fullyCompletely.ownedRepository': 'not/an/absolute/path' })
+    );
+    withFakeClaude(({ dir: fakeClaudeDir, readArgv }) => {
+      const promptFile = path.join(scratchRoot, 'prompt.txt');
+      fs.writeFileSync(promptFile, 'irrelevant, refused before this would matter');
+      const result = spawnSync(
+        process.execPath,
+        [path.join(scratchRoot, 'scripts', 'launcher', 'run-role.js'), '--headless', '--agent', 'dev-team-1', '--prompt-file', promptFile],
+        { cwd: scratchRoot, encoding: 'utf8', env: { ...process.env, PATH: fakeClaudeDir } }
+      );
+      assert.strictEqual(result.status, LAUNCHER_FAILURE_EXIT_CODE);
+      assert.match(result.stderr, /not an absolute path/);
+      assert.strictEqual(result.stdout, '');
+      assert.deepStrictEqual(readArgv(), [], 'claude must never be spawned once the declaration is refused');
+    });
+  });
 });
 
 if (failures > 0) {

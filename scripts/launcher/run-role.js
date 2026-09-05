@@ -443,6 +443,80 @@ function readPromptFile(filePath) {
 //   - master-controller: writes a sprint file (covered by acceptEdits
 //     alone, confirmed directly in sprint 14 — not inferred, and
 //     re-confirmed unregressed here). Unchanged by this sprint.
+// Sprint 19, Req 1/5: the broad grant, opt-in per repository via
+// resolveOwnedRepositoryGrant() above. Every entry here is a real,
+// non-empty command prefix -- established by running it (this sprint's
+// own build) that a bare `Bash(*)` (or the bare tool name `Bash` with no
+// pattern at all) genuinely disables Claude Code's own separate,
+// path-based redirect-confinement check: a write to an absolute path
+// OUTSIDE the working directory succeeded, with zero permission_denials,
+// under exactly that shape -- reproduced three times. A real, specific
+// prefix pattern, even a broad one like `Bash(git *)`, does NOT have this
+// effect -- confirmed directly, same test, same result every time: the
+// identical "Output redirection ... was blocked" refusal Req 5 exists to
+// re-verify. So this list is deliberately never a wildcard, no matter how
+// broad -- that's not a stylistic choice, it's the only shape that keeps
+// Req 5's confinement bound intact at all.
+//
+// Named as incomplete, on purpose (same principle as Req 6's own bare-
+// interpreter list): this covers the toolchain surface actually reported
+// (npx, a local node_modules binary, curl, git) plus the common
+// neighbours of each, not literally every build tool that exists. A
+// project whose toolchain needs something not listed here will still see
+// a denial -- that denial is honest, not a defect this list claims to
+// have eliminated. `git push` is carried in DISALLOWED, not left out of
+// ALLOWED, so `git` stays broadly usable for review/build purposes while
+// Req 7's own invariant ("Pipeman remains the only pusher") holds exactly
+// as before -- confirmed directly: `Bash(git *)` allowed plus
+// `Bash(git push *)` disallowed lets `git status` through and denies
+// `git push` outright, in the same real test.
+// `node *`, `python3 *`, `bash *`, `sh *` are deliberately included here,
+// even though a BARE, argument-less declaration of any one of them is
+// exactly what Req 6's readDeclaredTestCommand() validation exists to
+// reject. The two are different trust boundaries, not a contradiction:
+// Req 6 guards a value a TARGET PROJECT's own tracked settings file can
+// declare -- reachable by anyone with write access to that file, with no
+// separate act of trust from the operator running the agent. This list
+// only ever applies once the operator has ALREADY made the highest-trust
+// act available in this framework (declaring the repository their own,
+// validated above) -- at that point, `node`/`bash`/`python3` are exactly
+// the core toolchain commands a real build needs (`node scripts/build.js`,
+// `bash setup.sh`, `python3 setup.py`), and excluding them would defeat
+// this sprint's own motivating case. The risk they carry is bounded the
+// same way every other entry here is: directory confinement (verified
+// below, Req 5), git recoverability for everything except `.env` (Req 3)
+// and uncommitted work (Req 4, accepted and named).
+const OWNED_REPOSITORY_ALLOWED_TOOLS = [
+  'Bash(npm *)',
+  'Bash(npx *)',
+  'Bash(node *)',
+  'Bash(./node_modules/.bin/*)',
+  'Bash(yarn *)',
+  'Bash(pnpm *)',
+  'Bash(curl *)',
+  'Bash(wget *)',
+  'Bash(python3 *)',
+  'Bash(python *)',
+  'Bash(pip *)',
+  'Bash(pip3 *)',
+  'Bash(pytest *)',
+  'Bash(bash *)',
+  'Bash(sh *)',
+  'Bash(make *)',
+  'Bash(go *)',
+  'Bash(cargo *)',
+  'Bash(git *)',
+  // Found by running the full reversed-motivating-case check, not
+  // reasoned in advance: `mkdir && printf && chmod +x && ./local-binary`
+  // was denied specifically at `chmod +x` -- a compound command gets
+  // approved part by part, and chmod, needed to make a just-built local
+  // script executable before ./node_modules/.bin/* (already on this
+  // list) can run it, wasn't covered. Added after that real denial, not
+  // before it.
+  'Bash(chmod *)',
+];
+const OWNED_REPOSITORY_DISALLOWED_TOOLS = ['Bash(git push *)'];
+
 const HEADLESS_PERMISSION_PROFILES = {
   'master-controller': {
     disallowedTools: [],
@@ -452,16 +526,19 @@ const HEADLESS_PERMISSION_PROFILES = {
     disallowedTools: [],
     allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
     needsTestCommand: true,
+    eligibleForOwnedRepositoryGrant: true,
   },
   'dev-team-2': {
     disallowedTools: [],
     allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
     needsTestCommand: true,
+    eligibleForOwnedRepositoryGrant: true,
   },
   qa1: {
     disallowedTools: ['Edit', 'Write'],
     allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
     needsTestCommand: true,
+    eligibleForOwnedRepositoryGrant: true,
   },
   pipeman: {
     disallowedTools: [],
@@ -526,10 +603,289 @@ function readDeclaredTestCommand(root = ROOT) {
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
   const value = parsed['fullyCompletely.testCommand'];
+  const command = typeof value === 'string' && value.trim() ? value.trim() : null;
+  // Sprint 19, Req 6: a bare interpreter here would become
+  // `Bash(<command> *)`, which matches `node -e "<anything>"` exactly as
+  // readily as a real test invocation -- rejected rather than granted,
+  // printed loudly (a silently-dropped declaration would look identical
+  // to a typo, with no way to tell them apart) and treated as "not
+  // declared" (no test-running permission at all) rather than the
+  // launcher guessing at what was actually meant.
+  if (command && isBareInterpreter(command)) {
+    console.error(
+      `WARNING: .vscode/settings.json declares "fullyCompletely.testCommand": "${command}" -- a bare ` +
+        'interpreter with no script/arguments. Rejected: this would grant Bash access to that interpreter\'s ' +
+        'own inline-code flags (e.g. `node -e`), which is arbitrary code execution, not a scoped test ' +
+        'command. No test-running permission granted for this session. Declare the real command instead, ' +
+        'e.g. "node test/all.js" or "npm test".'
+    );
+    return null;
+  }
+  return command;
+}
+
+// Sprint 19: bare interpreters that, combined with the trailing ` *`
+// wildcard readDeclaredTestCommand()'s caller appends, yield arbitrary
+// code execution (`Bash(node *)` matches `node -e "<anything>"` just as
+// readily as it matches a real test invocation). Named explicitly rather
+// than pattern-matched, and named as incomplete: this catches the exact
+// shape Req 6 names (a bare interpreter, no arguments) and nothing more —
+// `node --experimental-x script.js` or a wrapper script that itself execs
+// an interpreter are NOT caught here. Sprint 18's own remaining items
+// (the compound-command `; echo $?` question) are a separate, larger
+// problem, deliberately left there rather than folded in here.
+const BARE_INTERPRETERS = new Set(['node', 'bash', 'sh', 'zsh', 'python3', 'python', 'python2', 'ruby', 'perl', 'php']);
+
+function isBareInterpreter(command) {
+  return BARE_INTERPRETERS.has(command.trim());
+}
+
+// Sprint 19, Req 2: a plain, direct check — `git rev-parse
+// --is-inside-work-tree` prints exactly "true" and exits 0 inside a real
+// git working tree (including a linked worktree), anything else (not a
+// repo, git missing, a bare repo) is treated as "not a git repository"
+// rather than distinguishing why, since every one of those cases gets the
+// identical refusal here.
+function isGitRepository(dir) {
+  const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir, encoding: 'utf8' });
+  return !result.error && result.status === 0 && result.stdout.trim() === 'true';
+}
+
+// Sprint 19, Req 1: reads the RAW declared value from .claude/settings.local.json
+// -- Claude Code's own established convention for personal, machine-local,
+// git-ignored-by-convention settings (this repo's own .npmignore already
+// excludes its own copy of this exact path, for exactly that reason: "not
+// part of the framework being installed, and install.js never reads this
+// path either" -- still true here; install.js does not manage this file).
+// Deliberately NOT .vscode/settings.json: that file is typically tracked
+// by git and travels with the repository to everyone who clones it, which
+// is the opposite of what an ownership declaration must be -- an act by
+// THIS operator, on THIS machine, never inherited by a colleague, a CI
+// runner, or a client who receives the same repository. Returns the raw
+// string (or null if absent/malformed/empty) -- validation of what that
+// string actually means happens in resolveOwnedRepositoryGrant() below,
+// mirroring readDeclaredTestCommand()'s own read/validate split.
+function readOwnedRepositoryDeclaration(root) {
+  const settingsPath = path.join(root, '.claude', 'settings.local.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(settingsPath, 'utf8');
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = parseJsonc(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const value = parsed['fullyCompletely.ownedRepository'];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function headlessPermissionArgs(role) {
+// Sprint 19, Req 1/2: the pure validator -- "validated, never sanitised."
+// No fail() call anywhere in this function, deliberately: it only ever
+// returns a verdict, `{ valid: true }` or `{ valid: false, reason: "..." }`,
+// which is what makes it directly unit-testable with fake declarations and
+// fake roots, without needing a subprocess just to avoid a real
+// process.exit() firing mid test-run. resolveOwnedRepositoryGrant() below
+// is the thin wrapper that turns an invalid verdict into a real, loud
+// refusal; this function itself never exits anything.
+//
+// Checked, in order, each one a real adversarial case named in the sprint
+// file: a relative path is refused outright (ambiguous relative to what,
+// in a headless invocation with no interactive cwd to anchor it); then
+// both the declared path and the real root are resolved with
+// fs.realpathSync (resolves symlinks AND normalises case on
+// case-insensitive filesystems -- macOS's default HFS+/APFS included) and
+// compared for exact equality, which is what catches a declaration naming
+// a parent directory, a sibling, a symlink pointing elsewhere, or a
+// same-looking path with different casing; then, only once the path
+// itself is proven correct, whether it's a real git repository (Req 2) --
+// checked last so a non-git refusal never gets confused with a path
+// mismatch.
+function validateOwnedRepositoryDeclaration(declared, root) {
+  if (!path.isAbsolute(declared)) {
+    return {
+      valid: false,
+      reason:
+        `.claude/settings.local.json declares "fullyCompletely.ownedRepository": "${declared}", which is not ` +
+        'an absolute path. A relative declaration is ambiguous (relative to what?) and is refused rather than ' +
+        'guessed -- declare the full absolute path to this exact repository, or remove the key entirely to ' +
+        'use the default, narrower profile.',
+    };
+  }
+
+  let realDeclared;
+  try {
+    realDeclared = fs.realpathSync(declared);
+  } catch (err) {
+    return {
+      valid: false,
+      reason:
+        `.claude/settings.local.json declares "fullyCompletely.ownedRepository": "${declared}", which does not ` +
+        `resolve to a real, existing path (${err.code || err.message}). Refused -- correct the path or remove ` +
+        'the key to use the default, narrower profile.',
+    };
+  }
+  const realRoot = fs.realpathSync(root);
+  if (realDeclared !== realRoot) {
+    return {
+      valid: false,
+      reason:
+        `.claude/settings.local.json declares "fullyCompletely.ownedRepository": "${declared}" (resolves to ` +
+        `${realDeclared}), which does not match the repository this session is actually running in ` +
+        `(${realRoot}). A declaration must name this exact repository -- not a parent directory, not a ` +
+        'sibling, not a symlink pointing elsewhere -- refused rather than granted against the wrong scope.',
+    };
+  }
+
+  if (!isGitRepository(root)) {
+    return {
+      valid: false,
+      reason:
+        `.claude/settings.local.json declares "${root}" as an owned repository, but it is not a real git ` +
+        "repository. Refused, not warned: git is the recovery boundary every downstream gate in this " +
+        "framework assumes (QA1's audit, Pipeman's push, LiveQA's live test), and outside a repository none " +
+        'of them runs early enough to prevent a loss. Run this inside a real git repository, or remove the ' +
+        'declaration to use the default, narrower profile.',
+    };
+  }
+
+  return { valid: true };
+}
+
+// The thin, I/O-and-fail() wrapper: not opted in -> { granted: false };
+// invalid -> fail() (real process.exit, never returns); valid -> { granted: true }.
+function resolveOwnedRepositoryGrant(root) {
+  const declared = readOwnedRepositoryDeclaration(root);
+  if (!declared) return { granted: false };
+  const verdict = validateOwnedRepositoryDeclaration(declared, root);
+  if (!verdict.valid) {
+    fail(verdict.reason);
+  }
+  return { granted: true };
+}
+
+// Sprint 19, Req 4: warns, then proceeds -- a deliberate choice, not a
+// silent default. Refusing on a dirty tree was considered and rejected:
+// dev-team's entire job is writing code, which means uncommitted changes
+// are dev-team's OWN normal working state, not an anomaly -- a hard
+// refusal here would make the broad grant nearly unusable for the exact
+// role it exists for. The real risk this Req names (two sessions
+// interleaving in one checkout) is not created by this grant and is not
+// solved by refusing to launch; it is a pre-existing risk of any
+// concurrent editing, and the operator's own ownership declaration already
+// accepts responsibility for how the repository is used. What the warning
+// buys: a real, timestamped line in the launcher's own stderr (visible to
+// whatever orchestrator or terminal is watching it, even though the AGENT
+// itself has no channel to read it back) naming exactly what was already
+// uncommitted before this session touched anything -- useful after the
+// fact, when two sessions' changes turn out tangled, to tell "already
+// there" apart from "this session's own work."
+function warnIfUncommittedWork(root) {
+  const result = spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' });
+  if (result.error || result.status !== 0) return; // not a git repo, or git unavailable -- resolveOwnedRepositoryGrant already refused that case
+  const dirty = result.stdout.split('\n').filter((line) => line.trim());
+  if (dirty.length > 0) {
+    console.error(
+      `WARNING: ${root} has ${dirty.length} uncommitted change(s) before this session started: ` +
+        `${dirty.slice(0, 10).join(', ')}${dirty.length > 10 ? ', ...' : ''}. Proceeding anyway (sprint 19, ` +
+        "Req 4's own deliberate choice) -- recorded here so a later tangle between two sessions can be traced."
+    );
+  }
+}
+
+// Sprint 19, Req 3: .env* protection at the OS level, not via Claude
+// Code's own Bash allow/deny patterns -- established by running it that
+// those patterns cannot express "block writes to this specific file
+// regardless of which command does it" (a disallowedTools entry
+// targeting the redirect target, e.g. "Bash(printf * > .env*)", was
+// tested directly and does NOT block "printf x > .env"; there is no
+// generic file-target restriction in that system, only command-prefix
+// matching). What DOES work, confirmed by running it: the filesystem's
+// own immutable flag. macOS's `chflags uchg` blocks writes AND deletes
+// with a real OS-level EPERM, regardless of which of several different
+// commands (printf redirect, rm) attempts either -- confirmed directly,
+// three ways, in the same real test. Linux's `chattr +i` is the
+// documented equivalent (ext2/3/4) but was NOT independently verified in
+// this build -- no Linux environment was available -- named as an
+// unverified-but-expected case, not claimed as confirmed. Windows has no
+// equivalent single command; `attrib +r` is meaningfully weaker (does not
+// reliably block deletion) and is not attempted here -- named as a real
+// gap rather than papered over with a partial mechanism presented as
+// protection.
+function envFilesIn(root) {
+  let entries;
+  try {
+    entries = fs.readdirSync(root);
+  } catch {
+    return [];
+  }
+  return entries.filter((name) => name === '.env' || name.startsWith('.env.')).map((name) => path.join(root, name));
+}
+
+function protectCommandFor(platform) {
+  if (platform === 'darwin') return (file) => spawnSync('chflags', ['uchg', file]);
+  if (platform === 'linux') return (file) => spawnSync('chattr', ['+i', file]);
+  return null;
+}
+
+function unprotectCommandFor(platform) {
+  if (platform === 'darwin') return (file) => spawnSync('chflags', ['nouchg', file]);
+  if (platform === 'linux') return (file) => spawnSync('chattr', ['-i', file]);
+  return null;
+}
+
+// Verifies protection actually took, rather than trusting the protecting
+// command's own exit code -- some `chattr`-shaped tools silently no-op on
+// filesystems that don't support the flag (overlay filesystems, tmpfs,
+// some container/CI setups), which would otherwise look identical to a
+// real success. A real write attempt is the only proof that means
+// anything here.
+function verifyEnvProtected(file) {
+  const probe = spawnSync('sh', ['-c', `printf x >> ${JSON.stringify(file)} 2>/dev/null`]);
+  return probe.status !== 0;
+}
+
+// Returns the list of files it actually protected (for unprotectEnvFiles
+// to reverse later) and the list it could NOT verify as protected. Never
+// throws; the caller decides what a non-empty `failed` list means for the
+// grant as a whole.
+function protectEnvFiles(root) {
+  const protect = protectCommandFor(process.platform);
+  const files = envFilesIn(root);
+  const protected_ = [];
+  const failed = [];
+  for (const file of files) {
+    if (!protect) {
+      failed.push(file);
+      continue;
+    }
+    protect(file);
+    if (verifyEnvProtected(file)) {
+      protected_.push(file);
+    } else {
+      failed.push(file);
+    }
+  }
+  return { protected: protected_, failed };
+}
+
+function unprotectEnvFiles(files) {
+  const unprotect = unprotectCommandFor(process.platform);
+  if (!unprotect) return;
+  for (const file of files) {
+    unprotect(file);
+  }
+}
+
+// `root` defaults to the module-level ROOT (real production behaviour)
+// but is overridable, same reasoning as readDeclaredTestCommand() above,
+// so tests can point the ownership check at a scratch directory instead
+// of this repo's own real .claude/settings.local.json.
+function headlessPermissionArgs(role, root = ROOT) {
   const profile = HEADLESS_PERMISSION_PROFILES[role.id];
   if (!profile) {
     // Every ROLES entry (agents.js) has a profile above; this only fires
@@ -538,19 +894,34 @@ function headlessPermissionArgs(role) {
     throw new Error(`No headless permission profile defined for role '${role.id}'.`);
   }
   const allowedTools = [...profile.allowedTools];
+  const disallowedTools = [...profile.disallowedTools];
   if (profile.needsTestCommand) {
-    const testCommand = readDeclaredTestCommand();
+    const testCommand = readDeclaredTestCommand(root);
     // A trailing ` *` wildcard, matching every other multi-word pattern in
     // this file — confirmed (sprint 17) to also match the bare command
     // with no trailing arguments at all, not just one-or-more.
     if (testCommand) allowedTools.push(`Bash(${testCommand} *)`);
   }
+  // Sprint 19, Req 1: only roles marked eligible above are even checked —
+  // pipeman, liveqa, and master-controller keep exactly their sprint 17
+  // profiles regardless of any declaration present, matching Req 7 ("every
+  // downstream gate stays exactly as it is"). resolveOwnedRepositoryGrant()
+  // itself calls fail() and never returns if a declaration IS present but
+  // invalid, so reaching the `if` below with `{ granted: false }` means
+  // either nothing was declared, or the role isn't eligible to receive it.
+  if (profile.eligibleForOwnedRepositoryGrant) {
+    const grant = resolveOwnedRepositoryGrant(root);
+    if (grant.granted) {
+      allowedTools.push(...OWNED_REPOSITORY_ALLOWED_TOOLS);
+      disallowedTools.push(...OWNED_REPOSITORY_DISALLOWED_TOOLS);
+    }
+  }
   const args = ['--permission-mode', 'acceptEdits'];
   if (allowedTools.length) {
     args.push('--allowedTools', allowedTools.join(' '));
   }
-  if (profile.disallowedTools.length) {
-    args.push('--disallowedTools', profile.disallowedTools.join(','));
+  if (disallowedTools.length) {
+    args.push('--disallowedTools', disallowedTools.join(','));
   }
   return args;
 }
@@ -619,7 +990,48 @@ async function runHeadless(role, { sprintId, promptFilePath, bare, settings }) {
   // the default, so a caller reaching for it gets exactly what it asked
   // for rather than a silent tie-break the other way.
   const prompt = promptFilePath ? readPromptFile(promptFilePath) : headlessPrompt(role, sprintId);
-  const result = await spawnClaude(headlessLaunchArgs(role, prompt, { bare, settings }));
+  // headlessLaunchArgs() -> headlessPermissionArgs() already resolved and
+  // validated any ownership declaration as part of building the args
+  // above (fail()ing, and exiting, if one was present but invalid) — this
+  // re-resolves the same, already-validated grant only to decide whether
+  // the .env/uncommitted-work side effects below apply. Redundant, not
+  // unsafe: resolveOwnedRepositoryGrant() is pure validation, no side
+  // effects of its own, so calling it twice costs a little work, never a
+  // different answer.
+  const profile = HEADLESS_PERMISSION_PROFILES[role.id];
+  const grant = profile && profile.eligibleForOwnedRepositoryGrant ? resolveOwnedRepositoryGrant(ROOT) : { granted: false };
+  let protectedEnvFiles = [];
+  if (grant.granted) {
+    warnIfUncommittedWork(ROOT);
+    // Sprint 19, Req 3: refuses the whole launch rather than proceeding
+    // with an unprotected .env — established by running it that Claude
+    // Code's own Bash allow/deny patterns cannot express "block writes to
+    // this file" at all (see OWNED_REPOSITORY_ALLOWED_TOOLS's own
+    // comment), so this OS-level step is the ONLY protection Req 3 has;
+    // silently granting the broad profile anyway if it fails would be
+    // exactly the unearned confidence this sprint exists to avoid. No
+    // .env* files present at all is not a failure (protectEnvFiles()
+    // naturally returns an empty `failed` list in that case) — most
+    // target projects will have none, and the broad grant proceeds
+    // normally.
+    const protection = protectEnvFiles(ROOT);
+    protectedEnvFiles = protection.protected;
+    if (protection.failed.length > 0) {
+      fail(
+        `Could not verify .env protection for: ${protection.failed.join(', ')}. Refusing the broad ` +
+          "owned-repository grant rather than proceeding with these files unprotected — this platform's " +
+          'immutable-flag mechanism (chflags on macOS, chattr on Linux) may be unavailable or unsupported ' +
+          'on this filesystem. Remove the ownedRepository declaration to fall back to the narrower default ' +
+          'profile, or protect these files by hand before retrying.'
+      );
+    }
+  }
+  let result;
+  try {
+    result = await spawnClaude(headlessLaunchArgs(role, prompt, { bare, settings }));
+  } finally {
+    if (protectedEnvFiles.length > 0) unprotectEnvFiles(protectedEnvFiles);
+  }
   // Req 10, documented per its own requirement: once claude has actually
   // been spawned, its exit code is passed through UNMODIFIED (null, from
   // a signal, still maps to 0 — pre-existing behavior from before this
@@ -775,4 +1187,14 @@ module.exports = {
   installOrphanGuard,
   readDeclaredTestCommand,
   HEADLESS_PERMISSION_PROFILES,
+  isBareInterpreter,
+  isGitRepository,
+  readOwnedRepositoryDeclaration,
+  validateOwnedRepositoryDeclaration,
+  resolveOwnedRepositoryGrant,
+  envFilesIn,
+  protectEnvFiles,
+  unprotectEnvFiles,
+  OWNED_REPOSITORY_ALLOWED_TOOLS,
+  OWNED_REPOSITORY_DISALLOWED_TOOLS,
 };
