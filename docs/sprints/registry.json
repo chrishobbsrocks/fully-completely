@@ -94,8 +94,8 @@
     "16": {
       "title": "Make the baseline table maintain itself, and stop tests breaking on its drift",
       "epic": "Honest reporting",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-16_make-the-baseline-table-maintain-itself-and-stop-tests-breaking-on-its-drift.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-16_make-the-baseline-table-maintain-itself-and-stop-tests-breaking-on-its-drift.md"
     },
     "17": {
       "title": "Give each headless role the permissions its actual job needs, not this repo's",

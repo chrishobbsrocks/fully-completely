@@ -2,7 +2,7 @@
 id: 16
 title: "Make the baseline table maintain itself, and stop tests breaking on its drift"
 epic: "Honest reporting"
-status: todo
+status: in_progress
 created: 2026-09-04T02:30:00+00:00
 ---
 
