@@ -129,4 +129,16 @@ function main() {
   console.log(`Wrote ${OUTPUT_PATH}`);
 }
 
-main();
+// Sprint 16, Req 1: only runs main() (which hits the real network and
+// writes the real file) when this file is executed directly, the same
+// guard run-role.js already uses — required as a module (by
+// check-staleness.js below, and by launcher_test.js's own tests), this
+// triggers none of that. compareVersions/publishedVersions are exported
+// so the staleness check reuses the exact same version ordering and the
+// exact same "ask the registry, not a local guess" source of truth,
+// rather than a second, potentially-diverging copy of either.
+if (require.main === module) {
+  main();
+}
+
+module.exports = { compareVersions, publishedVersions };

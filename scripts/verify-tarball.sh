@@ -89,6 +89,15 @@ BASELINE_PATH_COUNT="$(node -e "
 ")" || fail "scripts/baselines/user-owned-content.json in the tarball is not well-formed or has no path entries"
 echo "  present, $BASELINE_PATH_COUNT path(s) covered"
 
+echo "== confirming the baseline table itself is current, not just present (sprint 16) =="
+# Run from the UNPACKED tarball's own copy, not this repo's live source --
+# same reasoning as the launcher-file diff check above: this verifies what
+# actually ships, and check-staleness.js resolves both generate.js and the
+# table it reads relative to its own location, so running the tarball's
+# copy exercises the tarball's copy end to end.
+node "$UNPACKED/scripts/baselines/check-staleness.js" || \
+  fail "scripts/baselines/user-owned-content.json is stale -- see the message above for which version(s) are missing"
+
 echo
 echo "TARBALL VERIFICATION PASSED"
 echo "  tarball:  $TARBALL_PATH"

@@ -1,9 +1,13 @@
 {
   "name": "fully-completely",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Six-role Claude Code sprint workflow, with enforcement mechanics that actually block a sprint from closing until both QA gates pass.",
   "bin": {
     "fully-completely": "scripts/install.js"
+  },
+  "scripts": {
+    "baselines:generate": "node scripts/baselines/generate.js",
+    "baselines:check": "node scripts/baselines/check-staleness.js"
   },
   "repository": {
     "type": "git",

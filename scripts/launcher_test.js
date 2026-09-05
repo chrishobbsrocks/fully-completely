@@ -617,23 +617,42 @@ test('install.js: a genuinely different CLAUDE.md is reported as a conflict', ()
 // -------------------------------------------------------------------------
 const REAL_RUN_ROLE_JS = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'launcher', 'run-role.js'), 'utf8');
 const REAL_QA1_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'qa1.md'), 'utf8');
-// dev-team-1.md, not qa1.md, liveqa.md, pipeman.md, or master-controller.md,
-// for the tests below that assert a file matches the COMMITTED baseline
-// table (scripts/baselines/user-owned-content.json, generated from
-// published tarballs, still topped out at 0.1.8): every one of those four
-// has since been edited (qa1.md: sprints 9, 11, 12; liveqa.md: sprints 11,
-// 12; pipeman.md: sprint 11; master-controller.md: sprint 14's own Req 4)
-// ahead of whatever publish next regenerates that table, so none of them
-// currently match any published version — a test proving "matches a
-// published baseline" needs a file this repo hasn't since changed.
-// dev-team-1.md (and dev-team-2.md, an equally-valid alternative) are
-// untouched since 0.1.8; confirmed by hash before relying on it here. This
-// exact swap has now been needed four times across sprints 11-14 — each
-// time because the previously-held-out file got a real, warranted edit —
-// and it will keep recurring until something regenerates the baseline
-// table at publish time, still Pipeman's job, not fixed by chasing the
-// symptom here again.
-const REAL_DEV_TEAM_1_MD = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'agents', 'dev-team-1.md'), 'utf8');
+// Sprint 16, Req 3: picked DYNAMICALLY, not hardcoded to any one file.
+// The tests below need a real tracked path whose CURRENT on-disk content
+// matches an entry in the real, committed baseline table -- for four
+// sprints running (11 through 17), that was hardcoded to a single "held
+// out" file (qa1.md, then pipeman.md, then master-controller.md, then
+// dev-team-1.md), and every single time, a later sprint legitimately
+// edited that exact file and broke these tests again. Regenerating the
+// table every release (this same sprint's Req 1/2) fixes staleness, but
+// not this: even a same-day, uncommitted edit to whichever file was
+// hardcoded would still fail these tests immediately, regenerated table
+// or not. So instead of asserting a fact about one specific file, this
+// asks the table itself which tracked path currently qualifies, and uses
+// whichever one does -- true by construction, not by nobody having
+// touched the right file lately. Throws (not skips) if literally every
+// tracked path has been edited since the last regeneration, since that
+// would mean these tests have nothing real left to exercise.
+function findBaselineProvenFile() {
+  const table = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'baselines', 'user-owned-content.json'), 'utf8'));
+  for (const relPath of table.paths) {
+    const absPath = path.join(REPO_ROOT, relPath);
+    if (!fs.existsSync(absPath)) continue;
+    const content = fs.readFileSync(absPath, 'utf8');
+    const hashesForPath = Object.values(table.files[relPath] || {});
+    if (hashesForPath.includes(fcHash(content))) {
+      return { relPath, content };
+    }
+  }
+  throw new Error(
+    "launcher_test.js: no tracked path's current content matches any entry in the committed baseline table " +
+      '(scripts/baselines/user-owned-content.json) -- every tracked file has apparently been edited since the ' +
+      'table was last regenerated. Run `npm run baselines:generate` before running these tests.'
+  );
+}
+
+const BASELINE_PROVEN = findBaselineProvenFile();
+const BASELINE_PROVEN_CONTENT = BASELINE_PROVEN.content;
 const REAL_CURRENT_VERSION = require(path.join(REPO_ROOT, 'package.json')).version;
 
 function writeVersionMarker(dir, version) {
@@ -908,7 +927,10 @@ test('install.js: removing a dead gitignore line preserves the file\'s original 
 // rather than re-deriving it.
 // -------------------------------------------------------------------------
 const QA1_REL_PATH = path.join('.claude', 'agents', 'qa1.md');
-const DEV_TEAM_1_REL_PATH = path.join('.claude', 'agents', 'dev-team-1.md');
+// path.join() (not the raw table string) so this is a NATIVE path exactly
+// like every other *_REL_PATH constant here, even though the table itself
+// always stores forward-slash keys (generate.js's own documented choice).
+const BASELINE_PROVEN_REL_PATH = path.join(...BASELINE_PROVEN.relPath.split('/'));
 
 test('install.js: a fresh install writes a manifest recording every tracked user-owned file it wrote', () => {
   withFixture((dir) => {
@@ -1008,31 +1030,28 @@ test('install.js: a file matching a published baseline, with no manifest at all,
   // installs could ever have one. This repo's real, committed baseline
   // table (scripts/baselines/user-owned-content.json, generated from the
   // real published tarballs) is Req 1's second source of proof:
-  // dev-team-1.md's content here is exactly what shipped through
-  // 0.1.8, so it must now be recognised and brought current, not
-  // conflicted. (dev-team-1.md, not qa1.md, liveqa.md, pipeman.md, or
-  // master-controller.md — all four have been edited across sprints
-  // 11-14 ahead of whatever publish next regenerates this table, so none
-  // of their current bytes are on record there right now; see
-  // REAL_DEV_TEAM_1_MD's own comment above. baselineHashesFor()
+  // BASELINE_PROVEN's content (whichever tracked path currently matches
+  // the table — see findBaselineProvenFile()'s own comment above, sprint
+  // 16) is exactly what shipped in some real release, so it must now be
+  // recognised and brought current, not conflicted. baselineHashesFor()
   // matches against any published version, not just the one in the
   // fixture's version marker, so 0.1.4 here doesn't need to be the
-  // specific version whose hash matches.)
+  // specific version whose hash matches.
   withFixture((dir) => {
     writeVersionMarker(dir, '0.1.4');
-    const devTeam1Path = path.join(dir, DEV_TEAM_1_REL_PATH);
-    fs.mkdirSync(path.dirname(devTeam1Path), { recursive: true });
-    fs.writeFileSync(devTeam1Path, REAL_DEV_TEAM_1_MD);
+    const baselineProvenPath = path.join(dir, BASELINE_PROVEN_REL_PATH);
+    fs.mkdirSync(path.dirname(baselineProvenPath), { recursive: true });
+    fs.writeFileSync(baselineProvenPath, BASELINE_PROVEN_CONTENT);
 
     const output = runInstall(dir);
 
     assert.doesNotMatch(output, /Conflicts/, 'a baseline-proven file must not conflict');
-    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/dev-team-1\.md/);
-    assert.strictEqual(fs.readFileSync(devTeam1Path, 'utf8'), REAL_DEV_TEAM_1_MD);
+    assert.match(output, new RegExp(`Already present, unchanged[\\s\\S]*${BASELINE_PROVEN.relPath.replace(/\//g, '\\/').replace(/\./g, '\\.')}`));
+    assert.strictEqual(fs.readFileSync(baselineProvenPath, 'utf8'), BASELINE_PROVEN_CONTENT);
     const manifest = readManifest(dir);
     assert.strictEqual(
-      manifest[DEV_TEAM_1_REL_PATH],
-      fcHash(REAL_DEV_TEAM_1_MD),
+      manifest[BASELINE_PROVEN_REL_PATH],
+      fcHash(BASELINE_PROVEN_CONTENT),
       'a baseline-proven file must be recorded in the manifest as it is upgraded (Req 3), so the next run no longer needs the baseline sweep at all'
     );
   });
@@ -1110,35 +1129,33 @@ test('install.js: a valid manifest with no entry for a given user-owned file res
 test('install.js: a manifest entry stored under a backslash key never matches a real relPath, even by coincidence (Req 2/3)', () => {
   withFixture((dir) => {
     writeVersionMarker(dir, '0.1.0');
-    const devTeam1Path = path.join(dir, DEV_TEAM_1_REL_PATH);
-    fs.mkdirSync(path.dirname(devTeam1Path), { recursive: true });
-    fs.writeFileSync(devTeam1Path, REAL_DEV_TEAM_1_MD); // byte-identical to what we'd write
+    const baselineProvenPath = path.join(dir, BASELINE_PROVEN_REL_PATH);
+    fs.mkdirSync(path.dirname(baselineProvenPath), { recursive: true });
+    fs.writeFileSync(baselineProvenPath, BASELINE_PROVEN_CONTENT); // byte-identical to what we'd write
     // A manifest recording the CORRECT hash, but under the Windows-shaped
     // key a broken pre-fix run would have used instead of the real
-    // forward-slash one. manifestHashFor() normalizes the QUERY key
-    // (built from the real, forward-slash relPath on this machine), so it
-    // must look for '.claude/agents/dev-team-1.md' and find nothing here.
-    // dev-team-1.md, not qa1.md (this test's original fixture file), nor
-    // pipeman.md or master-controller.md, its later replacements — all
-    // three have live edits across sprints 11-14, so none is on record
-    // in the committed baseline table until a future publish regenerates
-    // it; see REAL_DEV_TEAM_1_MD's own comment above.
-    writeManifest(dir, { '.claude\\agents\\dev-team-1.md': fcHash(REAL_DEV_TEAM_1_MD) });
+    // forward-slash one. manifestHashFor() normalizes the QUERY key (built
+    // from the real, forward-slash relPath on this machine), so it must
+    // look for BASELINE_PROVEN.relPath (whichever tracked path currently
+    // matches the table — sprint 16, see findBaselineProvenFile()'s own
+    // comment above) and find nothing here.
+    const backslashKey = BASELINE_PROVEN.relPath.replace(/\//g, '\\');
+    writeManifest(dir, { [backslashKey]: fcHash(BASELINE_PROVEN_CONTENT) });
 
     const output = runInstall(dir);
 
-    // No manifest match — but REAL_DEV_TEAM_1_MD also matches a real published
+    // No manifest match — but BASELINE_PROVEN_CONTENT also matches a real published
     // baseline, so Req 1's second proof source correctly takes over and
     // this still resolves to "already present", not a conflict. That's
     // the safe fallback working, not a failure to detect the stale key.
-    assert.match(output, /Already present, unchanged[\s\S]*\.claude\/agents\/dev-team-1\.md/);
+    assert.match(output, new RegExp(`Already present, unchanged[\\s\\S]*${BASELINE_PROVEN.relPath.replace(/\//g, '\\/').replace(/\./g, '\\.')}`));
     assert.doesNotMatch(output, /Conflicts/);
     const manifest = readManifest(dir);
     assert.ok(
-      !Object.prototype.hasOwnProperty.call(manifest, '.claude\\agents\\dev-team-1.md'),
+      !Object.prototype.hasOwnProperty.call(manifest, backslashKey),
       'the stale backslash key must not survive into the new manifest'
     );
-    assert.strictEqual(manifest[DEV_TEAM_1_REL_PATH], fcHash(REAL_DEV_TEAM_1_MD), 'the real, forward-slash key must be written instead');
+    assert.strictEqual(manifest[BASELINE_PROVEN_REL_PATH], fcHash(BASELINE_PROVEN_CONTENT), 'the real, forward-slash key must be written instead');
   });
 });
 
@@ -2281,6 +2298,69 @@ if (process.platform === 'win32') {
     );
   });
 }
+
+// -------------------------------------------------------------------------
+// scripts/baselines/check-staleness.js (Sprint 16, Req 1/5): the pure
+// comparison function, tested in both directions with fake data -- no
+// network call, no real baselines file, deterministic every run. Req 5's
+// own instruction: "A check that can only say PASS retires the manual
+// habit that was working." The real, live-registry-backed run (both
+// directions, against the actual table) was also done for real during
+// this sprint's build -- see the sprint's own commit message -- this is
+// the permanent, repeatable regression guard for the comparison logic
+// itself, independent of network/registry state.
+// -------------------------------------------------------------------------
+const { missingVersions } = require('./baselines/check-staleness');
+
+test('check-staleness: a table covering everything published reports no missing versions', () => {
+  const published = ['0.1.0', '0.1.1', '0.1.2'];
+  assert.deepStrictEqual(missingVersions(published, published), []);
+});
+
+test('check-staleness: a table missing recent versions names exactly the missing ones, in order (the real, current-repo shape before this sprint)', () => {
+  const covered = ['0.1.0', '0.1.1', '0.1.2', '0.1.3', '0.1.4', '0.1.5', '0.1.6', '0.1.7', '0.1.8'];
+  const published = [...covered, '0.1.9', '0.1.10', '0.1.11'];
+  assert.deepStrictEqual(missingVersions(covered, published), ['0.1.9', '0.1.10', '0.1.11']);
+});
+
+test('check-staleness: missing versions are sorted numerically, not lexically (0.1.9 before 0.1.10)', () => {
+  // Deliberately fed out of order and lexically-would-sort-wrong, to
+  // confirm this reuses generate.js's own compareVersions rather than a
+  // second, naive string sort that would put "0.1.10" before "0.1.9".
+  const covered = ['0.1.0'];
+  const published = ['0.1.0', '0.1.10', '0.1.2', '0.1.9', '0.1.1'];
+  assert.deepStrictEqual(missingVersions(covered, published), ['0.1.1', '0.1.2', '0.1.9', '0.1.10']);
+});
+
+test('check-staleness: covering through N-1 is correct, not a gap -- a table missing only the version about to publish reports nothing missing', () => {
+  // Req 1's own named risk: the version currently in package.json, not
+  // yet on the registry, must never be demanded. Modeled here by simply
+  // never including it in `published` (exactly what publishedVersions()
+  // itself would return pre-publish, since it reads the real registry) --
+  // there is no separate "subtract one" logic in missingVersions() to get
+  // wrong, which this test exists to keep true.
+  const covered = ['0.1.0', '0.1.1', '0.1.2'];
+  const published = ['0.1.0', '0.1.1', '0.1.2']; // 0.1.3 not yet published, correctly absent
+  assert.deepStrictEqual(missingVersions(covered, published), []);
+});
+
+test('check-staleness: an empty table against real published versions reports everything missing, not a crash', () => {
+  assert.deepStrictEqual(missingVersions([], ['0.1.0', '0.1.1']), ['0.1.0', '0.1.1']);
+});
+
+test('check-staleness: real regeneration only adds versions, never changes an existing hash (this sprint\'s own real run)', () => {
+  // This sprint actually regenerated scripts/baselines/user-owned-content.json
+  // for real (0.1.0-0.1.8 -> 0.1.0-0.1.17) as part of its own build -- see
+  // the sprint's commit message for the before/after diff proving every
+  // pre-existing (path, version) hash was unchanged. Re-asserted here as a
+  // narrower, permanent regression guard: the table on disk right now
+  // must at least contain every version the original 0.1.8-era table
+  // covered, so a future accidental truncation is caught.
+  const table = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'baselines', 'user-owned-content.json'), 'utf8'));
+  for (const v of ['0.1.0', '0.1.1', '0.1.2', '0.1.3', '0.1.4', '0.1.5', '0.1.6', '0.1.7', '0.1.8']) {
+    assert.ok(table.versions.includes(v), `regenerated table lost pre-existing version ${v}`);
+  }
+});
 
 if (failures > 0) {
   console.error(`\n${failures} test(s) failed.`);
