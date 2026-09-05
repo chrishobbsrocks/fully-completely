@@ -86,7 +86,13 @@ function headlessScaffold(roleLabel, sprintId) {
     `wait for a reply that will never come.\n\n` +
     `Read docs/sprints/registry.json for sprint ${sprintId}'s current file and phase, then read ` +
     `that sprint file directly, and docs/sprints/state/sprint-${sprintId}.json if it already ` +
-    `exists — both are on disk and current. This message does not restate anything from either.`
+    `exists — both are on disk and current. This message does not restate anything from either.\n\n` +
+    `Sprint 18, Req 2, decided explicitly rather than left as an incidental cost: when you run a ` +
+    `Bash command your permission profile already covers, run exactly that command. Do not append ` +
+    'shell chaining like ; echo $? or && echo done. Your allowed/disallowed patterns match the ' +
+    'whole command line, not a leading sub-command, so appending anything after a covered command ' +
+    'turns it into a different, uncovered line — one that is correctly denied even though the ' +
+    'command itself was fine — and costs you a wasted denial and a retry.'
   );
 }
 

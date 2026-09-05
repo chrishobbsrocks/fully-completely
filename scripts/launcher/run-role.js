@@ -512,23 +512,34 @@ function readPromptFile(filePath) {
 // most literal, careless shell redirect, not a filesystem sandbox, and
 // this comment previously overstated it as the latter.
 //
-// What ACTUALLY bounds this grant, stated accurately: git recoverability
-// for anything inside this repository except uncommitted work (Req 4,
-// accepted and named) and .env (Req 3's own OS-level, command-independent
-// protection -- the one file this sprint protects against exactly this
-// class of escape, which is why Req 3 doesn't rely on Bash pattern
-// matching at all). Nothing here stops a sufficiently determined or
-// badly-instructed agent from writing somewhere else on the filesystem
-// entirely, the same residual risk npx/npm already carry the moment
-// arbitrary package execution is granted at all (a package's own code has
-// exactly the same file-system reach as `node -e` does -- there was never
-// a narrower boundary there either). The real control this sprint relies
-// on, honestly: the operator's own explicit, auditable act of declaring
-// this repository theirs, on their own machine, trusting the agent with
-// it -- not a technical sandbox this file can prove airtight. See Out of
-// Scope: this was never meant to make an unattended broad grant safe in
-// someone else's accounts, and this finding is exactly why that line is
-// there.
+// What ACTUALLY bounds this grant, stated accurately as four legs, not as
+// "directory confinement" (sprint 18, Req 3 -- retiring that phrase
+// everywhere it implied more than sprint 12 established):
+//   1. Git recoverability for anything inside this repository except
+//      uncommitted work (Req 4, accepted and named) and .env.
+//   2. .env's own OS-level, command-independent protection (Req 3) -- the
+//      one file this sprint protects against exactly this class of
+//      escape, which is why Req 3 doesn't rely on Bash pattern matching
+//      at all.
+//   3. `Bash(git push *)` carried in OWNED_REPOSITORY_DISALLOWED_TOOLS
+//      below, so nothing this grant touches leaves this machine except
+//      through Pipeman's own separate, narrower profile -- confirmed
+//      directly (see headlessPermissionArgs' own test coverage) that the
+//      carve-out survives even under the broad grant.
+//   4. The operator's own explicit, auditable act of declaring this
+//      repository theirs, on their own machine, trusting the agent with
+//      it.
+// Nothing here stops a sufficiently determined or badly-instructed agent
+// from writing somewhere else on the filesystem entirely, the same
+// residual risk npx/npm already carry the moment arbitrary package
+// execution is granted at all (a package's own code has exactly the same
+// file-system reach as `node -e` does -- there was never a narrower
+// boundary there either). Legs 1, 2 and 3 are real, checkable properties
+// of this grant; leg 4 is a trust decision, not a sandbox, and it is what
+// the first three ultimately rest on -- not a technical sandbox this file
+// can prove airtight. See Out of Scope: this was never meant to make an
+// unattended broad grant safe in someone else's accounts, and this finding
+// is exactly why that line is there.
 const OWNED_REPOSITORY_ALLOWED_TOOLS = [
   'Bash(npm *)',
   'Bash(npx *)',
@@ -1003,8 +1014,15 @@ function headlessPermissionArgs(role, root = ROOT) {
   if (profile.needsTestCommand) {
     const testCommand = readDeclaredTestCommand(root);
     // A trailing ` *` wildcard, matching every other multi-word pattern in
-    // this file — confirmed (sprint 17) to also match the bare command
-    // with no trailing arguments at all, not just one-or-more.
+    // this file. Sprint 18, correcting this comment: sprint 17 confirmed
+    // by running it that this pattern also matches the bare command with
+    // no trailing arguments at all, not just one-or-more -- but only for
+    // git, a real verb, in a real push. The equivalent npm case was
+    // proxied by an `npm pack` request that Pipeman declined as outside
+    // its own process, so no permission decision for a bare `npm` was
+    // ever actually reached. Confirmed: git. Inferred, not established:
+    // npm and every other entry on this list -- this comment used to
+    // claim both on the evidence of one.
     if (testCommand) allowedTools.push(`Bash(${testCommand} *)`);
   }
   // Sprint 19, Req 1: only roles marked eligible above are even checked —

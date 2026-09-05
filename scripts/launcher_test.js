@@ -1882,8 +1882,13 @@ test('prompts: headlessPrompt never composes verdicts, notes, requirements or ph
   const prompt = headlessPrompt(QA1_ROLE, 11);
   // A loose but meaningful proxy: the prompt must be short (a pointer, not
   // a summary) and must not contain the kind of language that would only
-  // appear if state had been paraphrased in.
-  assert.ok(prompt.length < 900, `expected a short pointer, got ${prompt.length} chars`);
+  // appear if state had been paraphrased in. Threshold raised in sprint 18
+  // (Req 2) to fit the fixed, cross-role compound-command instruction
+  // headlessScaffold() now always carries -- real, permanent guidance, not
+  // a sign that sprint content is leaking in, which is what the length
+  // check is actually a proxy for; the word-list check right below is the
+  // one that actually guards against that.
+  assert.ok(prompt.length < 1400, `expected a short pointer, got ${prompt.length} chars`);
   for (const word of ['PASS', 'FAIL', 'CONDITIONAL', 'verdict:', 'Requirement 1']) {
     assert.ok(!prompt.includes(word), `must not restate state content ("${word}" found)`);
   }
@@ -1897,6 +1902,14 @@ test('prompts: headlessPrompt has no literal " character (single argv element vi
 
 test('prompts: headlessPrompt throws for an unknown role rather than silently building a broken prompt', () => {
   assert.throws(() => headlessPrompt({ id: 'not-a-real-role', label: 'Nope' }, 1), /No headless pointer/);
+});
+
+test('prompts: headlessPrompt tells every role not to append shell chaining like ; echo $? (sprint 18, Req 2 -- the compound-command cost, decided rather than left implicit)', () => {
+  for (const role of RUN_ROLE_ROLES) {
+    const prompt = headlessPrompt(role, 9);
+    assert.match(prompt, /echo \$\?/, `${role.id}: must be told not to append shell chaining after a scoped command`);
+    assert.match(prompt, /wasted denial/, `${role.id}: must state why -- the permission matcher covers the whole command line, not a leading sub-command`);
+  }
 });
 
 // CLI-level tests: spawn the real script as a real OS process (Req 1 — a
