@@ -882,14 +882,26 @@ function warnIfUncommittedWork(root) {
 // own immutable flag. macOS's `chflags uchg` blocks writes AND deletes
 // with a real OS-level EPERM, regardless of which of several different
 // commands (printf redirect, rm) attempts either -- confirmed directly,
-// three ways, in the same real test. Linux's `chattr +i` is the
-// documented equivalent (ext2/3/4) but was NOT independently verified in
-// this build -- no Linux environment was available -- named as an
-// unverified-but-expected case, not claimed as confirmed. Windows has no
-// equivalent single command; `attrib +r` is meaningfully weaker (does not
-// reliably block deletion) and is not attempted here -- named as a real
-// gap rather than papered over with a partial mechanism presented as
-// protection.
+// three ways, in the same real test.
+//
+// Linux's `chattr +i` is no longer an unverified claim -- CI running this
+// suite on ubuntu-latest, plus independent testing in a real Linux
+// container (Docker, Ubuntu 22.04) after that CI run went red, confirmed
+// it both ways. It blocks write and delete exactly like chflags does,
+// fully reversible -- but only when the process holds CAP_LINUX_IMMUTABLE.
+// Without it, chattr +i fails outright ("Operation not permitted", exit
+// 1) and sets nothing. That capability is not the Linux default: an
+// ordinary unprivileged user lacks it, and so does root inside a plain
+// `docker run` with no `--cap-add` -- confirmed as identical failures,
+// not assumed to be. So on Linux this protection is real when this
+// process has the capability, and per Req 3's own design (see
+// verifyEnvProtected() below) the launch refuses the whole broad grant
+// rather than proceeding unprotected when it does not -- the mechanism
+// is not weaker than documented, it is simply not always available, and
+// the code does not pretend otherwise. Windows has no equivalent single
+// command; `attrib +r` is meaningfully weaker (does not reliably block
+// deletion) and is not attempted here -- named as a real gap rather than
+// papered over with a partial mechanism presented as protection.
 function envFilesIn(root) {
   let entries;
   try {
@@ -915,11 +927,30 @@ function unprotectCommandFor(platform) {
 // Verifies protection actually took, rather than trusting the protecting
 // command's own exit code -- some `chattr`-shaped tools silently no-op on
 // filesystems that don't support the flag (overlay filesystems, tmpfs,
-// some container/CI setups), which would otherwise look identical to a
-// real success. A real write attempt is the only proof that means
+// some container/CI setups) or lack the privilege to set it at all (Linux
+// requires CAP_LINUX_IMMUTABLE for chattr +i -- confirmed by running it,
+// in a real container, both as an unprivileged user and as root in a
+// default `docker run`; neither has it, both fail identically, and both
+// would otherwise look identical to a real success if this trusted the
+// exit code alone). A real write attempt is the only proof that means
 // anything here.
+//
+// The probe command is `: >> file`, not a probe that actually writes a
+// byte -- found and fixed while building this function's own test
+// coverage for the no-capability case: `printf x >> file` used to be the
+// probe, and on an UNPROTECTED file (exactly the case this function
+// exists to detect) that redirect's own append-open succeeds and writes
+// the byte for real, before the caller ever learns protection failed.
+// The shell would still have opened the file for append and left the
+// stray "x" behind. `:` is POSIX's own no-op builtin; the append
+// redirect still forces the same open() the caller cares about (which
+// fails with EPERM on a genuinely protected file, exit 1, exactly like
+// the write probe did), but `:` itself writes nothing, so a successful
+// open on an unprotected file leaves the content untouched -- confirmed
+// directly: protected -> exit 1, content unchanged; unprotected -> exit
+// 0, content unchanged either way.
 function verifyEnvProtected(file) {
-  const probe = spawnSync('sh', ['-c', `printf x >> ${JSON.stringify(file)} 2>/dev/null`]);
+  const probe = spawnSync('sh', ['-c', `: >> ${JSON.stringify(file)} 2>/dev/null`]);
   return probe.status !== 0;
 }
 
@@ -1094,9 +1125,12 @@ async function runHeadless(role, { sprintId, promptFilePath, bare, settings }) {
       fail(
         `Could not verify .env protection for: ${protection.failed.join(', ')}. Refusing the broad ` +
           "owned-repository grant rather than proceeding with these files unprotected — this platform's " +
-          'immutable-flag mechanism (chflags on macOS, chattr on Linux) may be unavailable or unsupported ' +
-          'on this filesystem. Remove the ownedRepository declaration to fall back to the narrower default ' +
-          'profile, or protect these files by hand before retrying.'
+          'immutable-flag mechanism (chflags on macOS, chattr on Linux) may be unavailable or unsupported on ' +
+          'this filesystem, OR (confirmed as the common Linux case) this process may lack the privilege the ' +
+          "mechanism needs -- chattr +i requires CAP_LINUX_IMMUTABLE, which an ordinary user's shell does not " +
+          'have and which a container does not grant by default even to root. Run as a user/context with that ' +
+          'capability if you need the broad grant on Linux, remove the ownedRepository declaration to fall ' +
+          'back to the narrower default profile, or protect these files by hand before retrying.'
       );
     }
   }

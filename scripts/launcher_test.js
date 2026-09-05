@@ -2581,48 +2581,140 @@ test('envFilesIn: finds .env and .env.* variants, ignores unrelated dotfiles, do
 if (process.platform !== 'darwin' && process.platform !== 'linux') {
   console.log(`SKIP .env protection tests: no known immutable-flag mechanism on ${process.platform} (see run-role.js's own comment)`);
 } else {
-  test('protectEnvFiles/unprotectEnvFiles: .env becomes unwritable and undeletable, stays readable, and is fully restored after (Req 3, real OS enforcement)', () => {
-    withFixture((dir) => {
-      fs.writeFileSync(path.join(dir, '.env'), 'SECRET=abc123');
-      const { protected: protectedFiles, failed } = protectEnvFiles(dir);
-      try {
-        assert.deepStrictEqual(failed, [], 'protection should be verified, not just attempted, on a supported platform');
-        assert.strictEqual(protectedFiles.length, 1);
+  // Post-ship CI finding (this sprint's own round-1-through-3 comments
+  // said Linux's chattr +i was "expected but unverified" -- CI running on
+  // ubuntu-latest is what actually verified it, and what it verified is
+  // narrower than assumed). Confirmed independently, in a real Linux
+  // container: `chattr +i` requires CAP_LINUX_IMMUTABLE, which an
+  // ordinary unprivileged user does not have, and which a default `docker
+  // run` does not grant even to root inside the container -- both fail
+  // identically, "Operation not permitted", exit 1. The matching positive
+  // was also confirmed: with that capability explicitly added
+  // (--cap-add=LINUX_IMMUTABLE), chattr +i behaves exactly as documented
+  // -- blocks a real write and a real delete, fully reversible. So the
+  // mechanism itself is real and now verified both ways, it just is not
+  // available to every process that might run this launcher on Linux.
+  //
+  // That is exactly the scenario Req 3's own verifyEnvProtected() exists
+  // to catch by attempting a real write rather than trusting an exit
+  // code, and runHeadless() already refuses the whole broad grant when it
+  // fires rather than degrading to "granted but unprotected" -- see that
+  // refusal's own coverage further below. This test's job is to prove the
+  // mechanism works when it can run for real; asserting that
+  // unconditionally on Linux was the CI defect, not the mechanism -- so
+  // probe capability first, honestly, the same discipline this whole area
+  // already follows, and skip loudly rather than fail in the one place
+  // that is expected.
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-env-protect-probe-'));
+  fs.writeFileSync(path.join(probeDir, '.env'), 'probe');
+  const probe = protectEnvFiles(probeDir);
+  unprotectEnvFiles(probe.protected);
+  fs.rmSync(probeDir, { recursive: true, force: true });
 
-        // Read still works.
-        assert.strictEqual(fs.readFileSync(path.join(dir, '.env'), 'utf8'), 'SECRET=abc123');
+  if (probe.failed.length > 0) {
+    console.log(
+      `SKIP .env real-enforcement test: this process could not verify ${process.platform}'s immutable-flag ` +
+        'mechanism (likely missing CAP_LINUX_IMMUTABLE or equivalent privilege -- confirmed as the cause in a real ' +
+        'Linux container, both as an unprivileged user and as root without the capability explicitly added). This ' +
+        "is exactly the case runHeadless() refuses the broad grant for rather than degrading; see that refusal's " +
+        'own real-subprocess coverage below.'
+    );
+  } else {
+    test('protectEnvFiles/unprotectEnvFiles: .env becomes unwritable and undeletable, stays readable, and is fully restored after (Req 3, real OS enforcement)', () => {
+      withFixture((dir) => {
+        fs.writeFileSync(path.join(dir, '.env'), 'SECRET=abc123');
+        const { protected: protectedFiles, failed } = protectEnvFiles(dir);
+        try {
+          assert.deepStrictEqual(failed, [], 'protection should be verified, not just attempted, when this process can actually exercise the mechanism');
+          assert.strictEqual(protectedFiles.length, 1);
 
-        // Write, via a real subprocess (not this process's own fs calls,
-        // which run as the file's owner and could behave differently from
-        // how an actual spawned Bash command would) fails.
-        const writeAttempt = spawnSync('sh', ['-c', `printf overwritten > ${JSON.stringify(path.join(dir, '.env'))}`]);
-        assert.notStrictEqual(writeAttempt.status, 0, 'a write to the protected .env must fail');
-        assert.strictEqual(fs.readFileSync(path.join(dir, '.env'), 'utf8'), 'SECRET=abc123', '.env content must be unchanged after the failed write');
+          // Read still works.
+          assert.strictEqual(fs.readFileSync(path.join(dir, '.env'), 'utf8'), 'SECRET=abc123');
 
-        // Delete fails too -- the harder case, since POSIX deletion is
-        // normally a directory-permission operation, not a file one; this
-        // is exactly why Req 3 needed the immutable flag rather than a
-        // plain chmod.
-        const deleteAttempt = spawnSync('rm', [path.join(dir, '.env')]);
-        assert.notStrictEqual(deleteAttempt.status, 0, 'deleting the protected .env must fail');
-        assert.ok(fs.existsSync(path.join(dir, '.env')), '.env must still exist after the failed delete');
-      } finally {
-        unprotectEnvFiles(protectedFiles);
-      }
+          // Write, via a real subprocess (not this process's own fs calls,
+          // which run as the file's owner and could behave differently from
+          // how an actual spawned Bash command would) fails.
+          const writeAttempt = spawnSync('sh', ['-c', `printf overwritten > ${JSON.stringify(path.join(dir, '.env'))}`]);
+          assert.notStrictEqual(writeAttempt.status, 0, 'a write to the protected .env must fail');
+          assert.strictEqual(fs.readFileSync(path.join(dir, '.env'), 'utf8'), 'SECRET=abc123', '.env content must be unchanged after the failed write');
 
-      // After unprotecting, normal operations must work again -- proving
-      // this is a scoped, reversible grant-duration protection, not a
-      // permanent lockout of the operator's own file.
-      fs.writeFileSync(path.join(dir, '.env'), 'restored');
-      assert.strictEqual(fs.readFileSync(path.join(dir, '.env'), 'utf8'), 'restored');
+          // Delete fails too -- the harder case, since POSIX deletion is
+          // normally a directory-permission operation, not a file one; this
+          // is exactly why Req 3 needed the immutable flag rather than a
+          // plain chmod.
+          const deleteAttempt = spawnSync('rm', [path.join(dir, '.env')]);
+          assert.notStrictEqual(deleteAttempt.status, 0, 'deleting the protected .env must fail');
+          assert.ok(fs.existsSync(path.join(dir, '.env')), '.env must still exist after the failed delete');
+        } finally {
+          unprotectEnvFiles(protectedFiles);
+        }
+
+        // After unprotecting, normal operations must work again -- proving
+        // this is a scoped, reversible grant-duration protection, not a
+        // permanent lockout of the operator's own file.
+        fs.writeFileSync(path.join(dir, '.env'), 'restored');
+        assert.strictEqual(fs.readFileSync(path.join(dir, '.env'), 'utf8'), 'restored');
+      });
     });
-  });
+  }
 
   test('protectEnvFiles: no .env* files present is not a failure -- nothing to protect, nothing fails', () => {
     withFixture((dir) => {
       const { protected: protectedFiles, failed } = protectEnvFiles(dir);
       assert.deepStrictEqual(protectedFiles, []);
       assert.deepStrictEqual(failed, []);
+    });
+  });
+
+  test('runHeadless (real subprocess): when .env protection cannot be verified (chflags/chattr no-ops -- the faithful stand-in for an unprivileged Linux process lacking CAP_LINUX_IMMUTABLE, confirmed above), the broad grant is refused rather than silently degraded to unprotected', () => {
+    withScratchLauncherInstall((scratchRoot) => {
+      execFileSync('git', ['init', '-q'], { cwd: scratchRoot });
+      fs.mkdirSync(path.join(scratchRoot, '.claude'), { recursive: true });
+      fs.writeFileSync(path.join(scratchRoot, '.claude', 'settings.local.json'), JSON.stringify({ 'fullyCompletely.ownedRepository': scratchRoot }));
+      fs.writeFileSync(path.join(scratchRoot, '.env'), 'SECRET=abc123');
+
+      // A no-op protect command standing in for what an unprivileged Linux
+      // process actually experiences. verifyEnvProtected() never trusts
+      // the protect command's own exit code (see its own comment) -- it
+      // attempts a real write -- so a no-op is a faithful stand-in
+      // regardless of what exit status it happens to return; this one
+      // returns non-zero, matching the real "Operation not permitted"
+      // observed in testing.
+      const noOpProtectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-noop-protect-'));
+      try {
+        for (const name of ['chflags', 'chattr']) {
+          fs.writeFileSync(path.join(noOpProtectDir, name), '#!/bin/sh\nexit 1\n');
+          fs.chmodSync(path.join(noOpProtectDir, name), 0o755);
+        }
+        withFakeClaude(({ dir: fakeClaudeDir, readArgv }) => {
+          const promptFile = path.join(scratchRoot, 'prompt.txt');
+          fs.writeFileSync(promptFile, 'irrelevant, refused before this would matter');
+          const result = spawnSync(
+            process.execPath,
+            [path.join(scratchRoot, 'scripts', 'launcher', 'run-role.js'), '--headless', '--agent', 'dev-team-1', '--prompt-file', promptFile],
+            {
+              cwd: scratchRoot,
+              encoding: 'utf8',
+              // noOpProtectDir and fakeClaudeDir first, so they shadow the
+              // real chflags/chattr/claude; the real PATH stays appended so
+              // git (needed by isGitRepository) and node's own shell-outs
+              // still resolve normally.
+              env: { ...process.env, PATH: [noOpProtectDir, fakeClaudeDir, process.env.PATH].join(path.delimiter) },
+            }
+          );
+          assert.strictEqual(result.status, LAUNCHER_FAILURE_EXIT_CODE);
+          assert.match(result.stderr, /Could not verify \.env protection/);
+          assert.strictEqual(result.stdout, '');
+          assert.deepStrictEqual(readArgv(), [], 'claude must never be spawned when .env protection cannot be verified');
+          assert.strictEqual(
+            fs.readFileSync(path.join(scratchRoot, '.env'), 'utf8'),
+            'SECRET=abc123',
+            '.env must be untouched -- this refuses the launch, it does not attempt to write to .env itself'
+          );
+        });
+      } finally {
+        fs.rmSync(noOpProtectDir, { recursive: true, force: true });
+      }
     });
   });
 }
