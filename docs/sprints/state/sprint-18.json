@@ -1,11 +1,11 @@
 {
   "id": 18,
   "title": "Stop a declared test command from silently unscoping three roles",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "7f8aff2e4ba698e8fe0c17839cb95a3d03cd1af0d121d294e3372532ed2b04bb",
   "qa1_audited_tree_hash": "2eec3a0032cf3ad2a3fc58ff20061e544bd9213feff35d0a25bf2eebb53b526c",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "527760799bf160135393960a7017a644a77a660a",
   "groundtruth_result": null,
   "audit_rounds": 1,
   "live_test_rounds": 0,
@@ -29,6 +29,12 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-05T20:56:15+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=5277607"
     }
   ]
 }
