@@ -41,9 +41,16 @@ This was correctly recorded as a finding rather than a FAIL: no role can do anyt
 
 3. **Decide the compound-command cost, explicitly.** `git push origin main 2>&1; echo "EXIT:$?"` is denied because the matcher matches one command, and **that behaviour is correct and stays.** The question is whether headless roles should be told not to append `; echo $?` — the templates from sprint 12 are the natural place — or whether the denial-and-retry is an acceptable cost. Either answer is fine; deciding by omission is not.
 
-4. **Bump `package.json` to 0.1.20.** One line. *Sprint 16 keeps 0.1.18 and ships first.*
+4. **Retire the phrase "directory-confined", and make three existing statements say *redirect* rather than *write*.** LiveQA's sprint 19 directive, and it is a precision fix rather than a correction — the three statements are true as far as they go.
+   - `.claude/agents/liveqa.md:30`, `.claude/agents/qa1.md:35` and `.claude/commands/sprint-new.md:17` each tell a role to keep its notes file inside the working directory because a write outside is blocked. **That operational advice is correct and must not be weakened** — it is why `printf … > notes.txt` works and `/tmp` does not.
+   - What must change is the stated *reason*. Sprint 12 established confinement for **shell redirects and the Write tool**. It says nothing about a program-mediated write, and sprint 19 demonstrated `node -e "fs.writeFileSync('/private/tmp/…')"` landing outside the declared directory with **zero denials**. A reader taking "confined to your working directory" as a property of *the profile* rather than of *the mechanism* makes exactly the generalisation that cost sprint 19 two separate corrections.
+   - **Record the bound as four legs, not "directory confinement":** git recoverability (except uncommitted work and `.env`), the OS-level `.env` protection which refuses rather than degrades, **`Bash(git push *)` carried in DISALLOWED so nothing leaves except through Pipeman**, and the operator's explicit declaration. **It is a trust decision, not a sandbox.** Sprint 19's own Context lists only the first, second and fourth — it understates the protection, which is the safe direction, and is not worth a re-audit to amend.
 
-5. **Test coverage in `scripts/launcher_test.js`.** At minimum: a bare interpreter declaration is rejected; a real project-shaped command is accepted; a rejected declaration produces the loud failure and no test-running permission at all.
+5. **Master Controller commits sprint-file amendments before handing to a gate.** Add to `.claude/agents/master-controller.md`. Five instances — sprints 11, 14, 19 twice, and the round-3 authorization record — every one caught by QA1 holding a verdict rather than by Master Controller. The sharpest was sprint 19's: **a PASS hashing a working-tree file would have left the durable record showing an authorization that existed nowhere in history.** There is no step in Master Controller's own workflow that says to commit, which is why it recurs.
+
+6. **Bump `package.json` to 0.1.20.** One line. *Sprint 16 keeps 0.1.18 and ships first.*
+
+7. **Test coverage in `scripts/launcher_test.js`.** At minimum: a bare interpreter declaration is rejected; a real project-shaped command is accepted; a rejected declaration produces the loud failure and no test-running permission at all.
 
 ### Acceptance Criteria
 
@@ -53,8 +60,10 @@ This was correctly recorded as a finding rather than a FAIL: no role can do anyt
 - Req 1: confirm rejection is loud. A silent rejection is a different defect, not a fix.
 - Req 2: confirm the comment now matches what was established. **If it still generalises from one verb, it fails** — this is the third comment in this epic to assert a bound the evidence did not reach.
 - Req 3: confirm a decision was made and recorded either way, and that the matcher's single-command behaviour is unchanged.
-- Req 4: `package.json` is `0.1.20`, one-line diff.
-- Req 5: **run the suite.**
+- Req 4: confirm the three statements now attribute confinement to the mechanism, and that the operational advice is unchanged. **A weakened instruction is a defect** — roles still need to write notes inside the working directory.
+- Req 5: read it cold. If it would not have caught the five instances, it is not written correctly.
+- Req 6: `package.json` is `0.1.20`, one-line diff.
+- Req 7: **run the suite.**
 - Run `scripts/verify-tarball.sh`.
 
 **LiveQA verifies live, after Pipeman publishes:**

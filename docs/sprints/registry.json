@@ -112,8 +112,8 @@
     "19": {
       "title": "Let an operator declare a repository as their own, and grant a broader profile only there",
       "epic": "Framework rules and distribution",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-19_let-an-operator-declare-a-repository-as-their-own-and-grant-a-broader-profile-only-there.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-19_let-an-operator-declare-a-repository-as-their-own-and-grant-a-broader-profile-only-there--done.md"
     }
   }
 }
