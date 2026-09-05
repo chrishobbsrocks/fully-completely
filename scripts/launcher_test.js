@@ -2427,16 +2427,22 @@ test('isGitRepository: true inside a real git working tree, false outside one', 
   });
 });
 
-test('readOwnedRepositoryDeclaration: absent file, absent key, non-string, and blank all resolve to null', () => {
+test('readOwnedRepositoryDeclaration: absent file, absent key, and blank all resolve to { present: false } -- true opt-outs, never refused', () => {
   withFixture((dir) => {
-    assert.strictEqual(readOwnedRepositoryDeclaration(dir), null, 'no .claude/settings.local.json at all');
+    assert.deepStrictEqual(readOwnedRepositoryDeclaration(dir), { present: false }, 'no .claude/settings.local.json at all');
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), '{"unrelated": true}');
-    assert.strictEqual(readOwnedRepositoryDeclaration(dir), null, 'key absent');
-    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), '{"fullyCompletely.ownedRepository": true}');
-    assert.strictEqual(readOwnedRepositoryDeclaration(dir), null, 'non-string value');
+    assert.deepStrictEqual(readOwnedRepositoryDeclaration(dir), { present: false }, 'key absent');
     fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), '{"fullyCompletely.ownedRepository": "   "}');
-    assert.strictEqual(readOwnedRepositoryDeclaration(dir), null, 'blank string');
+    assert.deepStrictEqual(readOwnedRepositoryDeclaration(dir), { present: false }, 'blank string');
+  });
+});
+
+test('readOwnedRepositoryDeclaration: a non-string value is reported as PRESENT, not silently dropped (QA1 round 1: this used to be indistinguishable from "not declared")', () => {
+  withFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), '{"fullyCompletely.ownedRepository": true}');
+    assert.deepStrictEqual(readOwnedRepositoryDeclaration(dir), { present: true, value: true });
   });
 });
 
@@ -2444,7 +2450,7 @@ test('readOwnedRepositoryDeclaration: a real declared value is returned, trimmed
   withFixture((dir) => {
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), `{"fullyCompletely.ownedRepository": "  ${dir}  "}`);
-    assert.strictEqual(readOwnedRepositoryDeclaration(dir), dir);
+    assert.deepStrictEqual(readOwnedRepositoryDeclaration(dir), { present: true, value: dir });
   });
 });
 
@@ -2662,6 +2668,26 @@ test('resolveOwnedRepositoryGrant (real subprocess): an invalid declaration refu
       );
       assert.strictEqual(result.status, LAUNCHER_FAILURE_EXIT_CODE);
       assert.match(result.stderr, /not an absolute path/);
+      assert.strictEqual(result.stdout, '');
+      assert.deepStrictEqual(readArgv(), [], 'claude must never be spawned once the declaration is refused');
+    });
+  });
+});
+
+test('resolveOwnedRepositoryGrant (real subprocess): a non-string declared value refuses too, not silently granted the narrow default (QA1 round 1 finding)', () => {
+  withScratchLauncherInstall((scratchRoot) => {
+    fs.mkdirSync(path.join(scratchRoot, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(scratchRoot, '.claude', 'settings.local.json'), JSON.stringify({ 'fullyCompletely.ownedRepository': true }));
+    withFakeClaude(({ dir: fakeClaudeDir, readArgv }) => {
+      const promptFile = path.join(scratchRoot, 'prompt.txt');
+      fs.writeFileSync(promptFile, 'irrelevant, refused before this would matter');
+      const result = spawnSync(
+        process.execPath,
+        [path.join(scratchRoot, 'scripts', 'launcher', 'run-role.js'), '--headless', '--agent', 'dev-team-1', '--prompt-file', promptFile],
+        { cwd: scratchRoot, encoding: 'utf8', env: { ...process.env, PATH: fakeClaudeDir } }
+      );
+      assert.strictEqual(result.status, LAUNCHER_FAILURE_EXIT_CODE);
+      assert.match(result.stderr, /not a string/);
       assert.strictEqual(result.stdout, '');
       assert.deepStrictEqual(readArgv(), [], 'claude must never be spawned once the declaration is refused');
     });

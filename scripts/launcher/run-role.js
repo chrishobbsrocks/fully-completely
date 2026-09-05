@@ -482,10 +482,53 @@ function readPromptFile(filePath) {
 // validated above) -- at that point, `node`/`bash`/`python3` are exactly
 // the core toolchain commands a real build needs (`node scripts/build.js`,
 // `bash setup.sh`, `python3 setup.py`), and excluding them would defeat
-// this sprint's own motivating case. The risk they carry is bounded the
-// same way every other entry here is: directory confinement (verified
-// below, Req 5), git recoverability for everything except `.env` (Req 3)
-// and uncommitted work (Req 4, accepted and named).
+// this sprint's own motivating case.
+//
+// QA1 round 1, correcting a claim this comment used to make: the risk
+// these four carry is NOT "bounded by directory confinement" the way the
+// heading above implies. Checked directly, at QA1's own prompt, rather
+// than left as an assertion: `bash -c 'echo x > /tmp/x'` and `python3 -c
+// "open('/tmp/x','w').write('x')"` both wrote OUTSIDE the working
+// directory, zero permission_denials, no refusal at all. The redirect-
+// confinement check (the "Output redirection ... was blocked" message
+// Req 5's own re-verification relies on) is narrower than its name
+// suggests: it recognises literal `>`/`>>` shell syntax in the OUTER
+// command Claude Code itself parses, and nothing past that boundary --
+// not a redirect hidden inside a `bash -c '...'` quoted argument, and not
+// a file write performed by an interpreter's OWN native API (`open()`,
+// `fs.writeFileSync()`) with no shell redirect anywhere in the command at
+// all. `node -e "require('fs').writeFileSync('/tmp/x','x')"` was checked
+// the same way and escapes identically.
+//
+// This is NOT unique to the four interpreters, and narrowing to just
+// those four would have been a cosmetic fix, not a real one: `curl -o
+// /tmp/x <url>` was checked the same way, escapes identically, and `curl`
+// was never in question. The actual boundary is: any tool with its own
+// "write to this path" argument -- an interpreter's inline-eval flag, a
+// downloader's `-o`/`-O`, and almost certainly others never explicitly
+// tried here (this list was not exhaustively probed for every entry) --
+// sits entirely outside what the redirect-confinement check's pattern
+// matching was ever built to recognise. It is a real backstop against the
+// most literal, careless shell redirect, not a filesystem sandbox, and
+// this comment previously overstated it as the latter.
+//
+// What ACTUALLY bounds this grant, stated accurately: git recoverability
+// for anything inside this repository except uncommitted work (Req 4,
+// accepted and named) and .env (Req 3's own OS-level, command-independent
+// protection -- the one file this sprint protects against exactly this
+// class of escape, which is why Req 3 doesn't rely on Bash pattern
+// matching at all). Nothing here stops a sufficiently determined or
+// badly-instructed agent from writing somewhere else on the filesystem
+// entirely, the same residual risk npx/npm already carry the moment
+// arbitrary package execution is granted at all (a package's own code has
+// exactly the same file-system reach as `node -e` does -- there was never
+// a narrower boundary there either). The real control this sprint relies
+// on, honestly: the operator's own explicit, auditable act of declaring
+// this repository theirs, on their own machine, trusting the agent with
+// it -- not a technical sandbox this file can prove airtight. See Out of
+// Scope: this was never meant to make an unattended broad grant safe in
+// someone else's accounts, and this finding is exactly why that line is
+// there.
 const OWNED_REPOSITORY_ALLOWED_TOOLS = [
   'Bash(npm *)',
   'Bash(npx *)',
@@ -661,27 +704,46 @@ function isGitRepository(dir) {
 // by git and travels with the repository to everyone who clones it, which
 // is the opposite of what an ownership declaration must be -- an act by
 // THIS operator, on THIS machine, never inherited by a colleague, a CI
-// runner, or a client who receives the same repository. Returns the raw
-// string (or null if absent/malformed/empty) -- validation of what that
-// string actually means happens in resolveOwnedRepositoryGrant() below,
-// mirroring readDeclaredTestCommand()'s own read/validate split.
+// runner, or a client who receives the same repository.
+//
+// Returns `{ present: false }` for every shape that means "nothing was
+// declared, at all" -- no file, unparseable JSONC, wrong top-level shape,
+// key absent, or present as a blank string (an operator who explicitly
+// writes "" almost certainly means "not now", the same convention
+// readDeclaredTestCommand() already treats install.js's own default
+// empty string as) -- the caller must never refuse for any of these, only
+// fall back to the narrow default profile in silence.
+//
+// Returns `{ present: true, value }` for everything else, INCLUDING a
+// non-string value (a number, a boolean, an object) -- QA1 round 1 caught
+// this asymmetry directly: a wrong-type declaration was silently treated
+// as "not declared" while a wrong-*path* declaration was refused loudly,
+// both fail-closed but inconsistently so, for a Req whose own stated
+// principle is "validated, never sanitised." A `true` where a path string
+// belongs is not "opting out", it's very likely a typo an operator would
+// want to know about -- so the caller (resolveOwnedRepositoryGrant below)
+// now refuses THIS shape loudly too, the same as every other malformed
+// declaration, rather than quietly granting the narrow profile and
+// leaving the operator to wonder why the broad one never applied.
 function readOwnedRepositoryDeclaration(root) {
   const settingsPath = path.join(root, '.claude', 'settings.local.json');
   let raw;
   try {
     raw = fs.readFileSync(settingsPath, 'utf8');
   } catch {
-    return null;
+    return { present: false };
   }
   let parsed;
   try {
     parsed = parseJsonc(raw);
   } catch {
-    return null;
+    return { present: false };
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return { present: false };
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'fullyCompletely.ownedRepository')) return { present: false };
   const value = parsed['fullyCompletely.ownedRepository'];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
+  if (typeof value === 'string' && !value.trim()) return { present: false };
+  return { present: true, value: typeof value === 'string' ? value.trim() : value };
 }
 
 // Sprint 19, Req 1/2: the pure validator -- "validated, never sanitised."
@@ -759,9 +821,21 @@ function validateOwnedRepositoryDeclaration(declared, root) {
 // The thin, I/O-and-fail() wrapper: not opted in -> { granted: false };
 // invalid -> fail() (real process.exit, never returns); valid -> { granted: true }.
 function resolveOwnedRepositoryGrant(root) {
-  const declared = readOwnedRepositoryDeclaration(root);
-  if (!declared) return { granted: false };
-  const verdict = validateOwnedRepositoryDeclaration(declared, root);
+  const declaration = readOwnedRepositoryDeclaration(root);
+  if (!declaration.present) return { granted: false };
+  // QA1 round 1: a non-string declared value must refuse loudly, same as
+  // any other malformed declaration -- see readOwnedRepositoryDeclaration()'s
+  // own comment for why this used to silently degrade to "not declared"
+  // instead, and why that was the wrong default for this specific Req.
+  if (typeof declaration.value !== 'string') {
+    fail(
+      '.claude/settings.local.json declares "fullyCompletely.ownedRepository" as type ' +
+        `${Array.isArray(declaration.value) ? 'array' : typeof declaration.value} (${JSON.stringify(declaration.value)}), ` +
+        'not a string. Refused -- declare the full absolute path to this repository as a plain string, or remove ' +
+        'the key entirely to use the default, narrower profile.'
+    );
+  }
+  const verdict = validateOwnedRepositoryDeclaration(declaration.value, root);
   if (!verdict.valid) {
     fail(verdict.reason);
   }
