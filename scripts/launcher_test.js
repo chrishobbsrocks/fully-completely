@@ -1620,9 +1620,15 @@ test('run-role: headlessPermissionArgs does not disallow Edit/Write for roles th
   }
 });
 
-test('run-role: headlessPermissionArgs grants pipeman npm access and nothing about npm to qa1', () => {
+test('run-role: headlessPermissionArgs grants pipeman its narrow npm subcommands and nothing about npm to qa1', () => {
+  // Sprint 17 round 2 (QA1 finding 2): blanket Bash(npm *) reaches well
+  // past pipeman's job -- `npm install` alone runs unattended postinstall
+  // scripts. Narrowed to the three subcommands pipeman.md actually names.
   const pipemanArgs = headlessPermissionArgs(RUN_ROLE_ROLES.find((r) => r.id === 'pipeman'));
-  assert.ok(pipemanArgs.some((a) => a.includes('Bash(npm *)')), 'pipeman must be allowed Bash(npm *)');
+  for (const sub of ['publish', 'view', 'pack']) {
+    assert.ok(pipemanArgs.some((a) => a.includes(`Bash(npm ${sub} *)`)), `pipeman must be allowed npm ${sub}`);
+  }
+  assert.ok(!pipemanArgs.some((a) => a.includes('Bash(npm *)')), 'pipeman must not have blanket npm access');
   const qa1Args = headlessPermissionArgs(QA1_ROLE);
   assert.ok(!qa1Args.some((a) => a.includes('npm')), 'qa1 has no stated need for npm and must not be granted it');
 });
@@ -1695,9 +1701,18 @@ test('run-role: pipeman is allowlisted the specific git subcommands its document
   }
 });
 
-test('run-role: liveqa is allowlisted both npm and npx (Req 1, confirmed by running npx against a real scratch install)', () => {
+test('run-role: liveqa is allowlisted npm install (narrow) and npx (deliberately broad) (Req 1/3, confirmed by running npx against a real scratch install)', () => {
   const liveqaArgs = HEADLESS_PERMISSION_PROFILES.liveqa.allowedTools;
-  assert.ok(liveqaArgs.some((a) => a.includes('Bash(npm *)')), 'liveqa missing npm');
+  // Sprint 17 round 2 (QA1 finding 2): blanket Bash(npm *) here too was
+  // unargued and too broad -- narrowed to `npm install`, the specific verb
+  // Req 1's own text names ("install published packages into scratch
+  // directories"). `npx *` stays broad, deliberately: the package name
+  // under test is a different string every sprint, so there is no fixed
+  // prefix narrower than the subcommand to enumerate against, unlike a
+  // fixed verb set like git's or npm's -- an argued exception, not an
+  // oversight.
+  assert.ok(liveqaArgs.some((a) => a.includes('Bash(npm install *)')), 'liveqa missing npm install');
+  assert.ok(!liveqaArgs.some((a) => a.includes('Bash(npm *)')), 'liveqa must not have blanket npm access');
   assert.ok(liveqaArgs.some((a) => a.includes('Bash(npx *)')), 'liveqa missing npx');
 });
 

@@ -415,14 +415,31 @@ function readPromptFile(filePath) {
 //     (Req 3's own named example) — status/log/diff/fetch (branch review,
 //     step 2), add/commit (step 9.3 and conflict resolution), rebase/merge
 //     (step 5), checkout (conflict resolution, step 4), push (steps 6 and
-//     9.3, the headline gap) — plus npm, confirmed including `npm publish
-//     --dry-run` running cleanly under exactly this profile.
+//     9.3, the headline gap). npm held to the same standard on QA1's
+//     round-1 finding (round 1 shipped blanket `Bash(npm *)`, which — like
+//     `Bash(git *)` — reaches well past pipeman's actual job: `npm
+//     install` alone runs arbitrary unattended postinstall scripts, which
+//     nothing pipeman.md documents it ever needing): `npm publish` (step
+//     9.2, confirmed clean including `--dry-run` under exactly this
+//     profile), `npm view` (step 10's `gitHead` check), `npm pack` (the
+//     inspection step 9.1's own tarball leak-check performs when that
+//     script is present — see pipeman.md step 9.1's own conditional).
 //   - liveqa: npm and npx added and TESTED (not inferred from the
 //     definition, per this Req's own instruction) — `npx <published
 //     package>` into a scratch directory, confirmed clean under exactly
-//     this profile. The real browser-driving tools (Playwright/Chrome
-//     MCP) still aren't scoped here — out of reach of a synthetic-agent
-//     scratch test, untested as such, not assumed to need broader Bash.
+//     this profile. `npm install` narrowed the same way as pipeman's npm
+//     (round-1 shipped blanket `Bash(npm *)` here too) — Req 1's own text
+//     names installing a published package as the job, which `npm
+//     install` states directly. `Bash(npx *)` deliberately stays broad,
+//     an argued exception rather than an oversight: the whole point of
+//     `npx <package>` here is running THIS SPRINT'S published package
+//     under test, whose name is a different string for every downstream
+//     project and every sprint — there is no fixed prefix narrower than
+//     the subcommand itself to enumerate against, unlike git's or npm's
+//     fixed, known verb set. The real browser-driving tools (Playwright/
+//     Chrome MCP) still aren't scoped here — out of reach of a
+//     synthetic-agent scratch test, untested as such, not assumed to need
+//     broader Bash.
 //   - master-controller: writes a sprint file (covered by acceptEdits
 //     alone, confirmed directly in sprint 14 — not inferred, and
 //     re-confirmed unregressed here). Unchanged by this sprint.
@@ -451,7 +468,9 @@ const HEADLESS_PERMISSION_PROFILES = {
     allowedTools: [
       'Bash(node scripts/run-lifecycle.js *)',
       'Bash(python3 scripts/sprint_lifecycle.py *)',
-      'Bash(npm *)',
+      'Bash(npm publish *)',
+      'Bash(npm view *)',
+      'Bash(npm pack *)',
       'Bash(git status *)',
       'Bash(git log *)',
       'Bash(git diff *)',
@@ -469,7 +488,7 @@ const HEADLESS_PERMISSION_PROFILES = {
     allowedTools: [
       'Bash(node scripts/run-lifecycle.js *)',
       'Bash(python3 scripts/sprint_lifecycle.py *)',
-      'Bash(npm *)',
+      'Bash(npm install *)',
       'Bash(npx *)',
     ],
   },
