@@ -37,7 +37,7 @@ created: 2026-09-04T02:30:00+00:00
 
 3. **The tests stop breaking when a user-owned file legitimately changes.** The coupling is real: a test that asserts "this file matches a published baseline" needs a file the repo has not since changed, and the repo keeps changing files. **Either pick the file/version pair dynamically from the table**, or **freeze a fixture that is deliberately separate from the live table** and say which, and why. What must not survive is a test whose passing depends on nobody editing a particular agent file.
 
-4. **Bump `package.json` to 0.1.17.** One line.
+4. **Bump `package.json` to 0.1.18.** One line.
 
 5. **Test coverage.** The stale-table check must itself be tested in both directions — a current table passes, a table missing the last published version fails and names it. A check that can only say PASS retires the manual habit that was working, which is the trap LiveQA named when it verified sprint 13's `verify-publish` against its negative case.
 
@@ -49,13 +49,13 @@ created: 2026-09-04T02:30:00+00:00
 - Req 1: confirm the N-1 rule is encoded rather than assumed, and that a correct release does not trip it.
 - Req 2: confirm the regeneration step exists somewhere a release actually reaches, and that the reasoning about `package.json` scripts is stated either way.
 - **Req 3: read the chosen approach against the failure it must prevent.** If a future edit to an agent file would still break a test, it is not fixed. Name which tests were coupled and what they are coupled to now.
-- Req 4: `package.json` is `0.1.17`, one-line diff.
+- Req 4: `package.json` is `0.1.18`, one-line diff.
 - Req 5: **run the suite**, and confirm the negative case is covered.
 - Run `scripts/verify-tarball.sh`.
 
 **LiveQA verifies live, after Pipeman publishes:**
 
-- **Confirm 0.1.17 is on the registry**, verifying published bytes against the audited commit per the rule sprint 13 documents.
+- **Confirm 0.1.18 is on the registry**, verifying published bytes against the audited commit per the rule sprint 13 documents.
 - **The published table is current.** Install the published artifact and confirm its baseline table covers through `0.1.16` — the release before this one. This is the state that has been wrong since 0.1.9 and that no user could have detected.
 - **The upgrade path still works** on a real pre-manifest install, since the table is what proves a file untouched. A regenerated table must not change any existing hash — only add versions.
 - **macOS and Windows both unaffected**, if a Windows machine is obtainable; record plainly if not.
@@ -71,7 +71,7 @@ created: 2026-09-04T02:30:00+00:00
 ### Dependencies
 
 - **Blocks:** Nothing, but the fixture breaks again on any release that touches a user-owned file, which sprint 14 does.
-- **Blocked by:** Sprints 14 and 15 shipping, on the shared `package.json` version line. Sequential: 0.1.15, 0.1.16, then 0.1.17.
+- **Blocked by:** Sprints 14 and 15 shipping, on the shared `package.json` version line. Sequential: 0.1.16, 0.1.17 (sprint 17), then 0.1.18.
 - **External:** None.
 
 ### Team Assignments

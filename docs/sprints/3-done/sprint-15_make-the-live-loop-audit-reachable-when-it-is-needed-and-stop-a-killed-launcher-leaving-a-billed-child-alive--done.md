@@ -2,7 +2,7 @@
 id: 15
 title: "Make the live-loop audit reachable when it is needed, and stop a killed launcher leaving a billed child alive"
 epic: "Honest reporting"
-status: in_progress
+status: done
 created: 2026-09-03T23:05:31+00:00
 ---
 
