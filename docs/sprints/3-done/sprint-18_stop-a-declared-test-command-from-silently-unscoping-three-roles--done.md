@@ -2,7 +2,7 @@
 id: 18
 title: "Stop a declared test command from silently unscoping three roles"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-09-05T05:45:21+00:00
 ---
 
