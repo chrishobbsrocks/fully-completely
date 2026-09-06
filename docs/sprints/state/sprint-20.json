@@ -1,11 +1,11 @@
 {
   "id": 20,
   "title": "Make the framework describe itself accurately in the five places it doesn't",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "250c2d2ee4fe69c4576f4dcdf15cfa10eb4cf5a4f20fc1e83fa82296a304b153",
   "qa1_audited_tree_hash": "54f7c2d03137b26ff56b00bcd2a589e746efac89cf8d05488983c7343aa620c9",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "f534e493084e301db4e7a403a7887d736d015e28",
   "groundtruth_result": null,
   "audit_rounds": 1,
   "live_test_rounds": 0,
@@ -29,6 +29,12 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-06T02:02:34+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=f534e49"
     }
   ]
 }
