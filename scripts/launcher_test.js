@@ -2414,6 +2414,9 @@ const {
   unprotectEnvFiles,
   OWNED_REPOSITORY_ALLOWED_TOOLS,
   OWNED_REPOSITORY_DISALLOWED_TOOLS,
+  PERMISSION_FINDINGS_ANCHOR_VERSION,
+  getClaudeVersionString,
+  warnIfPermissionFindingsStale,
 } = require('./launcher/run-role');
 
 test('isBareInterpreter: the exact interpreters named in the sprint file, and common neighbours, are caught', () => {
@@ -2796,6 +2799,123 @@ test('resolveOwnedRepositoryGrant (real subprocess): a non-string declared value
       assert.strictEqual(result.stdout, '');
       assert.deepStrictEqual(readArgv(), [], 'claude must never be spawned once the declaration is refused');
     });
+  });
+});
+
+// -------------------------------------------------------------------------
+// Sprint 21, Req 3: the permission-findings staleness warning. Reuses
+// withFakeClaude()'s fake binary but extends what it answers for
+// --version -- the shared fixture always exits 0 with no output for
+// --version, which getClaudeVersionString() treats as null (can't
+// compare), so these tests need a fake that actually PRINTS a version.
+// PATH is mutated on process.env directly, not passed as a function
+// argument, because getClaudeVersionString() -- like the real claude
+// binary resolution everywhere else in this file -- has no root/env
+// override parameter; it always resolves 'claude' from whatever this
+// process's own PATH is, the same way production does. Restored in
+// finally either way.
+function withFakeClaudeVersion(versionOutput, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-fake-claude-version-'));
+  const script = ['#!/bin/sh', `if [ "$1" = "--version" ]; then printf '%s\\n' ${JSON.stringify(versionOutput)}; exit 0; fi`, 'exit 1', ''].join('\n');
+  fs.writeFileSync(path.join(dir, 'claude'), script);
+  fs.chmodSync(path.join(dir, 'claude'), 0o755);
+  const originalPath = process.env.PATH;
+  process.env.PATH = dir;
+  try {
+    fn();
+  } finally {
+    process.env.PATH = originalPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function captureStderr(fn) {
+  const original = console.error;
+  const lines = [];
+  console.error = (...args) => lines.push(args.join(' '));
+  try {
+    fn();
+  } finally {
+    console.error = original;
+  }
+  return lines;
+}
+
+test('getClaudeVersionString: parses the version token, ignoring trailing text like "(Claude Code)"', () => {
+  withFakeClaudeVersion(`${PERMISSION_FINDINGS_ANCHOR_VERSION} (Claude Code)`, () => {
+    assert.strictEqual(getClaudeVersionString(), PERMISSION_FINDINGS_ANCHOR_VERSION);
+  });
+});
+
+test('getClaudeVersionString: null when claude produces no parseable output (the shared fake-claude fixture used everywhere else in this file) -- can\'t compare is not the same as mismatch', () => {
+  // withFakeClaude() only creates the fake binary and hands back its dir --
+  // it never mutates this process's own PATH itself (real-subprocess tests
+  // pass `dir` as the child's env.PATH explicitly instead). Calling
+  // getClaudeVersionString() in-process needs that same mutation applied
+  // here, or it just resolves the real system claude and this test would
+  // pass for the wrong reason.
+  withFakeClaude(({ dir }) => {
+    const originalPath = process.env.PATH;
+    process.env.PATH = dir;
+    try {
+      assert.strictEqual(getClaudeVersionString(), null);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+});
+
+test('warnIfPermissionFindingsStale: silent when the running version matches the anchor', () => {
+  withFakeClaudeVersion(PERMISSION_FINDINGS_ANCHOR_VERSION, () => {
+    const lines = captureStderr(() => warnIfPermissionFindingsStale());
+    assert.deepStrictEqual(lines, []);
+  });
+});
+
+test('warnIfPermissionFindingsStale: silent when the version can\'t be determined (null), never a false alarm', () => {
+  withFakeClaude(({ dir }) => {
+    const originalPath = process.env.PATH;
+    process.env.PATH = dir;
+    try {
+      const lines = captureStderr(() => warnIfPermissionFindingsStale());
+      assert.deepStrictEqual(lines, []);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+});
+
+test('warnIfPermissionFindingsStale: warns, naming both versions and the findings document, on a real mismatch -- and never throws or exits (Req 3: warns, never gates)', () => {
+  withFakeClaudeVersion('9.9.999 (Claude Code)', () => {
+    const lines = captureStderr(() => warnIfPermissionFindingsStale());
+    assert.strictEqual(lines.length, 1);
+    assert.match(lines[0], /9\.9\.999/);
+    assert.match(lines[0], new RegExp(PERMISSION_FINDINGS_ANCHOR_VERSION.replace(/\./g, '\\.')));
+    assert.match(lines[0], /sprint-12-permission-scope-findings\.md/);
+    assert.match(lines[0], /not a defect and not a block/i);
+  });
+});
+
+test('runHeadless (real subprocess): the staleness warning appears on stderr but never blocks the run when claude reports a different version', () => {
+  withScratchLauncherInstall((scratchRoot) => {
+    const noOpProtectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-version-mismatch-claude-'));
+    try {
+      const script = ['#!/bin/sh', 'if [ "$1" = "--version" ]; then printf \'9.9.999 (Claude Code)\\n\'; exit 0; fi', `if [ "$1" = "auth" ] && [ "$2" = "status" ]; then echo '{"loggedIn": true}'; exit 0; fi`, `printf '%s' '${FAKE_JSON_RESULT}'`, 'exit 0', ''].join('\n');
+      fs.writeFileSync(path.join(noOpProtectDir, 'claude'), script);
+      fs.chmodSync(path.join(noOpProtectDir, 'claude'), 0o755);
+      const promptFile = path.join(scratchRoot, 'prompt.txt');
+      fs.writeFileSync(promptFile, 'irrelevant, this only checks the version-mismatch warning path');
+      const result = spawnSync(
+        process.execPath,
+        [path.join(scratchRoot, 'scripts', 'launcher', 'run-role.js'), '--headless', '--agent', 'dev-team-1', '--prompt-file', promptFile],
+        { cwd: scratchRoot, encoding: 'utf8', env: { ...process.env, PATH: noOpProtectDir } }
+      );
+      assert.strictEqual(result.status, 0, 'a version mismatch must never change the exit code -- warns, never gates');
+      assert.match(result.stderr, /9\.9\.999/);
+      assert.match(result.stderr, /sprint-12-permission-scope-findings\.md/);
+    } finally {
+      fs.rmSync(noOpProtectDir, { recursive: true, force: true });
+    }
   });
 });
 

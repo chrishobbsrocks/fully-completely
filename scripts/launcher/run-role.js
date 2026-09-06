@@ -99,6 +99,68 @@ function claudeOnPath() {
   return probe.status === 0;
 }
 
+// Sprint 21, Req 1/2: docs/sprint-12-permission-scope-findings.md — the
+// evidence base every headless permission profile in this file rests on
+// -- is anchored to the claude CLI version its entries were last
+// re-verified against. Bump this only after actually re-running the
+// document's own claims (see that file's own "Sprint 21 re-verification"
+// section for what "re-running" means here), never just because a newer
+// CLI happens to be out.
+const PERMISSION_FINDINGS_ANCHOR_VERSION = '2.1.261';
+
+// Returns the exact version token (e.g. "2.1.261"), or null if it
+// couldn't be determined for any reason -- claude missing, --version
+// failing, or output this parser doesn't recognise. null means "can't
+// compare", not "mismatch": warnIfPermissionFindingsStale() below must
+// never warn on a null, only on an actual, positively-observed
+// difference, so a test double or a future --version output shape this
+// parser doesn't understand degrades to silence, not false alarms.
+function getClaudeVersionString() {
+  const [cmd, args] = claudeCommand(['--version']);
+  const probe = spawnSync(cmd, args, { encoding: 'utf8' });
+  if (probe.error || probe.status !== 0) return null;
+  const token = (probe.stdout || '').trim().split(/\s+/)[0];
+  return token || null;
+}
+
+// Sprint 21, Req 3: staleness made visible, never a gate. A version
+// difference is not itself a defect -- this exact evidence base already
+// survived one real CLI update unchanged (this sprint's own
+// re-verification, ~2.1.257-258 through 2.1.261) -- so this warns and
+// keeps going, on every headless launch, rather than blocking the moment
+// claude updates for no demonstrated reason. Deliberately NOT modeled on
+// the `repo=` banner, which prints unconditionally on every invocation
+// and was read wrong four times because it never says anything different
+// depending on whether it matters: this only ever produces output when
+// there is an actual, positively-observed version difference to report,
+// so silence is the common case and the warning stays meaningful when it
+// does appear.
+function warnIfPermissionFindingsStale() {
+  const running = getClaudeVersionString();
+  if (!running || running === PERMISSION_FINDINGS_ANCHOR_VERSION) return;
+  // Sprint 21: docs/sprint-12-permission-scope-findings.md is NOT in
+  // install.js's FRAMEWORK_OWNED list -- confirmed by inspecting a real
+  // unpacked tarball's installed target, that file never reaches a
+  // downstream project at all, it stays this repository's own internal
+  // reference. Naming it unconditionally, as if the reader could always
+  // go open it, would be exactly the "this repository" ambiguity sprint
+  // 20 just corrected in CLAUDE.md, one sprint later, in this same file.
+  // Named as the upstream framework's own record instead -- true and
+  // actionable for both audiences: this repo's own maintainers can open
+  // it directly, and a downstream operator at least knows there's a real
+  // evidence base to ask about upstream, rather than a dangling path.
+  console.error(
+    `NOTE: this session is running claude ${running}, but the headless permission-scope evidence ` +
+      "the fully-completely framework's own profiles rest on (docs/sprint-12-permission-scope-" +
+      'findings.md in the fully-completely framework\'s own upstream repository -- not a file ' +
+      'copied into an installed project, so it will only be present here if this session IS that ' +
+      `repository) was last re-verified against ${PERMISSION_FINDINGS_ANCHOR_VERSION}. Not a ` +
+      "defect and not a block -- this bound has already survived one real CLI update unchanged -- " +
+      "but if a permission behaviour in this session doesn't match what that document describes, " +
+      'this is the first place to look, or to ask upstream about.'
+  );
+}
+
 // Sprint 15, Req 3: fixes a real, confirmed orphan, established by running
 // it rather than by reasoning about signal semantics. Repro before this
 // fix (POSIX; this file's `spawn()` never passes `detached`, so the child
@@ -1063,6 +1125,11 @@ function headlessLaunchArgs(role, prompt, { bare, settings } = {}) {
 }
 
 async function runHeadless(role, { sprintId, promptFilePath, bare, settings }) {
+  // Sprint 21, Req 3: warn, never gate, before anything else in this
+  // function can fail() and exit early -- a stale-evidence warning that
+  // only ever printed on the runs that happened to succeed would miss
+  // exactly the runs most likely to hit a genuinely drifted bound.
+  warnIfPermissionFindingsStale();
   // Req 4, amended: the credential check now branches on whether --bare
   // was requested, since it changes which credential source is actually
   // in play.
@@ -1322,4 +1389,7 @@ module.exports = {
   unprotectEnvFiles,
   OWNED_REPOSITORY_ALLOWED_TOOLS,
   OWNED_REPOSITORY_DISALLOWED_TOOLS,
+  PERMISSION_FINDINGS_ANCHOR_VERSION,
+  getClaudeVersionString,
+  warnIfPermissionFindingsStale,
 };
