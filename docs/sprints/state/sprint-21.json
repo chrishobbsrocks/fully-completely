@@ -1,11 +1,11 @@
 {
   "id": 21,
   "title": "Anchor the permission findings to a CLI version, and detect when they expire",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "bdef3ec0579d4bb1d2d6f151b45296a991f70f3383856c674d0d9ba2359a0a53",
   "qa1_audited_tree_hash": "85d703b28645902c97ee8cbe5955122c88322a83b145bf0cb414808ff33da96a",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "1ca1e8f9210b9b4763d473df8675009e7cd2d145",
   "groundtruth_result": null,
   "audit_rounds": 1,
   "live_test_rounds": 0,
@@ -29,6 +29,12 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-06T14:36:07+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=1ca1e8f"
     }
   ]
 }
