@@ -1014,15 +1014,14 @@ function headlessPermissionArgs(role, root = ROOT) {
   if (profile.needsTestCommand) {
     const testCommand = readDeclaredTestCommand(root);
     // A trailing ` *` wildcard, matching every other multi-word pattern in
-    // this file. Sprint 18, correcting this comment: sprint 17 confirmed
-    // by running it that this pattern also matches the bare command with
-    // no trailing arguments at all, not just one-or-more -- but only for
-    // git, a real verb, in a real push. The equivalent npm case was
-    // proxied by an `npm pack` request that Pipeman declined as outside
-    // its own process, so no permission decision for a bare `npm` was
-    // ever actually reached. Confirmed: git. Inferred, not established:
-    // npm and every other entry on this list -- this comment used to
-    // claim both on the evidence of one.
+    // this file, confirmed for two real verbs now, each by running it.
+    // Sprint 17 confirmed git: a real push, no trailing arguments.
+    // Sprint 18 established npm directly, promoted from sprint 17's own
+    // declined proxy: `Bash(npm pack *)` matched a bare `npm pack` with
+    // zero denials AND produced the actual tarball -- proof the command
+    // ran, not merely proof it wasn't denied. Confirmed: git and npm.
+    // Inferred, not established: every other entry on this list --
+    // promoting these two is not license to claim the general property.
     if (testCommand) allowedTools.push(`Bash(${testCommand} *)`);
   }
   // Sprint 19, Req 1: only roles marked eligible above are even checked —

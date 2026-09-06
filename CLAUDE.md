@@ -41,7 +41,7 @@ refuses outright, no override, if it's missing or empty.
 | Dev Team 2 | Dev2 | `.claude/agents/dev-team-2.md` | sonnet | Runs a separate, independent sprint in parallel, in its own git worktree |
 | QA1 | QA1 | `.claude/agents/qa1.md` | opus | Static code audit (the only gate) |
 | Pipeman | PM | `.claude/agents/pipeman.md` | sonnet | Only one who pushes to remote |
-| LiveQA | LQ | `.claude/agents/liveqa.md` | opus | Live browser testing after every push |
+| LiveQA | LQ | `.claude/agents/liveqa.md` | opus | Live verification of the released artifact after every push — a browser is the common case, not the definition |
 
 Shorthand is for conversation only, never for file names or commands.
 
@@ -252,25 +252,51 @@ that line alone.
 
 ## Changes to this repo's own tooling
 
-Everything above describes the lifecycle a *downstream project* runs its
-own sprints through, after installing this workflow. It does not describe
-how changes to this repository itself (`scripts/`, `.claude/`,
-`templates/`, this file) get made. Those are development on the tool, not
-a sprint that runs through the tool's own state machine, and that's a
-deliberate call, not an oversight:
+**"This repository" in this section means the `fully-completely`
+framework's own upstream source repository — the one this framework
+itself is built and released from — never a downstream project you have
+installed `fully-completely` into.** Read from an installed copy of this
+file, `scripts/`, `.claude/`, and `templates/` name directories that
+exist in *your own project too*, because the install manifest puts them
+there — but they are not what this section is about, and this section
+does not license editing them. A downstream team nearly made exactly this
+misreading, on day one, and stopped only because their own boundary held.
+If you did not clone `fully-completely` itself to work on the framework —
+if you ran `npx fully-completely` or an equivalent installer into your
+own project — this whole section is not about you or your `scripts/`;
+everything under `## The lifecycle` above is what applies to your
+project's own sprints, in your own `scripts/`, `.claude/`, and
+`templates/`.
+
+Everything above `## The lifecycle` describes the lifecycle a
+*downstream project* runs its own sprints through, after installing this
+workflow. It does not describe how changes to *this framework's own
+repository* (its own `scripts/`, `.claude/`, `templates/`, this file —
+the copies inside `fully-completely`'s own source checkout, not inside
+whatever project installed it) get made. Those are development on the
+tool, not a sprint that runs through the tool's own state machine by
+default, and that's a deliberate call, not an oversight:
 
 - **QA1's gate still has a real referent here** (does a diff of
   `sprint_lifecycle.py` or an agent file actually do what it claims), so a
   real independent review before anything non-trivial merges is still
   expected, just not mechanized through `/sprint-qa1` and a sprint file
   for this repo's own commits.
-- **LiveQA's gate does not.** LiveQA live-tests a deployed
-  product in a browser. This repository has no deployed product, it *is*
-  the workflow definition a downstream project deploys against. Forcing a
-  browser-testable live-test step onto a change to a Python script or a
-  markdown agent file would be fitting the process to itself rather than
-  to what actually needs verifying, the same reasoning that produced the
-  trivial fix fast lane, applied to the opposite end of the size scale.
+- **LiveQA's gate applies here too, with a different surface, not a
+  different rule.** `sprint_lifecycle.py`'s own `cmd_complete` refuses to
+  close *any* sprint without a recorded LiveQA PASS, with no override —
+  that includes a sprint about this framework's own tooling, exactly as
+  much as one in a downstream project. What differs is what "live" means:
+  LiveQA verifies the released artifact in a real environment, after
+  distribution (see `liveqa.md`), and this framework's own released
+  artifact is the published npm package, not a deployed web app. A sprint
+  that changes `sprint_lifecycle.py` or an agent file is verified live by
+  installing the newly published version into a real scratch project and
+  confirming the change actually reached it — the install manifest (since
+  0.1.6) is what makes that reachable at all, and it is exactly what this
+  repository's own sprints (fourteen and counting) have actually been
+  running as their live test, not a browser stand-in and not a skipped
+  step.
 - **Every change here should still be a real, committed diff before
   anyone reviews it**, for the same reason `qa1.md` tells QA1 to hold a
   verdict on uncommitted work: a review of a working-tree diff is a claim
@@ -280,11 +306,11 @@ deliberate call, not an oversight:
   being the reviewed commit, not whatever was last pushed before the
   review started.
 
-If a change to this repo's own tooling ever turns out to need something
-sprint-shaped (recorded requirements, a documented audit trail across
-multiple rounds), that's a case for `/sprint-new` with LiveQA's step
-explicitly skipped and noted why, not a case for forcing a live-test step
-that doesn't apply.
+If a change to this framework's own tooling ever turns out to need
+something sprint-shaped (recorded requirements, a documented audit trail
+across multiple rounds), that's a case for `/sprint-new` — LiveQA's gate
+applies exactly as it does everywhere else, redefined per `liveqa.md` to
+mean a real install of the newly published package, never skipped.
 
 ## Project standards
 
