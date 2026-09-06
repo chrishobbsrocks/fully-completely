@@ -1121,12 +1121,17 @@ function headlessPermissionArgs(role, root = ROOT) {
 //
 // Measured at THIS commit (re-measure on every future check, per QA1's
 // own criterion -- a carried-forward number is exactly the kind of
-// figure that goes stale silently): the largest role is
-// `master-controller.md`, whose --agents JSON is 14,083 characters --
-// 43.0% of the 32,767-character limit, 18,684 remaining. This number
-// moves in one direction only: every rule sprints 14, 18 and 20 each
-// added to an agent file spent headroom, and nothing ever reclaims any.
-// Comfortable now; worth a maintainer's attention once a single role's
+// figure that goes stale silently, and QA1 round 1 caught it going
+// stale within THIS same commit: this sprint's own Req 5 edit to
+// liveqa.md added 1,586 characters, pushing it past master-controller.md
+// as the largest role before the first version of this comment was even
+// committed -- attributed to the wrong file by its own edit, not by a
+// later one): the largest role is `liveqa.md`, whose --agents JSON is
+// 14,624 characters -- 44.6% of the 32,767-character limit, 18,143
+// remaining. This number moves in one direction only: every rule sprints
+// 14, 18, 20 and 22 each added to an agent file spent headroom, and
+// nothing ever reclaims any. Comfortable now; worth a maintainer's
+// attention once a single role's
 // JSON gets meaningfully closer to the limit, not before.
 function headlessLaunchArgs(role, prompt, { bare, settings } = {}) {
   const meta = readAgentMeta(role.id);

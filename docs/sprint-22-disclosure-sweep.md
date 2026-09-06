@@ -159,10 +159,36 @@ from recurring in the next one. That is a decision for the user: whether
 to scrub the two lines going forward (a real, small code change — a
 project-name placeholder and a path placeholder, matching the pattern
 every neighbouring test already uses) is not something this sweep decides
-or does. Req 3's mechanical check below will keep failing against Finding
-2's exact class of leak (a real local path) until that decision is made
-and acted on; that failure is the check working as designed, not a defect
-in this sprint's own verification.
+or does. Req 3's mechanical check will keep failing against Finding 2's
+exact class of leak (a real local path) until that decision is made and
+acted on; that failure is the check working as designed, not a defect in
+this sprint's own verification.
+
+**If you are Pipeman and `scripts/verify-tarball.sh` fails on this exact
+finding before you publish: stop, do not work around it, and do not
+publish past it on your own judgement.** QA1's round-1 audit of this
+sprint named this precondition directly: Pipeman cannot clear it (fixing
+the underlying line is explicitly not this sprint's call, and reworking
+the check to stop flagging a real, known leak would just be a quieter way
+of publishing past it), so per this project's own transition-precondition
+rule (CLAUDE.md), it needs a documented cross-role recovery path rather
+than silently blocking. That path is: bring this to the user, point them
+at this section, and get one of two explicit decisions on record before
+publishing —
+1. **Fix the two lines first** (a real, small commit — replace "Fifty
+   Mission Cap" and the real local path with placeholders, matching every
+   neighbouring test's existing pattern), then publish once
+   `verify-tarball.sh` passes cleanly, or
+2. **The user explicitly authorizes publishing 0.1.23 anyway**, on the
+   reasoning that both findings already exist in every prior published
+   release (0.1.17+ and 0.1.1+ respectively) and 0.1.23 carrying them
+   forward unfixed changes nothing about what is already permanently
+   public — but that reasoning is the user's to make and record, not
+   Pipeman's to assume on the sprint's behalf.
+Either way, record which decision was made and why, the same discipline
+this framework already applies to `/sprint-complete`'s own
+`--user-said` requirement — a real-time human decision, not inferred from
+silence or from the sprint having reached this gate.
 
 ## What was NOT found, stated as a result rather than left silent
 

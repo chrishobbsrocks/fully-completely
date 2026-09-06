@@ -102,8 +102,9 @@ echo "  clean — only .gitkeep placeholders present"
 #
 # What this does NOT catch, named rather than assumed away, because none
 # of these have a reliable, narrow, mechanical check: a real person's
-# name, a client or project identifier (sprint 22's own second finding,
-# "Fifty Mission Cap" in scripts/launcher/run-role.js, is exactly this
+# name, a client or project identifier (sprint 22's own Finding 1, a real
+# downstream consumer's project name in scripts/launcher/run-role.js --
+# see docs/sprint-22-disclosure-sweep.md, not shipped -- is exactly this
 # shape and this check cannot see it), an email address beyond an
 # obviously-reserved domain, an internal URL, a key or token, or any
 # machine's home directory other than this one. Those stay a human-review
@@ -117,7 +118,7 @@ if [ -n "${HOME:-}" ] && [ "$HOME" != "/" ]; then
       HOME_LEAK_FOUND=1
     fi
   done < <(find "$UNPACKED" -type f -print0)
-  [ "$HOME_LEAK_FOUND" -eq 0 ] || fail "a shipped file contains this machine's own home directory path — see LEAK line(s) above; very likely a hardcoded local path that should be a placeholder instead, same shape as sprint 22's own finding"
+  [ "$HOME_LEAK_FOUND" -eq 0 ] || fail "a shipped file contains this machine's own home directory path — see LEAK line(s) above; very likely a hardcoded local path that should be a placeholder instead, same shape as sprint 22's own Finding 2. If this is that already-known, already-published finding and you are Pipeman about to publish anyway: STOP. This is not yours to clear — whether to publish past a known, unfixed disclosure or hold for it to be fixed first is the user's decision, not something to work around by re-running this script differently or publishing anyway because the finding predates this release. See docs/sprint-22-disclosure-sweep.md's own 'What decision this needs' section, get that decision from the user, and record it before proceeding either way."
   echo "  clean"
 else
   echo "  SKIP: \$HOME is unset or '/' — nothing meaningful to check against"
