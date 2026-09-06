@@ -31,3 +31,13 @@ docs/sprints/*/*.md
 # Personal, repo-local Claude Code permission settings — not part of the
 # framework being installed, and install.js never reads this path either.
 .claude/settings.local.json
+
+# Sprint 22: this record names two real, already-published disclosure
+# findings by their exact content (a client/project identifier, the
+# author's own real local absolute path) so a decision can actually be
+# made about them. Shipping the record itself in every future release
+# would make it a second, ongoing vector for the same two strings on top
+# of the original leak — the opposite of "stopped from recurring." Unlike
+# docs/sprint-12-permission-scope-findings.md (pure mechanism findings,
+# nothing personally identifying), this one is deliberately excluded.
+docs/sprint-22-disclosure-sweep.md

@@ -1110,6 +1110,24 @@ function headlessPermissionArgs(role, root = ROOT) {
   return args;
 }
 
+// Sprint 22, Req 4: a recorded budget, not a defect and not a gate --
+// the point is that the next rule added to an agent file is spent
+// knowingly, not discovered at 100%. `--agents` is the one argv payload
+// this launcher builds that scales with an agent file's own prose (one
+// role per launch, headless path only -- the interactive path never
+// passes --agents at all, so this budget doesn't apply there). Windows'
+// CreateProcess has a hard 32,767-character argv limit; nothing else in
+// this file's argv approaches it.
+//
+// Measured at THIS commit (re-measure on every future check, per QA1's
+// own criterion -- a carried-forward number is exactly the kind of
+// figure that goes stale silently): the largest role is
+// `master-controller.md`, whose --agents JSON is 14,083 characters --
+// 43.0% of the 32,767-character limit, 18,684 remaining. This number
+// moves in one direction only: every rule sprints 14, 18 and 20 each
+// added to an agent file spent headroom, and nothing ever reclaims any.
+// Comfortable now; worth a maintainer's attention once a single role's
+// JSON gets meaningfully closer to the limit, not before.
 function headlessLaunchArgs(role, prompt, { bare, settings } = {}) {
   const meta = readAgentMeta(role.id);
   const body = agentBody(role.id);
