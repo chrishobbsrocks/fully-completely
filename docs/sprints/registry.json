@@ -124,8 +124,8 @@
     "21": {
       "title": "Anchor the permission findings to a CLI version, and detect when they expire",
       "epic": "Honest reporting",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-21_anchor-the-permission-findings-to-a-cli-version-and-detect-when-they-expire.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-21_anchor-the-permission-findings-to-a-cli-version-and-detect-when-they-expire.md"
     }
   }
 }

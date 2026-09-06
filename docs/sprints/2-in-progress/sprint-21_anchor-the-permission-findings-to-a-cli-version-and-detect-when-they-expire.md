@@ -2,7 +2,7 @@
 id: 21
 title: "Anchor the permission findings to a CLI version, and detect when they expire"
 epic: "Honest reporting"
-status: todo
+status: in_progress
 created: 2026-09-06T02:09:00+00:00
 ---
 
