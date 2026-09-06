@@ -52,8 +52,9 @@
 // claude's own --settings flag, the real path for an apiKeyHelper-based
 // project (see runHeadless() below).
 //
-// Requested by an external orchestrator (Fifty Mission Cap) that installs
-// this framework and drives docs/sprints/ from outside, through
+// Requested by a real external orchestrator (a downstream consumer, not
+// a hypothetical one) that installs this framework and drives
+// docs/sprints/ from outside, through
 // sprint_lifecycle.py and state files only, never reading agent files or
 // editing sprint files. See runHeadless() and its neighbors below for
 // what headless does differently from the interactive path above, and why.
@@ -441,7 +442,7 @@ function readPromptFile(filePath) {
 // `git push`, a ten-command git sweep, a bare `git status`), all clean.
 // This was NOT re-tested under `--bare` mode (no ANTHROPIC_API_KEY
 // available in this environment) — an external, unattended orchestrator
-// like Fifty Mission Cap is exactly the caller likely to use `--bare`,
+// is exactly the kind of caller likely to use `--bare`,
 // and that mode's Bash behavior was never independently confirmed here to
 // match the default path's. Given that gap, and given the whole point of
 // Req 2 above is that undocumented, version-dependent "it happens to work

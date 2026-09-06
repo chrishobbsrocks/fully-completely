@@ -101,13 +101,17 @@ pattern-shaped and nothing pattern-shaped would have caught it. The
 pattern sweep surfaced candidates to look at closely; every file was still
 read as prose or code on its own terms.
 
-## Result: this is not a clean sweep. Two findings, neither scrubbed here.
+## Result: this was not a clean sweep. Two findings, both now fixed going forward.
 
-Per Req 2: found and stopped, not found and fixed in the same commit. A
-disclosure finding may not be scrubbable at all once it has shipped — sprint
-4's could not be unpublished, only stopped from recurring — and that
-decision belongs to the user, not to whoever ran the sweep. Both findings
-below are recorded, not corrected, in this commit.
+Per Req 2: found and stopped, not found and fixed in the same commit that
+found them. Both were recorded, not corrected, in the commit that
+discovered them. **The user's decision (relayed by Pipeman after
+`scripts/verify-tarball.sh` correctly blocked publishing 0.1.23): fix the
+two lines first.** Both are now scrubbed — see each finding below for the
+exact change — and `scripts/verify-tarball.sh` passes cleanly again,
+confirmed by running it. Neither is scrubbable from the releases that
+already carry them; see "Already published" under each finding for
+exactly which versions remain permanently affected.
 
 ### Finding 1 — `scripts/launcher/run-role.js:55` and `:444`
 
@@ -120,9 +124,15 @@ category Req 1 names.
 
 **Already published.** Confirmed by packing every released version from
 the npm registry and checking each: absent through 0.1.16, present in
-every published version from **0.1.17 onward** (0.1.17 through the current
-0.1.22 — 6 releases). Past npm's 72-hour unpublish window for all of them;
+every published version from **0.1.17 onward** (0.1.17 through 0.1.22 —
+6 releases). Past npm's 72-hour unpublish window for all of them;
 permanent, same as sprint 4's finding.
+
+**Fixed going forward.** The identifier is replaced with a generic
+description ("a real external orchestrator... a downstream consumer, not
+a hypothetical one" at line 55; "an external, unattended orchestrator" at
+line 444, dropping the now-redundant repeated name) — same meaning, no
+longer a specific identifier. Will not appear in 0.1.23 or later.
 
 ### Finding 2 — `scripts/launcher_test.js:154-155`
 
@@ -143,6 +153,13 @@ every published version from **0.1.1 onward** (0.1.1 through 0.1.22 — 22
 releases, essentially this project's entire published history). Permanent,
 same reasoning as Finding 1.
 
+**Fixed going forward.** Replaced with the same `/Users/x/...` placeholder
+shape every neighbouring test in this file already uses correctly
+(`/Users/x/Programming/fully-completely`, with the expected encoded value
+updated to match). The test still asserts the same behaviour — no
+hardcoded `-Users-` special-casing — on a fixture that discloses nothing.
+Will not appear in 0.1.23 or later.
+
 (Line 192 of the same file, `C:\Users\Chris Hobbs\Programming\fully-completely`,
 was checked and is **not** a separate finding — it is a synthetic,
 clearly-hypothetical Windows-path fixture using the author's own
@@ -151,9 +168,17 @@ testing "the derivation logic's consistency, not a claim about the real
 Windows CLI's behavior." It discloses nothing beyond what `package.json`
 already does.)
 
-### What decision this needs
+### What decision this needed — decided
 
-Both findings are permanent regardless of what happens next — they cannot
+**Resolved.** The user chose option 1 below (fix the two lines first),
+relayed and recorded by Pipeman after `scripts/verify-tarball.sh` blocked
+`/sprint-ship`, exactly as this section anticipated. Both lines are fixed
+as of the commit that updates this section — see "Fixed going forward"
+under each finding above. Kept below as the record of the decision
+actually made, and because the reasoning stays correct for the next time
+this shape of gate fires on a different finding.
+
+Both findings were permanent regardless of what happened next — they cannot
 be unpublished from the releases that already carry them, only stopped
 from recurring in the next one. That is a decision for the user: whether
 to scrub the two lines going forward (a real, small code change — a

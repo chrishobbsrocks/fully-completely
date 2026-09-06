@@ -151,8 +151,8 @@ test('session: UUID is RFC-4122-valid (version 5, variant 10xx), not a reformatt
 
 test('session: directory derivation replaces POSIX separators, no hardcoded -Users-', () => {
   withTmpHome((home) => {
-    const dir = sessionsDir('/Users/chrishobbs/Programming/fully-completely', home);
-    assert.strictEqual(dir, path.join(home, '.claude', 'projects', '-Users-chrishobbs-Programming-fully-completely'));
+    const dir = sessionsDir('/Users/x/Programming/fully-completely', home);
+    assert.strictEqual(dir, path.join(home, '.claude', 'projects', '-Users-x-Programming-fully-completely'));
   });
 });
 
