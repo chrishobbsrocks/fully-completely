@@ -2,7 +2,7 @@
 id: 20
 title: "Make the framework describe itself accurately in the five places it doesn't"
 epic: "Honest reporting"
-status: in_progress
+status: done
 created: 2026-09-05T21:10:55+00:00
 ---
 

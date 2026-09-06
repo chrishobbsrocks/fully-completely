@@ -1,5 +1,5 @@
 {
-  "next_id": 21,
+  "next_id": 22,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -118,8 +118,14 @@
     "20": {
       "title": "Make the framework describe itself accurately in the five places it doesn't",
       "epic": "Honest reporting",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-20_make-the-framework-describe-itself-accurately-in-the-five-places-it-doesn-t.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-20_make-the-framework-describe-itself-accurately-in-the-five-places-it-doesn-t--done.md"
+    },
+    "21": {
+      "title": "Anchor the permission findings to a CLI version, and detect when they expire",
+      "epic": "Honest reporting",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-21_anchor-the-permission-findings-to-a-cli-version-and-detect-when-they-expire.md"
     }
   }
 }
