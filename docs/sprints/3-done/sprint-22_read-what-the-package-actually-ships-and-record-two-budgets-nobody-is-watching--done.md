@@ -2,7 +2,7 @@
 id: 22
 title: "Read what the package actually ships, and record two budgets nobody is watching"
 epic: "Framework rules and distribution"
-status: in_progress
+status: done
 created: 2026-09-06T15:12:30+00:00
 ---
 
