@@ -1,11 +1,11 @@
 {
   "id": 22,
   "title": "Read what the package actually ships, and record two budgets nobody is watching",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "2552f5a3ccb652c1047057b3641864956d879c7c48c6ff7824be79b991c9f635",
   "qa1_audited_tree_hash": "0d4d60cdcc7423ca1ba0921e1430fb96346ab1d5630e0caca0ebda434d38b051",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "efe4a38e757e50519e50b8683cab41849e9f5983",
   "groundtruth_result": null,
   "audit_rounds": 3,
   "live_test_rounds": 0,
@@ -47,6 +47,12 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-07T02:58:53+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=efe4a38"
     }
   ]
 }
