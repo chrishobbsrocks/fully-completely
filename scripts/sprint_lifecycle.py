@@ -689,6 +689,32 @@ def _find_sprint_file_under(sprints_dir: Path, sprint_id: int) -> Optional[Path]
     return None
 
 
+def _other_worktree_roots() -> list:
+    """Sprint 29, Req 1: factored out of worktree_divergence_warning()
+    (sprint 13) so state_divergence_warning() (below) can reuse the exact
+    same enumeration instead of a second copy of this subprocess call —
+    and so a caller iterating many sprints (cmd_list, cmd_status with no
+    id) can compute this ONCE per invocation rather than once per sprint.
+    Same failure handling as every other git-touching function in this
+    file: no git, not a worktree-using repo, or any subprocess failure
+    collapses to an empty list, never raises."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return []
+    roots = []
+    for line in result.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        candidate = Path(line[len("worktree "):]).resolve()
+        if candidate != ROOT.resolve():
+            roots.append(candidate)
+    return roots
+
+
 def worktree_divergence_warning(sprint_id: int) -> Optional[str]:
     """Sprint 13, Req 3 (Finding C): a sprint file amended in one working
     tree is invisible to a gate running in another — the hash gates were
@@ -711,22 +737,13 @@ def worktree_divergence_warning(sprint_id: int) -> Optional[str]:
     Returns a human-readable warning if another worktree's copy of this
     sprint's file has different BYTE CONTENT than the one this process
     found, naming which worktree(s) diverge; None if there's nothing to
-    warn about."""
-    try:
-        result = subprocess.run(  # nosec B603 B607
-            ["git", "worktree", "list", "--porcelain"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-        return None
+    warn about.
 
-    other_roots = []
-    for line in result.stdout.splitlines():
-        if not line.startswith("worktree "):
-            continue
-        candidate = Path(line[len("worktree "):]).resolve()
-        if candidate != ROOT.resolve():
-            other_roots.append(candidate)
+    Sprint 29: only ever compares the sprint FILE. See
+    state_divergence_warning() below for why that alone misses most of
+    the lifecycle — this function is deliberately left as-is rather than
+    widened, the new function covers what this one structurally can't."""
+    other_roots = _other_worktree_roots()
     if not other_roots:
         return None
 
@@ -759,6 +776,122 @@ def worktree_divergence_warning(sprint_id: int) -> Optional[str]:
         "another session amended the sprint file elsewhere, this may be a stale copy. "
         "Not gated: worktrees are exactly how this framework expects roles to work in "
         "parallel, this only makes the divergence visible rather than silent."
+    )
+
+
+def state_divergence_warning(
+    sprint_id: int,
+    this_phase: Optional[str] = None,
+    this_registry_status: Optional[str] = None,
+    other_roots: Optional[list] = None,
+) -> Optional[str]:
+    """Sprint 29, Req 1 (Finding A): extends sprint 13's cross-tree warning
+    from the sprint FILE to STATE FILES and the REGISTRY — precisely what
+    a close (and almost every other phase transition) actually writes.
+
+    worktree_divergence_warning() above only ever compares the sprint
+    file's byte content, which changes at exactly three transitions —
+    new, start, complete — the only ones that call
+    update_frontmatter_status(). Every other transition this lifecycle
+    has (a QA1 verdict, dev_agreed_done, shipped, reshipped, a LiveQA
+    verdict, a repoint) touches ONLY docs/sprints/state/sprint-<id>.json,
+    invisible to that check entirely. Master Controller named the gap
+    precisely: sprint 13's mechanism "says nothing about state files or
+    the registry, which is precisely what a close writes." A stranded
+    close (Finding A's own motivating incident) happens to ALSO change
+    the sprint file's frontmatter (status: in_progress -> done), so
+    worktree_divergence_warning() would catch that one case by accident —
+    this function is the general fix, not a narrower one aimed only at
+    closing.
+
+    Same discipline as worktree_divergence_warning(): warns, never gates,
+    and every failure mode (no git, no other worktrees, another tree's
+    state file or registry missing or unreadable) collapses silently to
+    None — this must never be the reason a read-only or gating command
+    fails to answer.
+
+    Compares TWO independent things per other worktree, either one
+    enough to warn on its own: state.json's own `phase` (fine-grained,
+    authoritative — dev_build, qa1_audit, liveqa_live, complete, ...),
+    and registry.json's `status` for this sprint id (the coarse
+    todo/in_progress/done bucket cmd_list and cmd_status's no-id view
+    actually print). The stranded-close incident changes both; a
+    mid-lifecycle phase change (e.g. dev_agreed_done -> shipped) changes
+    only the first, and Req 1 requires that be visible too, not only the
+    close case.
+
+    `other_roots`, `this_phase`, `this_registry_status` are accepted as
+    parameters, not always re-derived, so a caller iterating many sprints
+    (cmd_list, cmd_status with no id) can compute `other_roots` ONCE via
+    _other_worktree_roots() and reuse it across every sprint, instead of
+    a redundant `git worktree list` subprocess call per sprint. A caller
+    with only one sprint to check (cmd_status with an id, which already
+    has `state` loaded) can pass what it already has and let this
+    function derive the rest itself."""
+    if other_roots is None:
+        other_roots = _other_worktree_roots()
+    if not other_roots:
+        return None
+
+    if this_phase is None:
+        this_state_path = state_path(sprint_id)
+        if not this_state_path.exists():
+            return None
+        try:
+            this_phase = json.loads(this_state_path.read_text()).get("phase")
+        except (OSError, json.JSONDecodeError):
+            return None
+    if this_registry_status is None:
+        reg = load_registry()
+        entry = reg["sprints"].get(str(sprint_id))
+        this_registry_status = entry["status"] if entry else None
+
+    diverging = []
+    for other_root in other_roots:
+        other_phase = None
+        other_state_file = other_root / "docs" / "sprints" / "state" / f"sprint-{sprint_id}.json"
+        if other_state_file.exists():
+            try:
+                other_phase = json.loads(other_state_file.read_text()).get("phase")
+            except (OSError, json.JSONDecodeError):
+                other_phase = None
+
+        other_registry_status = None
+        other_registry_file = other_root / "docs" / "sprints" / "registry.json"
+        if other_registry_file.exists():
+            try:
+                other_reg = json.loads(other_registry_file.read_text())
+                other_entry = (other_reg.get("sprints") or {}).get(str(sprint_id))
+                other_registry_status = other_entry["status"] if other_entry else None
+            except (OSError, json.JSONDecodeError, KeyError, TypeError):
+                other_registry_status = None
+
+        if other_phase is None and other_registry_status is None:
+            continue  # nothing readable there for this sprint — absence, not divergence
+
+        phase_differs = other_phase is not None and other_phase != this_phase
+        status_differs = other_registry_status is not None and other_registry_status != this_registry_status
+        if not (phase_differs or status_differs):
+            continue
+
+        bits = []
+        if other_phase is not None:
+            bits.append(f"phase '{other_phase}'")
+        if status_differs:
+            bits.append(f"registry status '{other_registry_status}'")
+        diverging.append(f"{other_root} ({', '.join(bits)})")
+
+    if not diverging:
+        return None
+    plural = "worktree" if len(diverging) == 1 else "worktrees"
+    return (
+        f"WARNING: sprint {sprint_id}'s state here reads phase "
+        f"'{this_phase}' (registry status '{this_registry_status}'), but {len(diverging)} "
+        f"other {plural} disagree: {'; '.join(diverging)}. This read is from {ROOT} only — "
+        "if another session moved this sprint further (closed it, shipped it, recorded a "
+        "verdict) in a different worktree, this may be stale. Not gated: worktrees are "
+        "exactly how this framework expects roles to work in parallel, this only makes the "
+        "divergence visible rather than silent."
     )
 
 
@@ -809,7 +942,20 @@ def origin_ahead_of_record_warning(last_shipped: Optional[str]) -> Optional[str]
     never raises, when it is: worded to say exactly "origin carries a
     commit your record does not," never "someone bypassed the push
     rule" — Pipeman's own first, wrong reading of this exact situation,
-    the misreading this message exists to prevent."""
+    the misreading this message exists to prevent.
+
+    Sprint 29, Req 3: NAMES the commits (short SHA + subject line, via
+    `git log --oneline`, capped so a long drift doesn't dump an
+    unreadable wall of text), not merely a count with a suggestion to go
+    look — this is deliberately the same question this function already
+    answers cheaply, `git log --oneline A..B` costs no more than the
+    `git rev-list --count` this replaced and returns the commits it
+    would have counted anyway. This is also the mechanism cmd_liveqa uses
+    to detect the branch tip moving off `last_shipped_commit` DURING the
+    live gate (Finding B) — see the dedicated comment at that call site
+    for why that context warns rather than refuses; this function's own
+    behaviour (warn, never gate) is unchanged, only its message grew
+    more specific."""
     if not last_shipped or not is_git_repository():
         return None
     upstream = subprocess.run(  # nosec B603 B607
@@ -821,29 +967,32 @@ def origin_ahead_of_record_warning(last_shipped: Optional[str]) -> Optional[str]
     origin_ref = upstream.stdout.strip()
     if not origin_ref:
         return None
-    ahead = subprocess.run(  # nosec B603 B607
-        ["git", "rev-list", "--count", f"{last_shipped}..{origin_ref}"],
+    log = subprocess.run(  # nosec B603 B607
+        ["git", "log", "--oneline", f"{last_shipped}..{origin_ref}"],
         cwd=ROOT, capture_output=True, text=True,
     )
-    if ahead.returncode != 0:
+    if log.returncode != 0:
         return None  # last_shipped or origin_ref doesn't resolve locally
-    try:
-        count = int(ahead.stdout.strip())
-    except ValueError:
+    commits = [line for line in log.stdout.splitlines() if line.strip()]
+    if not commits:
         return None
-    if count <= 0:
-        return None
+    count = len(commits)
     plural = "commit" if count == 1 else "commits"
+    max_named = 5
+    named = "; ".join(commits[:max_named])
+    if count > max_named:
+        named += f"; ...and {count - max_named} more"
     return (
         f"NOTE: {origin_ref} carries {count} {plural} beyond this sprint's own recorded "
-        f"last_shipped_commit ({last_shipped}). This means the remote and this record have "
-        "drifted apart — it does NOT mean someone bypassed the push-only-Pipeman rule. The "
-        "most common cause is a second, real ship (often a headless Pipeman's own instance) "
-        "landing after this one, before its own bookkeeping state write caught up. Not a "
-        "block — informational, and worth a fresh /sprint-status re-check, or `git log "
-        f"{last_shipped}..{origin_ref}` to see exactly what's there. (Compares against the "
-        "locally cached view of origin — run `git fetch` first for the freshest picture; a "
-        "stale local view under-reports this, it never over-reports it.)"
+        f"last_shipped_commit ({last_shipped}): {named}. This means the remote and this "
+        "record have drifted apart — it does NOT mean someone bypassed the push-only-Pipeman "
+        "rule. The most common causes: a second, real ship (often a headless Pipeman's own "
+        "instance) landing after this one, before its own bookkeeping state write caught up; "
+        "or ordinary, legitimate work on another sprint landing on the same shared branch — "
+        "any push moves the one tip everyone shares, regardless of which worktree it came "
+        "from. Not a block — informational. (Compares against the locally cached view of "
+        "origin — run `git fetch` first for the freshest picture; a stale local view "
+        "under-reports this, it never over-reports it.)"
     )
 
 
@@ -968,8 +1117,18 @@ def cmd_status(args) -> None:
         if not reg["sprints"]:
             print(f"No sprints yet in {tree_description()}. Use /sprint-new to create one.")
             return
+        # Sprint 29, Req 2: computed ONCE for the whole listing, not once
+        # per sprint — see state_divergence_warning()'s own docstring for
+        # why a caller iterating many sprints passes this in rather than
+        # letting the function re-derive it every time.
+        other_roots = _other_worktree_roots()
         for sid, entry in sorted(reg["sprints"].items(), key=lambda kv: int(kv[0])):
             print(f"Sprint {sid}: {entry['title']} - {entry['status']}")
+            if other_roots:
+                divergence = state_divergence_warning(
+                    int(sid), this_registry_status=entry["status"], other_roots=other_roots)
+                if divergence:
+                    print(f"  {divergence}")
         return
 
     state = load_state(args.id)
@@ -995,6 +1154,13 @@ def cmd_status(args) -> None:
     divergence = worktree_divergence_warning(args.id)
     if divergence:
         print(divergence)
+    # Sprint 29, Req 1/2 (Finding A): the sprint-FILE check above misses
+    # most of the lifecycle (see state_divergence_warning()'s own
+    # docstring) — this is the general check, passing this_phase since
+    # `state` is already loaded here.
+    state_divergence = state_divergence_warning(args.id, this_phase=state["phase"])
+    if state_divergence:
+        print(state_divergence)
     # Sprint 24, Req 3 (Finding C): same "warns, never gates" shape, a
     # different divergence — see origin_ahead_of_record_warning()'s own
     # docstring for why comparing against origin here doesn't repeat the
@@ -1888,6 +2054,34 @@ def cmd_liveqa(args) -> None:
                   f"last_shipped_commit ({last_shipped}) by identity, but their shipped "
                   "content is byte-identical (bookkeeping only). Accepted.")
 
+        # Sprint 29, Req 3 (Finding B): this is also where the branch tip
+        # moving off last_shipped_commit DURING the live gate gets
+        # detected — any push (by any role, on any sprint) moves the one
+        # branch tip the deploy platform tracks, and the docs-only case
+        # (Finding B's own motivating incident: a commit touching only
+        # docs/sprints/, inside sprint 13's ship-hash exclusion, so no
+        # content comparison anywhere could ever see it) is exactly what
+        # this catches, since git rev-list/log counts commits, not paths.
+        #
+        # THE DECISION, STATED RATHER THAN DEFAULTED: THIS WARNS, IT DOES
+        # NOT REFUSE. A refusal's recovery is a reship (Req 3's own named
+        # cost), and the true rate of "something landed on origin since
+        # ship" is high by this framework's own design — Dev Team 2's
+        # worktrees, headless Pipeman instances, and ordinary parallel
+        # sprints all push to the SAME shared branch, so refusing here
+        # would make LiveQA unable to record a verdict on almost any
+        # sprint that isn't the only one in flight, the same
+        # unworkable-for-its-own-model failure Req 1/2's FAIL-level
+        # criteria exist to prevent for the cross-tree warning. A warning
+        # is not "too weak for a gate whose job is testing what is
+        # deployed" (the risk this Req names) BECAUSE this gate's actual
+        # identity/content check just above already refuses on any REAL
+        # content mismatch between --deployed-commit and last_shipped —
+        # this warning's only job is the residual case content can't
+        # cover: origin has moved further than what was even tested,
+        # regardless of whether that content matched. Recording that
+        # fact, naming the commits, is proportionate; blocking every such
+        # verdict is not.
         origin_warning = origin_ahead_of_record_warning(last_shipped)
         if origin_warning:
             print(origin_warning)
@@ -2380,8 +2574,16 @@ def cmd_list(args) -> None:
     if not reg["sprints"]:
         print(f"No sprints yet in {tree_description()}.")
         return
+    # Sprint 29, Req 2: same reasoning as cmd_status's no-id branch —
+    # computed once, reused across every sprint below.
+    other_roots = _other_worktree_roots()
     for sid, entry in sorted(reg["sprints"].items(), key=lambda kv: int(kv[0])):
         print(f"{sid:>3}  {entry['status']:<12} {entry['title']}")
+        if other_roots:
+            divergence = state_divergence_warning(
+                int(sid), this_registry_status=entry["status"], other_roots=other_roots)
+            if divergence:
+                print(f"     {divergence}")
 
 
 def cmd_gates(args) -> None:

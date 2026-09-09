@@ -1590,4 +1590,105 @@ $SCRIPT repoint-shipped-commit "$SPRINT_NOREPOINT" --commit "$MAIN_BRANCH" \
 grep -q "nothing to re-point" /tmp/out.txt || fail "repoint's no-last-shipped-commit refusal message is missing"
 rm -f /tmp/out.txt
 
+echo "== sprint 29, Req 1/2: a sprint closed only in another worktree is surfaced from here (state + registry), on status (both forms) and list =="
+SPRINT_STATE_WT=$(new_sprint "State divergence sprint")
+$SCRIPT start "$SPRINT_STATE_WT" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_STATE_WT work"
+$SCRIPT qa1 "$SPRINT_STATE_WT" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_STATE_WT" > /dev/null
+STATE_WT_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_STATE_WT" --commit "$STATE_WT_COMMIT" > /dev/null
+# A new worktree checks out committed history only, never another
+# worktree's uncommitted files -- sprint_lifecycle.py's own writes never
+# get here any other way, same reason sprint 13's own worktree test
+# commits before branching (line ~980, above).
+git add -A
+git commit -q -m "commit sprint $SPRINT_STATE_WT's shipped state so a second worktree starts from it"
+
+STATE_WT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fully-completely-smoke-state-wt.XXXXXX")"
+git worktree add -q -b smoke-state-wt-branch "$STATE_WT_DIR" > /dev/null
+STATE_WT_SCRIPT="python3 $STATE_WT_DIR/scripts/sprint_lifecycle.py"
+
+# Close it fully, but ONLY inside the other worktree -- nothing here ever
+# commits or pushes that close, exactly the stranding Finding A describes
+# ("/sprint-complete correctly writes where it runs; the close commit
+# never reaches main"). sprint_lifecycle.py never touches git itself, so
+# these writes sit as plain uncommitted files in $STATE_WT_DIR the whole
+# time -- state_divergence_warning() reads worktree files directly, not
+# through git, which is exactly why it can see this at all.
+$STATE_WT_SCRIPT liveqa "$SPRINT_STATE_WT" --deployed-commit "$STATE_WT_COMMIT" --verdict PASS --notes ok > /dev/null
+printf 'closing for the divergence test\n' > /tmp/state_wt_user_said.txt
+$STATE_WT_SCRIPT complete "$SPRINT_STATE_WT" --user-said-file /tmp/state_wt_user_said.txt > /dev/null
+
+# This tree's own phase must be completely unaffected by a close that
+# happened only in the other worktree.
+$SCRIPT status "$SPRINT_STATE_WT" 2>&1 | grep -qE "Phase: (liveqa_live|groundtruth_live)" || \
+  fail "test setup: this tree's own phase should be unaffected by a close in the other worktree"
+
+STATUS_STATE_OUT=$($SCRIPT status "$SPRINT_STATE_WT" 2>&1)
+echo "$STATUS_STATE_OUT" | grep -q "WARNING" || \
+  fail "status <id> did not surface the stranded close (Req 1 state+registry divergence) -- output: $STATUS_STATE_OUT"
+echo "$STATUS_STATE_OUT" | grep -q "phase 'complete'" || \
+  fail "status <id>'s state-divergence warning doesn't name the other tree's phase"
+echo "$STATUS_STATE_OUT" | grep -qF "$(basename "$STATE_WT_DIR")" || \
+  fail "status <id>'s state-divergence warning doesn't name the diverging worktree's path"
+
+$SCRIPT list 2>&1 | grep -E "^ *${SPRINT_STATE_WT} " -A1 | grep -q "WARNING" || \
+  fail "list did not surface the stranded close next to the sprint it applies to (Req 2)"
+$SCRIPT status 2>&1 | grep -F "Sprint ${SPRINT_STATE_WT}:" -A1 | grep -q "WARNING" || \
+  fail "status with no id did not surface the stranded close (Req 2)"
+
+git worktree remove --force "$STATE_WT_DIR" > /dev/null 2>&1 || rm -rf "$STATE_WT_DIR"
+rm -f /tmp/state_wt_user_said.txt
+
+echo "== sprint 29, Req 1/2: identical state across trees produces no warning, on status (both forms) and list =="
+SPRINT_STATE_CLEAN=$(new_sprint "State agreement sprint")
+$SCRIPT start "$SPRINT_STATE_CLEAN" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_STATE_CLEAN work"
+$SCRIPT qa1 "$SPRINT_STATE_CLEAN" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_STATE_CLEAN" > /dev/null
+git add -A
+git commit -q -m "commit sprint $SPRINT_STATE_CLEAN's state so a second worktree starts from an identical copy"
+
+STATE_CLEAN_WT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fully-completely-smoke-state-clean-wt.XXXXXX")"
+git worktree add -q -b smoke-state-clean-wt-branch "$STATE_CLEAN_WT_DIR" > /dev/null
+
+$SCRIPT status "$SPRINT_STATE_CLEAN" 2>&1 | grep -q "WARNING" && \
+  fail "status <id> warned about state divergence when the other worktree's state is genuinely identical"
+$SCRIPT list 2>&1 | grep -E "^ *${SPRINT_STATE_CLEAN} " -A1 | grep -q "WARNING" && \
+  fail "list warned about state divergence when the other worktree's state is genuinely identical"
+$SCRIPT status 2>&1 | grep -F "Sprint ${SPRINT_STATE_CLEAN}:" -A1 | grep -q "WARNING" && \
+  fail "status with no id warned about state divergence when the other worktree's state is genuinely identical"
+
+git worktree remove --force "$STATE_CLEAN_WT_DIR" > /dev/null 2>&1 || rm -rf "$STATE_CLEAN_WT_DIR"
+
+echo "== sprint 29, Req 3: a branch tip moving off last_shipped_commit during liveqa_live is detected and the landed commit is named, including a docs-only push =="
+SPRINT_TIPMOVE=$(new_sprint "Tip move sprint")
+$SCRIPT start "$SPRINT_TIPMOVE" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_TIPMOVE work"
+$SCRIPT qa1 "$SPRINT_TIPMOVE" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_TIPMOVE" > /dev/null
+TIPMOVE_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_TIPMOVE" --commit "$TIPMOVE_COMMIT" > /dev/null
+git push -q origin HEAD:main
+
+# A push touching ONLY docs/sprints/ -- inside sprint 13's own
+# SHIP_HASH_EXCLUDE_PATTERNS, so no content-based comparison anywhere
+# could ever see this land. This is Finding B's own motivating incident
+# (commit 4d67199, touching only docs/sprints/1-todo/... and
+# registry.json), reproduced directly rather than assumed equivalent.
+echo "placeholder" > "docs/sprints/1-todo/tipmove-placeholder-${SPRINT_TIPMOVE}.md"
+git add "docs/sprints/1-todo/tipmove-placeholder-${SPRINT_TIPMOVE}.md"
+git commit -q -m "docs-only bookkeeping landing during sprint ${SPRINT_TIPMOVE}'s live gate"
+TIPMOVE_DOCS_COMMIT=$(git rev-parse HEAD)
+git push -q origin HEAD:main
+
+LIVEQA_TIPMOVE_OUT=$($SCRIPT liveqa "$SPRINT_TIPMOVE" --deployed-commit "$TIPMOVE_COMMIT" --verdict PASS --notes ok 2>&1) || \
+  fail "liveqa refused (or failed) solely because the branch tip moved during the live gate -- Req 3 must never gate on this -- output: $LIVEQA_TIPMOVE_OUT"
+echo "$LIVEQA_TIPMOVE_OUT" | grep -q "carries 1 commit beyond this sprint's own recorded last_shipped_commit" || \
+  fail "liveqa did not detect the branch tip moving off last_shipped_commit during the live gate (Req 3) -- output: $LIVEQA_TIPMOVE_OUT"
+echo "$LIVEQA_TIPMOVE_OUT" | grep -qF "${TIPMOVE_DOCS_COMMIT:0:7}" || \
+  fail "liveqa's tip-move warning doesn't name the actual commit that landed (Req 3: 'say which commits landed since') -- output: $LIVEQA_TIPMOVE_OUT"
+rm -f "docs/sprints/1-todo/tipmove-placeholder-${SPRINT_TIPMOVE}.md"
+
 echo "ALL SMOKE TESTS PASSED"
