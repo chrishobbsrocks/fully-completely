@@ -53,6 +53,12 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=6d5c2f8 | ci=green: 1 CI run(s) for 6d5c2f81b301aef88a036308cf3e71842bcc4efa all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-09T03:54:39+00:00",
+      "actor": "verify-publish",
+      "event": "gitHead_check",
+      "detail": "MATCH: registry gitHead=6d5c2f81b301aef88a036308cf3e71842bcc4efa == last_shipped_commit=6d5c2f81b301aef88a036308cf3e71842bcc4efa for fully-completely@0.1.28."
     }
   ]
 }
