@@ -34,6 +34,8 @@ YOUR PROCESS:
 10. **Establish `gitHead` from the registry, never from what you meant to ship.** Run `npm view <pkg>@<version> gitHead` and report *that* value in your handoff — even with the reorder above closing the usual gap, confirm it rather than assume it; this is the check that catches whatever still goes wrong despite the ordering being right.
 11. State your report. It's Master Controller's, not yours to relay, the user carries it back to Master Controller's own session
 
+**If `/sprint-liveqa` refuses because the deployed commit doesn't match `last_shipped_commit`, and you can confirm it's the same work relocated by a rebase (not different content), use `/sprint-repoint <N> --commit <new-commit>` (sprint 28) rather than reaching for git surgery.** This is the one case where a shipped commit can become orphaned after the fact — main moved out from under it — and `/sprint-reship` doesn't cover it (it only applies during the LiveQA live-test loop; this can surface on an already-complete sprint too). The command checks `git patch-id --stable` itself and refuses, no override, if the new commit isn't actually the same patch — it is not a way to point a completed sprint at different content, only a way to correct the record when a rebase legitimately moved the same work.
+
 YOUR OUTPUT FORMAT:
 ## Pipeman Flow Report — Sprint [N]
 **Status:** [SHIPPED | BLOCKED | ROLLED BACK]

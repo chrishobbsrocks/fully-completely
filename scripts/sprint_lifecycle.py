@@ -572,6 +572,32 @@ def git_commit_sha(ref: str) -> Optional[str]:
         return None
 
 
+def is_commit_reachable(commit: str, ref: str = "HEAD") -> bool:
+    """Sprint 28, Req 2: is `commit` actually reachable from `ref` (an
+    ancestor of it, or equal to it)? A commit already unreachable at ship
+    time should never become last_shipped_commit — nothing checked this
+    before this Req, and it is exactly how a hash could be recorded for
+    something that a subsequent push doesn't actually carry.
+
+    `git merge-base --is-ancestor <commit> <ref>` — exit 0 means yes
+    (including commit == ref, confirmed by running: a commit is its own
+    ancestor), exit 1 means no (cleanly, no stderr noise), any other exit
+    code (128 for a ref that doesn't resolve at all, `gh`-style tool
+    failures) means "couldn't determine" and is treated as NOT reachable
+    here — the conservative branch, deliberately: this Req exists to stop
+    an unverifiable commit from being recorded as shipped, so a check
+    that can't run must refuse exactly like a check that ran and found
+    the commit missing, never silently wave it through."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "merge-base", "--is-ancestor", commit, ref],
+            cwd=ROOT, capture_output=True, text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return False
+    return result.returncode == 0
+
+
 def is_git_repository() -> bool:
     """True only if ROOT is inside a real git working tree. Sprint 7, Req
     12: git_tree_hash_excluding() and git_commit_sha() above both collapse two very
@@ -1177,6 +1203,44 @@ CI_STATUS_RED = "red"
 CI_STATUS_UNDETERMINABLE = "undeterminable"
 
 
+def workflows_configured_at(commit_sha: str) -> bool:
+    """Sprint 28, Req 1: the local discriminator between "no CI is
+    configured" and "CI is configured but produced no run for this
+    commit" — `.github/workflows/` in the repository AT THE COMMIT BEING
+    SHIPPED, not at HEAD or on GitHub's current view of the repo.
+
+    ESTABLISHED BY RUNNING, per this Req's own instruction to check
+    whether `gh` also separates the two cases and prefer whichever is
+    more reliable: `gh workflow list` DOES report configured workflows,
+    but it reads GitHub's current state of the default branch, not the
+    tree at any specific commit — wrong question for a check that is
+    supposed to be scoped to "the exact commit", the same principle
+    `check_ci_status()`'s own docstring already states for run lookups.
+    It also requires network and auth. `git ls-tree -r --name-only
+    <commit_sha> -- .github/workflows/` answers the precise question (did
+    THIS commit's tree have workflow files) with no API call and nothing
+    that can fail for network reasons — confirmed directly: it exits 0
+    and prints matching paths when they exist, and exits 0 with empty
+    output (not an error) when the path doesn't exist in that tree at
+    all, verified against both a real commit in this repo and a scratch
+    repo with no .github/workflows/ whatsoever.
+
+    Returns False (i.e. "nothing configured") on any subprocess failure
+    too — collapsing "couldn't check" into the benign case is deliberate
+    here and asymmetric with check_ci_status()'s own None-handling: a
+    tool failure on THIS check must never manufacture the "workflows
+    exist but produced nothing" alarm, which is what would make a ship
+    gate flaky for a reason that has nothing to do with CI."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "ls-tree", "-r", "--name-only", commit_sha, "--", ".github/workflows/"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return False
+    return bool(result.stdout.strip())
+
+
 def check_ci_status(commit_sha: str):
     """Returns (status, detail). status is one of CI_STATUS_GREEN,
     CI_STATUS_RED, CI_STATUS_UNDETERMINABLE — never raises, mirroring
@@ -1216,12 +1280,27 @@ def check_ci_status(commit_sha: str):
 
     CI_STATUS_UNDETERMINABLE fires when: `gh` isn't installed/
     authenticated or this isn't a GitHub repository (the subprocess call
-    itself fails); no runs exist yet for this exact commit (no CI
-    configured, or it hasn't started); or every run found is still
-    pending. Per this Req's own explicit instruction, undeterminable is
-    NOT treated as red — a project with no CI, or CI this tool can't see,
-    must not become unshippable by accident. Both callers — cmd_ship AND
-    cmd_reship (Req 4, added mid-flight once QA1 named the gap: a
+    itself fails); no CI is configured at all for this commit (see below);
+    or every run found is still pending. Per this Req's own explicit
+    instruction, undeterminable is NOT treated as red — a project with no
+    CI, or CI this tool can't see, must not become unshippable by
+    accident.
+
+    Sprint 28, Req 1: "no runs exist yet for this exact commit" used to be
+    a single undeterminable case, and it isn't one — it conflates "no CI
+    configured" (benign) with "workflows exist and produced nothing for
+    this commit" (not benign: indistinguishable from a pipeline broken
+    badly enough to never even start, which is a real incident this
+    project shipped over silently). workflows_configured_at(commit_sha)
+    (above) is the split: no workflow files in this commit's own tree
+    stays CI_STATUS_UNDETERMINABLE with the same benign wording as
+    before; workflow files present but zero runs found for this commit
+    is graded CI_STATUS_RED — reusing the existing refuse-and-say-why
+    path in both callers below rather than inventing a fourth status, so
+    "distinguished in behaviour, not only in wording" (this Req's own
+    acceptance criterion) falls out of the existing branches for free.
+
+    Both callers — cmd_ship AND cmd_reship (Req 4, added mid-flight once QA1 named the gap: a
     reshipped commit has never been through QA1's static audit at all,
     so exempting it here would give the least-audited path the least
     mechanical scrutiny) — print this as a warning and proceed; neither
@@ -1261,9 +1340,22 @@ def check_ci_status(commit_sha: str):
     except json.JSONDecodeError:
         return (CI_STATUS_UNDETERMINABLE, f"gh run list returned unparseable output for {commit_sha}.")
     if not runs:
-        return (CI_STATUS_UNDETERMINABLE,
-                f"no CI runs found for commit {commit_sha} — either no CI is configured, or "
-                "it hasn't run yet for this exact commit.")
+        # Sprint 28, Req 1: the split. workflows_configured_at() answers
+        # from the commit's own tree, no API call, can't fail for network
+        # reasons — see that function's own docstring for why it's
+        # preferred over asking `gh` the same question.
+        if not workflows_configured_at(commit_sha):
+            return (CI_STATUS_UNDETERMINABLE,
+                    f"no CI runs found for commit {commit_sha}, and no CI is configured "
+                    "(.github/workflows/ is empty or absent in this commit's own tree) — benign, "
+                    "this project has no CI for this tool to see.")
+        return (CI_STATUS_RED,
+                f"workflows are configured (.github/workflows/ is non-empty in commit {commit_sha}'s "
+                "own tree) but gh found zero runs for this exact commit — indistinguishable from a "
+                "pipeline broken badly enough to never even start (a bad trigger condition, a "
+                "workflow-syntax error, CI not yet caught up). Not treated as benign undeterminable: "
+                "unlike 'no CI configured', this is exactly what a silently broken pipeline looks "
+                "like. If CI genuinely hasn't had time to start yet, wait for it and retry.")
 
     problems = []
     pending = []
@@ -1378,6 +1470,22 @@ def cmd_ship(args) -> None:
         if shipped_commit is None:
             die(f"'{args.commit}' resolved a tree hash but not a full commit SHA - "
                 "unexpected, please investigate before shipping.")
+
+        # Sprint 28, Req 2: nothing checked, before this, that the commit
+        # being recorded as shipped is actually reachable from the branch
+        # being pushed. pipeman.md's documented flow pushes shipped_commit
+        # to remote BEFORE this command runs (see the comment just below),
+        # so at this point it should already be part of local HEAD's
+        # history — a stale/typo'd --commit, or a rebase/reset landing
+        # between the push and this command, are exactly the cases this
+        # catches. Checked BEFORE last_shipped_commit is ever written
+        # (this Req's own ordering requirement), against local HEAD, since
+        # that's what pipeman.md's flow pushes.
+        if not is_commit_reachable(shipped_commit, "HEAD"):
+            die(f"Sprint {args.id}: {shipped_commit} is not reachable from HEAD — it is not an "
+                "ancestor of the branch you're about to push (or you're not on that branch). A "
+                "commit already unreachable at ship time must never become last_shipped_commit. "
+                "Confirm you're on the right branch and --commit is correct. No override.")
 
         # Sprint 24, Req 2: by this point pipeman.md's own documented flow
         # has already pushed shipped_commit to remote (step 6, before
@@ -2068,6 +2176,138 @@ def cmd_rename(args) -> None:
           "a bug.")
 
 
+def commit_patch_id(commit: str) -> Optional[str]:
+    """Sprint 28, Req 3: a content-equivalence check for "is this the same
+    patch, relocated" -- deliberately NOT git_tree_hash_excluding(), which
+    answers a different question (see cmd_repoint()'s own docstring and
+    Req 4). `git patch-id --stable` hashes a diff's actual content
+    independent of the commit's parent or position in history, which is
+    exactly the property a rebase/cherry-pick preserves and a tree hash
+    does not (a relocated commit's resulting TREE differs from the
+    original's by definition -- it now sits on a different base).
+    `--stable` (not the default `git patch-id` mode) keeps the id stable
+    across git versions/whitespace-context churn, per its own man page.
+
+    ESTABLISHED BY RUNNING: `git show <commit> | git patch-id --stable`
+    gives the SAME id for a commit and a cherry-picked copy of it onto a
+    different base (confirmed directly, this sprint, in a scratch repo:
+    identical patch-id for the original and a relocated copy carrying
+    unrelated commits underneath it), and a DIFFERENT id for genuinely
+    different content. `git show`'s own commit-message header above the
+    diff does not confuse `git patch-id`, which parses only the diff
+    hunks -- also confirmed directly rather than assumed from its man
+    page.
+
+    Returns None on any failure to compute one: the commit doesn't
+    resolve, `git show`/`git patch-id` aren't available, or the diff is
+    empty (a `git show` on a genuinely content-free commit produces no
+    patch-id line -- rare, but real, and "no failure" would be the wrong
+    signal to give a caller that exists specifically to refuse on
+    anything it can't verify)."""
+    try:
+        shown = subprocess.run(  # nosec B603 B607
+            ["git", "show", commit],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    try:
+        patch_id_proc = subprocess.run(  # nosec B603 B607
+            ["git", "patch-id", "--stable"],
+            cwd=ROOT, input=shown.stdout, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    line = patch_id_proc.stdout.strip()
+    if not line:
+        return None
+    return line.split()[0]
+
+
+def cmd_repoint(args) -> None:
+    """Sprint 28, Req 3: recover a shipped commit orphaned by a rebase, by
+    re-pointing last_shipped_commit at a commit whose git patch-id
+    matches the orphaned one -- checked every time, never asserted, and
+    refused (no override) on any mismatch or any failure to compute
+    either patch-id at all. See commit_patch_id()'s own docstring for why
+    patch-id, not a tree hash, is the right equivalence check here.
+
+    NO PHASE RESTRICTION, unlike every other lifecycle transition in this
+    file except cmd_rename (same precedent, same reasoning: this recovery
+    exists BECAUSE the normal phase-gated paths have no way out here).
+    Context Finding B is explicit that this surfaces on a COMPLETE
+    sprint -- cmd_reship refuses there (LIVEQA_PHASES only, its whole
+    reason for existing is the live-test fix loop), and hand-editing
+    docs/sprints/state/ is forbidden. The only real precondition is that
+    a last_shipped_commit already exists to re-point; nothing else to
+    recover otherwise. This also means the same command works whether
+    Pipeman meets this failure mid-liveqa_live or after the sprint is
+    already complete -- one mechanism, not two.
+
+    Req 4's own instruction, worth restating here since this is the one
+    function that could quietly violate it: this does NOT touch, read, or
+    call git_tree_hash_excluding() anywhere. The ship gate's tree
+    comparison answers "is this what QA1 audited" and must keep doing
+    that with trees, unchanged -- patch-id answers a genuinely different
+    question ("is this the same work, relocated") and belongs only here,
+    a separate command Pipeman chooses to run, never folded into
+    /sprint-ship itself.
+
+    Deliberately does NOT re-run any other check last_shipped_commit
+    feeds (cmd_liveqa's deployed-commit comparison, cmd_status's
+    origin-ahead warning) -- re-pointing the field is the whole job;
+    whatever reads it next re-evaluates against the new value on its own,
+    exactly as it would if last_shipped_commit had always held that
+    value."""
+    with locked(f"sprint-{args.id}"):
+        state = load_state(args.id)
+        old_commit = state.get("last_shipped_commit")
+        if not old_commit:
+            die(f"Sprint {args.id} has no last_shipped_commit on record -- nothing to re-point. "
+                "This recovery is for a commit that WAS shipped and later became unreachable "
+                "(a rebase, typically), not a substitute for /sprint-ship.")
+
+        if not is_git_repository():
+            die(f"{ROOT} is not a git repository. Run this from inside a real git repository - "
+                "there is nothing here for --commit to resolve against.")
+
+        new_commit = git_commit_sha(args.commit) if args.commit else None
+        if new_commit is None:
+            die(f"'{args.commit or ''}' does not resolve to a real commit in this repo. "
+                "--commit must be the commit that now carries the same work, after the rebase.")
+
+        if new_commit == old_commit:
+            die(f"Sprint {args.id}'s last_shipped_commit is already {old_commit} -- nothing to "
+                "re-point.")
+
+        # Req 3's own FAIL-level criterion: a re-point succeeding on an
+        # unmatched patch-id is a FAIL, not a CONDITIONAL. No override
+        # exists on this branch, and none should be added.
+        old_patch_id = commit_patch_id(old_commit)
+        new_patch_id = commit_patch_id(new_commit)
+        if old_patch_id is None or new_patch_id is None:
+            die(f"Sprint {args.id}: could not compute a patch-id for both {old_commit} and "
+                f"{new_commit} (old={old_patch_id}, new={new_patch_id}) -- refusing to re-point "
+                "without a checked equivalence. If the old commit object no longer exists at all "
+                "(pruned, not merely unreachable), there is nothing left here to verify against, "
+                "and this recovery does not apply.")
+        if old_patch_id != new_patch_id:
+            die(f"Sprint {args.id}: {new_commit} is NOT the same patch as {old_commit} "
+                f"(patch-id {new_patch_id} != {old_patch_id}). Refusing to re-point -- this "
+                "recovery restores a path for a commit relocated by a rebase; it is not a way to "
+                "point a completed sprint at different content. No override.")
+
+        log_event(state, "pipeman", "repointed_shipped_commit",
+                  f"old={old_commit} new={new_commit} patch_id={new_patch_id} (verified equal on "
+                  "both commits via git patch-id --stable)")
+        state["last_shipped_commit"] = new_commit
+        save_state(args.id, state)
+    print(f"Sprint {args.id}: last_shipped_commit re-pointed {old_commit} -> {new_commit}.")
+    print(f"  patch-id {new_patch_id} confirmed equal on both commits -- recorded in history.")
+    print("  The ship gate's own tree comparison is untouched by this command (Req 4); only "
+          "last_shipped_commit changed.")
+
+
 def cmd_override(args) -> None:
     """Human-only escape hatch. Deliberately absent from .claude/commands/ (no
     slash command wraps this) and never mentioned in CLAUDE.md or any agent
@@ -2363,6 +2603,20 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("ship"); s.add_argument("id", type=int); s.add_argument("--commit", default=""); s.set_defaults(func=cmd_ship)
 
     s = sub.add_parser("reship"); s.add_argument("id", type=int); s.add_argument("--commit", default=""); s.set_defaults(func=cmd_reship)
+
+    s = sub.add_parser("repoint-shipped-commit",
+                        help="Sprint 28, Req 3: recover a last_shipped_commit orphaned by a "
+                        "rebase — re-points it to --commit only after confirming (via git "
+                        "patch-id --stable, no override on a mismatch) that --commit carries the "
+                        "exact same patch as the commit currently on record. No phase "
+                        "restriction: this is the recovery for exactly the case where the "
+                        "normal phase-gated paths (reship, a fresh ship) have no way back, "
+                        "including on a sprint that's already complete.")
+    s.add_argument("id", type=int)
+    s.add_argument("--commit", default="",
+                    help="The commit that now carries the same work as the orphaned "
+                    "last_shipped_commit, after whatever rebase relocated it.")
+    s.set_defaults(func=cmd_repoint)
 
     s = sub.add_parser("verify-publish",
                         help="Sprint 13: mechanically verify a shipped sprint's registry "

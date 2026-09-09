@@ -1420,4 +1420,174 @@ events = [h['event'] for h in state['history']]
 assert 'sprint_file_drift_since_audit' not in events, f'a drift event was recorded when nothing drifted: {events}'
 "
 
+MAIN_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+echo "== sprint 28, Req 1: no workflows configured at all still ships as the benign undeterminable case (baseline, unaffected by the split) =="
+SPRINT_CI_NOWF=$(new_sprint "CI no-workflows sprint")
+$SCRIPT start "$SPRINT_CI_NOWF" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_CI_NOWF work, deliberately no .github/workflows/"
+$SCRIPT qa1 "$SPRINT_CI_NOWF" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_CI_NOWF" > /dev/null
+CI_NOWF_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=none $SCRIPT ship "$SPRINT_CI_NOWF" --commit "$CI_NOWF_COMMIT" \
+  > /tmp/out.txt 2>&1 || fail "ship refused with no workflows configured at all -- must stay the benign undeterminable case (sprint 24's own rule)"
+grep -q "no CI is configured" /tmp/out.txt || fail "ship's no-workflows-at-all warning doesn't say CI genuinely isn't configured"
+rm -f /tmp/out.txt
+
+echo "== sprint 28, Req 1: workflows configured but no CI run found for the commit is graded RED (refuses), NOT the benign undeterminable case =="
+SPRINT_CI_SPLIT=$(new_sprint "CI split sprint")
+$SCRIPT start "$SPRINT_CI_SPLIT" > /dev/null
+mkdir -p .github/workflows
+echo "name: ci" > .github/workflows/ci.yml
+git add .github/workflows
+git commit -q -m "sprint $SPRINT_CI_SPLIT: a workflow file exists, no run will ever exist for this fake commit"
+$SCRIPT qa1 "$SPRINT_CI_SPLIT" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_CI_SPLIT" > /dev/null
+CI_SPLIT_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=none $SCRIPT ship "$SPRINT_CI_SPLIT" --commit "$CI_SPLIT_COMMIT" \
+  > /tmp/out.txt 2>&1 && fail "ship succeeded when workflows are configured but no CI run was found for the commit -- must refuse, not silently proceed" || true
+grep -q "workflows are configured" /tmp/out.txt || fail "ship's workflows-configured-no-run refusal doesn't name the case"
+grep -q "indistinguishable from a pipeline broken" /tmp/out.txt || fail "ship's workflows-configured-no-run refusal doesn't explain why this isn't benign"
+$SCRIPT status "$SPRINT_CI_SPLIT" 2>&1 | grep -q "Phase: dev_agreed_done" || \
+  fail "a workflows-configured-no-run ship attempt must not have moved the sprint's phase"
+rm -f /tmp/out.txt
+
+echo "== sprint 28, Req 1: the same sprint still ships cleanly once a run genuinely exists and is green -- not a permanent lockout =="
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_CI_SPLIT" --commit "$CI_SPLIT_COMMIT" \
+  > /tmp/out.txt 2>&1 || fail "ship refused a workflows-configured commit with a genuinely green run -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 28, Req 1: reship gets the identical workflows-configured-no-run treatment as ship (same question, same answer) =="
+SPRINT_RESHIP_SPLIT=$(new_sprint "Reship CI split sprint")
+$SCRIPT start "$SPRINT_RESHIP_SPLIT" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_RESHIP_SPLIT work"
+$SCRIPT qa1 "$SPRINT_RESHIP_SPLIT" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_RESHIP_SPLIT" > /dev/null
+RESHIP_SPLIT_SHIPPED=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_RESHIP_SPLIT" --commit "$RESHIP_SPLIT_SHIPPED" > /dev/null
+$SCRIPT liveqa "$SPRINT_RESHIP_SPLIT" --deployed-commit "$RESHIP_SPLIT_SHIPPED" --verdict FAIL --notes "found a bug" > /dev/null
+git commit -q --allow-empty -m "fix for sprint $SPRINT_RESHIP_SPLIT, workflows are already configured by now"
+RESHIP_SPLIT_FIX=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=none $SCRIPT reship "$SPRINT_RESHIP_SPLIT" --commit "$RESHIP_SPLIT_FIX" \
+  > /tmp/out.txt 2>&1 && fail "reship succeeded when workflows are configured but no CI run was found for the commit (Req 1 regression)" || true
+grep -q "workflows are configured" /tmp/out.txt || fail "reship's workflows-configured-no-run refusal doesn't name the case"
+rm -f /tmp/out.txt
+
+echo "== sprint 28, Req 2: ship refuses when --commit is not reachable from HEAD, before ever recording it as last_shipped_commit =="
+SPRINT_UNREACH=$(new_sprint "Unreachable commit sprint")
+$SCRIPT start "$SPRINT_UNREACH" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_UNREACH work"
+$SCRIPT qa1 "$SPRINT_UNREACH" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_UNREACH" > /dev/null
+UNREACH_MAIN_HEAD=$(git rev-parse HEAD)
+# A real, valid commit object that is nonetheless not an ancestor of HEAD:
+# branch off, add an empty commit (same tree content as its parent, so the
+# ship gate's own tree-hash check still matches the audited tree and lets
+# execution reach the reachability check being tested here), then return to
+# the main branch WITHOUT that commit ever merging in. Left on its own
+# branch rather than deleted -- reachable from HEAD is what's being tested,
+# not reachable from anywhere at all, and a throwaway sandbox needs no
+# cleanup beyond the final rm -rf.
+git checkout -q -b unreachable-throwaway
+git commit -q --allow-empty -m "a commit that will never be on $MAIN_BRANCH"
+UNREACHABLE_COMMIT=$(git rev-parse HEAD)
+git checkout -q "$MAIN_BRANCH"
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_UNREACH" --commit "$UNREACHABLE_COMMIT" \
+  > /tmp/out.txt 2>&1 && fail "ship succeeded for a commit that is not reachable from HEAD" || true
+grep -q "is not reachable from HEAD" /tmp/out.txt || fail "ship's unreachable-commit refusal message is missing"
+$SCRIPT status "$SPRINT_UNREACH" --verbose 2>&1 | grep -qF "$UNREACHABLE_COMMIT" && \
+  fail "an unreachable commit must never be recorded as last_shipped_commit"
+$SCRIPT status "$SPRINT_UNREACH" 2>&1 | grep -q "Phase: dev_agreed_done" || \
+  fail "a ship refused for unreachability must not have moved the sprint's phase"
+rm -f /tmp/out.txt
+
+echo "== sprint 28, Req 2: the same sprint ships fine once given a genuinely reachable commit -- not a permanent lockout =="
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_UNREACH" --commit "$UNREACH_MAIN_HEAD" \
+  > /tmp/out.txt 2>&1 || fail "ship refused a genuinely reachable commit -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 28, Req 3: repoint-shipped-commit re-points last_shipped_commit to a patch-id-equivalent (relocated) commit, and records the equivalence =="
+SPRINT_REPOINT=$(new_sprint "Repoint sprint")
+$SCRIPT start "$SPRINT_REPOINT" > /dev/null
+echo "repoint sprint content" > "repoint-${SPRINT_REPOINT}.txt"
+git add "repoint-${SPRINT_REPOINT}.txt"
+git commit -q -m "sprint $SPRINT_REPOINT work"
+$SCRIPT qa1 "$SPRINT_REPOINT" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_REPOINT" > /dev/null
+REPOINT_ORIGINAL=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_REPOINT" --commit "$REPOINT_ORIGINAL" > /dev/null
+
+# Simulate the Context Finding B shape: a rebase relocates the exact same
+# patch onto a different base (unrelated work landing underneath it) --
+# cherry-pick, which by construction preserves patch content while
+# changing the commit's parent (and therefore its own SHA and tree).
+git checkout -q -b repoint-relocated "${REPOINT_ORIGINAL}~1"
+git commit -q --allow-empty -m "unrelated work underneath, simulating the moved base"
+git cherry-pick "$REPOINT_ORIGINAL" > /dev/null
+REPOINT_RELOCATED=$(git rev-parse HEAD)
+git checkout -q "$MAIN_BRANCH"
+
+$SCRIPT repoint-shipped-commit "$SPRINT_REPOINT" --commit "$REPOINT_RELOCATED" \
+  > /tmp/out.txt 2>&1 || fail "repoint-shipped-commit refused a genuinely patch-id-equivalent relocated commit -- output: $(cat /tmp/out.txt)"
+grep -q "re-pointed" /tmp/out.txt || fail "repoint's success message is missing"
+grep -qF "$REPOINT_RELOCATED" /tmp/out.txt || fail "repoint's success message doesn't name the new commit"
+$SCRIPT status "$SPRINT_REPOINT" --verbose 2>&1 | grep -qF "$REPOINT_RELOCATED" || \
+  fail "repoint should have updated last_shipped_commit to the relocated commit"
+python3 -c "
+import json
+state = json.load(open('docs/sprints/state/sprint-${SPRINT_REPOINT}.json'))
+events = [h['event'] for h in state['history']]
+assert 'repointed_shipped_commit' in events, f'no repointed_shipped_commit event recorded: {events}'
+last = [h for h in state['history'] if h['event'] == 'repointed_shipped_commit'][-1]
+assert '$REPOINT_ORIGINAL' in last['detail'], f'repoint history entry does not name the old commit: {last[\"detail\"]}'
+assert '$REPOINT_RELOCATED' in last['detail'], f'repoint history entry does not name the new commit: {last[\"detail\"]}'
+assert 'patch_id' in last['detail'], f'repoint history entry does not record the patch-id: {last[\"detail\"]}'
+"
+rm -f /tmp/out.txt
+
+echo "== sprint 28, Req 3: repoint-shipped-commit refuses a commit whose patch-id does NOT match -- FAIL, no override =="
+echo "totally different content" > "repoint-unrelated-${SPRINT_REPOINT}.txt"
+git add "repoint-unrelated-${SPRINT_REPOINT}.txt"
+git commit -q -m "unrelated commit, not the same patch at all"
+REPOINT_UNRELATED=$(git rev-parse HEAD)
+$SCRIPT repoint-shipped-commit "$SPRINT_REPOINT" --commit "$REPOINT_UNRELATED" \
+  > /tmp/out.txt 2>&1 && fail "repoint-shipped-commit succeeded on a commit whose patch-id does not match -- must refuse, no override" || true
+grep -q "is NOT the same patch as" /tmp/out.txt || fail "repoint's patch-id-mismatch refusal message is missing"
+$SCRIPT status "$SPRINT_REPOINT" --verbose 2>&1 | grep -qF "$REPOINT_UNRELATED" && \
+  fail "a patch-id-mismatched commit must never be recorded as last_shipped_commit"
+$SCRIPT status "$SPRINT_REPOINT" --verbose 2>&1 | grep -qF "$REPOINT_RELOCATED" || \
+  fail "last_shipped_commit should still be the relocated commit after a refused repoint attempt"
+rm -f /tmp/out.txt
+
+echo "== sprint 28, Req 3: repoint-shipped-commit works on an already-COMPLETE sprint, not just mid-liveqa -- the whole reason it exists (Context Finding B) =="
+$SCRIPT liveqa "$SPRINT_REPOINT" --deployed-commit "$REPOINT_RELOCATED" --verdict PASS --notes ok > /dev/null
+printf 'closing repoint sprint for the test\n' > /tmp/user_said_repoint.txt
+$SCRIPT complete "$SPRINT_REPOINT" --user-said-file /tmp/user_said_repoint.txt > /dev/null
+$SCRIPT status "$SPRINT_REPOINT" 2>&1 | grep -q "Phase: complete" || fail "test setup: sprint should be complete before this check"
+$SCRIPT reship "$SPRINT_REPOINT" --commit "$REPOINT_RELOCATED" > /tmp/out.txt 2>&1 && \
+  fail "test setup check: reship should refuse on a complete sprint, it succeeded instead" || true
+git checkout -q -b repoint-relocated-2 "${REPOINT_ORIGINAL}~1"
+git commit -q --allow-empty -m "different unrelated work underneath, second relocation"
+git cherry-pick "$REPOINT_ORIGINAL" > /dev/null
+REPOINT_RELOCATED_2=$(git rev-parse HEAD)
+git checkout -q "$MAIN_BRANCH"
+$SCRIPT repoint-shipped-commit "$SPRINT_REPOINT" --commit "$REPOINT_RELOCATED_2" \
+  > /tmp/out.txt 2>&1 || fail "repoint-shipped-commit refused on a complete sprint -- this is exactly the dead end it exists to fix. output: $(cat /tmp/out.txt)"
+$SCRIPT status "$SPRINT_REPOINT" --verbose 2>&1 | grep -qF "$REPOINT_RELOCATED_2" || \
+  fail "repoint should have updated last_shipped_commit even on a complete sprint"
+rm -f /tmp/out.txt /tmp/user_said_repoint.txt
+
+echo "== sprint 28, Req 4: the ship gate's own tree comparison is unaffected -- patch-id appears nowhere in git_tree_hash_excluding's call graph =="
+if grep -n "patch.id\|patch_id" scripts/sprint_lifecycle.py | grep -qi "git_tree_hash_excluding\|cmd_ship\b"; then
+  fail "patch-id logic appears to have leaked into the ship gate's tree comparison (Req 4 regression) -- see the matching grep line above"
+fi
+
+echo "== sprint 28, Req 3: repoint-shipped-commit refuses cleanly when the sprint has no last_shipped_commit to re-point =="
+SPRINT_NOREPOINT=$(new_sprint "No repoint target sprint")
+$SCRIPT start "$SPRINT_NOREPOINT" > /dev/null
+$SCRIPT repoint-shipped-commit "$SPRINT_NOREPOINT" --commit "$MAIN_BRANCH" \
+  > /tmp/out.txt 2>&1 && fail "repoint-shipped-commit succeeded on a sprint with no last_shipped_commit on record" || true
+grep -q "nothing to re-point" /tmp/out.txt || fail "repoint's no-last-shipped-commit refusal message is missing"
+rm -f /tmp/out.txt
+
 echo "ALL SMOKE TESTS PASSED"
