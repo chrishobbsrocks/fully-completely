@@ -1,0 +1,27 @@
+{
+  "id": 28,
+  "title": "Split the undeterminable CI case, and give an orphaned shipped commit a way back",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-09-09T19:50:53+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-09-09T19:50:53+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ],
+  "last_claim": {
+    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-09T19:50:53+00:00"
+  }
+}

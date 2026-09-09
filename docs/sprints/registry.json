@@ -1,5 +1,5 @@
 {
-  "next_id": 28,
+  "next_id": 30,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -162,6 +162,18 @@
       "epic": "Honest reporting",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-27_make-the-sprint-record-durable-at-the-moments-people-rely-on-it--done.md"
+    },
+    "28": {
+      "title": "Split the undeterminable CI case, and give an orphaned shipped commit a way back",
+      "epic": "Honest reporting",
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-28_split-the-undeterminable-ci-case-and-give-an-orphaned-shipped-commit-a-way-back.md"
+    },
+    "29": {
+      "title": "Surface a stranded close and stop the deployed tip moving during the live gate",
+      "epic": "Honest reporting",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-29_surface-a-stranded-close-and-stop-the-deployed-tip-moving-during-the-live-gate.md"
     }
   }
 }
