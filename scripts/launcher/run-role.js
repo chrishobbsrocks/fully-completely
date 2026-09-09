@@ -1422,11 +1422,83 @@ function headlessLaunchArgs(role, prompt, { bare, settings, root = ROOT } = {}) 
       );
     }
   }
-  if (bare) {
-    const settingsArgs = settings ? ['--settings', settings] : [];
-    return [...base, '--bare', ...settingsArgs, prompt];
-  }
-  return [...base, '--no-session-persistence', prompt];
+  const finalArgs = bare
+    ? [...base, '--bare', ...(settings ? ['--settings', settings] : []), prompt]
+    : [...base, '--no-session-persistence', prompt];
+
+  emitPermissionRecord(role, finalArgs, root);
+
+  return finalArgs;
+}
+
+// Sprint 30: makes every headless permission denial self-explaining by
+// emitting the exact configuration a launch was made under, alongside
+// the launch itself. Reported by a downstream install whose unattended
+// sprint-22 run recorded 84 denials with no way to know what grants were
+// in force when any of them happened — `permission_denials` alone
+// records THAT a command was refused, never WHY it could have been.
+//
+// Req 1: DERIVED FROM finalArgs ITSELF, never rebuilt from a second
+// source. That is the acceptance criterion, and it is load-bearing: a
+// record assembled independently of the args it claims to describe is
+// exactly the defect this sprint exists to prevent, reproduced one
+// layer up (this file already builds a permission configuration once
+// and passes it to the child — a second, parallel assembly of "what was
+// passed" could drift from the first exactly the way persisted denials
+// drifted from their own conditions). Parsing finalArgs — the literal
+// array about to reach spawnClaude() — makes that drift structurally
+// impossible rather than merely unlikely.
+function emitPermissionRecord(role, finalArgs, root) {
+  const valueAfter = (flag) => {
+    const i = finalArgs.indexOf(flag);
+    return i === -1 ? null : finalArgs[i + 1];
+  };
+  const record = {
+    role: role.id,
+    // Req 2: measured NOW, not PERMISSION_FINDINGS_ANCHOR_VERSION — the
+    // anchor is pinned at 2.1.261, both known real installs run 2.1.267,
+    // and a record reporting the anchor would be confidently wrong,
+    // which this Req names as worse than reporting nothing. null (never
+    // the anchor as a fallback) when the running version can't be
+    // determined at all — same "can't compare is not the same as
+    // mismatch" discipline getClaudeVersionString() already documents.
+    cliVersion: getClaudeVersionString(),
+    workingDirectory: root,
+    permissionMode: valueAfter('--permission-mode'),
+    // Req 3: a role whose profile grants nothing (qa1, master-controller
+    // — no arbitrary-execution primitive) never gets an --allowedTools
+    // or --disallowedTools flag at all (see headlessPermissionArgs()'s
+    // own `if (allowedTools.length)` guards), so valueAfter() returns
+    // null here — present in the JSON as an explicit null, not an
+    // omitted key, which is what "stating the empty grant explicitly"
+    // requires: a reader can tell "granted nothing" from "field missing,
+    // check elsewhere" only if the key is always there.
+    allowedTools: valueAfter('--allowedTools'),
+    disallowedTools: valueAfter('--disallowedTools'),
+    // Req 4: distinguishes "MCP config supplied" from "no MCP config
+    // supplied" — true only when finalArgs actually carries --mcp-config
+    // (currently possible only for liveqa; uniform for every role rather
+    // than special-cased, since the question "was this flag actually
+    // passed" is the same question regardless of role). Sprint 27, Req 4
+    // established that an allowlisted-but-unreachable MCP tool produces
+    // a tool-resolution failure ("No such tool available"), not a
+    // permission denial — this field is what lets a reader attribute a
+    // denial-shaped observation to the right cause instead of the other.
+    mcpConfigSupplied: finalArgs.includes('--mcp-config'),
+  };
+  // Req 5: unconditional — no verbosity flag, no env var, no debug mode.
+  // Printed once, at the moment it is true, following this repo's own
+  // established receipt shape (the `[sprint_lifecycle] repo=...` line,
+  // sprint 27's "print what you just wrote" notices) — a statement of
+  // fact, not a warning. A distinct, greppable prefix and single-line
+  // JSON, per Req 1's own "a capturing process can parse without
+  // scraping prose" — deliberately NOT the agent definition or prompt
+  // body (headlessLaunchArgs() already serialises the whole agent body
+  // into --agents elsewhere in this same args array): the permission
+  // configuration is the subject here, and including the prompt would
+  // make the record unreadable at exactly the moment someone needs to
+  // read it (a named risk in this sprint's own Risks & Mitigations).
+  console.error(`PERMISSION_RECORD: ${JSON.stringify(record)}`);
 }
 
 async function runHeadless(role, { sprintId, promptFilePath, bare, settings }) {
@@ -1719,4 +1791,5 @@ module.exports = {
   PERMISSION_FINDINGS_ANCHOR_VERSION,
   getClaudeVersionString,
   warnIfPermissionFindingsStale,
+  emitPermissionRecord,
 };

@@ -1567,6 +1567,7 @@ const {
   HEADLESS_PERMISSION_PROFILES,
   LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS,
   LIVEQA_API_ALLOWED_TOOLS,
+  emitPermissionRecord,
 } = require('./launcher/run-role');
 
 const QA1_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'qa1');
@@ -2085,21 +2086,105 @@ test('run-role: headlessLaunchArgs omits --mcp-config for liveqa when nothing is
       args = headlessLaunchArgs(LIVEQA_ROLE, 'X', { root: dir });
     });
     assert.ok(!args.includes('--mcp-config'), 'no declaration means no --mcp-config -- the launcher never invents one');
-    assert.strictEqual(lines.length, 1);
-    assert.match(lines[0], /Playwright MCP browser tools/);
-    assert.match(lines[0], /fullyCompletely\.liveqaMcpConfig/);
+    // Sprint 30, Req 5: emitPermissionRecord() now prints a PERMISSION_RECORD
+    // line on every launch too -- the MCP note is still exactly one line,
+    // it's just no longer the only line on stderr.
+    const mcpLines = lines.filter((l) => !l.startsWith('PERMISSION_RECORD: '));
+    assert.strictEqual(mcpLines.length, 1);
+    assert.match(mcpLines[0], /Playwright MCP browser tools/);
+    assert.match(mcpLines[0], /fullyCompletely\.liveqaMcpConfig/);
     // Req 4's own instruction: if a server can't be supplied, the message
     // must name what a project must configure -- not just that something
     // is missing.
-    assert.match(lines[0], /mcpServers/);
+    assert.match(mcpLines[0], /mcpServers/);
+    assert.ok(lines.some((l) => l.startsWith('PERMISSION_RECORD: {"role":"liveqa"')), 'the permission record itself must still be emitted');
   });
 });
 
 test('run-role: headlessLaunchArgs prints no MCP note at all for a role other than liveqa, declared or not', () => {
   withScratchSettings(null, (dir) => {
     const lines = captureStderr(() => headlessLaunchArgs(QA1_ROLE, 'X', { root: dir }));
-    assert.deepStrictEqual(lines, []);
+    // Sprint 30, Req 5: PERMISSION_RECORD is now expected here too --
+    // this test's own subject (no MCP note for a non-liveqa role) is
+    // still true, just no longer "stderr is empty".
+    assert.deepStrictEqual(
+      lines.filter((l) => !l.startsWith('PERMISSION_RECORD: ')),
+      []
+    );
+    assert.ok(lines.some((l) => l.startsWith('PERMISSION_RECORD: {"role":"qa1"')), 'the permission record itself must still be emitted');
   });
+});
+
+test('run-role: emitPermissionRecord (Req 1) derives every field from the args array itself, never a second source that could drift', () => {
+  const args = [
+    '--agent', 'x', '-p', '--output-format', 'json',
+    '--permission-mode', 'acceptEdits',
+    '--allowedTools', 'Bash(git log *)',
+    '--disallowedTools', 'Edit,Write',
+    '--mcp-config', '{"mcpServers":{}}',
+    'the prompt',
+  ];
+  const lines = captureStderr(() => emitPermissionRecord({ id: 'x' }, args, '/some/root'));
+  assert.strictEqual(lines.length, 1);
+  assert.match(lines[0], /^PERMISSION_RECORD: /);
+  const record = JSON.parse(lines[0].slice('PERMISSION_RECORD: '.length));
+  assert.strictEqual(record.role, 'x');
+  assert.strictEqual(record.workingDirectory, '/some/root');
+  assert.strictEqual(record.permissionMode, 'acceptEdits');
+  assert.strictEqual(record.allowedTools, 'Bash(git log *)');
+  assert.strictEqual(record.disallowedTools, 'Edit,Write');
+  assert.strictEqual(record.mcpConfigSupplied, true);
+  // Not the prompt or the --agents JSON -- Risks & Mitigations names
+  // exactly this as the thing that would make the record unreadable.
+  assert.ok(!lines[0].includes('the prompt'), 'the record must not include the prompt body');
+});
+
+test('run-role: emitPermissionRecord (Req 3) states an empty grant explicitly -- null, not an omitted key -- when a flag was never added to args', () => {
+  const args = ['--agent', 'x', '-p', '--output-format', 'json', '--permission-mode', 'acceptEdits', 'the prompt'];
+  const lines = captureStderr(() => emitPermissionRecord({ id: 'x' }, args, '/root'));
+  const record = JSON.parse(lines[0].slice('PERMISSION_RECORD: '.length));
+  assert.ok('allowedTools' in record, 'the key must be present even when there is nothing to report');
+  assert.ok('disallowedTools' in record, 'the key must be present even when there is nothing to report');
+  assert.strictEqual(record.allowedTools, null);
+  assert.strictEqual(record.disallowedTools, null);
+  assert.strictEqual(record.mcpConfigSupplied, false);
+});
+
+test('run-role: emitPermissionRecord (Req 2) reports the CLI version measured now, never PERMISSION_FINDINGS_ANCHOR_VERSION as a fallback', () => {
+  // Deliberately re-required inline rather than relying on the module-level
+  // PERMISSION_FINDINGS_ANCHOR_VERSION binding declared later in this file
+  // (a separate destructure of the same module, further down) -- this
+  // test() callback runs synchronously at registration time, before that
+  // later `const` has initialized, and referencing it here would hit the
+  // temporal dead zone rather than the value.
+  const anchor = require('./launcher/run-role').PERMISSION_FINDINGS_ANCHOR_VERSION;
+  withFakeClaudeVersion('9.9.9', () => {
+    const lines = captureStderr(() => emitPermissionRecord({ id: 'x' }, ['--agent', 'x', 'p'], '/root'));
+    const record = JSON.parse(lines[0].slice('PERMISSION_RECORD: '.length));
+    assert.strictEqual(record.cliVersion, '9.9.9');
+    assert.notStrictEqual(record.cliVersion, anchor);
+  });
+});
+
+test('run-role: headlessLaunchArgs (Req 1, end to end) emits a record whose fields match the real args array it actually returns, for every real role', () => {
+  for (const role of RUN_ROLE_ROLES) {
+    let args;
+    const lines = captureStderr(() => {
+      args = headlessLaunchArgs(role, 'p');
+    });
+    const recordLine = lines.find((l) => l.startsWith('PERMISSION_RECORD: '));
+    assert.ok(recordLine, `${role.id}: no PERMISSION_RECORD emitted (Req 5: every role, unconditionally)`);
+    const record = JSON.parse(recordLine.slice('PERMISSION_RECORD: '.length));
+    assert.strictEqual(record.role, role.id);
+    const at = (flag) => {
+      const i = args.indexOf(flag);
+      return i === -1 ? null : args[i + 1];
+    };
+    assert.strictEqual(record.allowedTools, at('--allowedTools'), `${role.id}: allowedTools mismatch against the real returned args`);
+    assert.strictEqual(record.disallowedTools, at('--disallowedTools'), `${role.id}: disallowedTools mismatch against the real returned args`);
+    assert.strictEqual(record.permissionMode, at('--permission-mode'), `${role.id}: permissionMode mismatch against the real returned args`);
+    assert.strictEqual(record.mcpConfigSupplied, args.includes('--mcp-config'), `${role.id}: mcpConfigSupplied mismatch against the real returned args`);
+  }
 });
 
 test('run-role: headlessLaunchArgs prompt stays the final positional argument in every mode', () => {
@@ -2218,6 +2303,23 @@ function runRoleCli(args, envOverrides) {
   });
 }
 
+// Sprint 30, Req 5: emitPermissionRecord() now prints one PERMISSION_RECORD
+// line, unconditionally, on EVERY headless launch -- including every real
+// subprocess test below that predates this sprint and asserted an
+// otherwise-empty stderr to mean "nothing unexpected happened". That
+// assertion is still the right one to make; it just has to look past a
+// line that's now legitimately always there. Filtering it out here (rather
+// than hand-reconstructing the exact expected JSON per test, which would
+// tie every one of these tests to emitPermissionRecord()'s exact field
+// order) keeps each test's own actual subject -- a role claim warning, an
+// auth failure, a prompt-file override -- the only thing it's asserting on.
+function stripPermissionRecordLine(stderr) {
+  return stderr
+    .split('\n')
+    .filter((line) => !line.startsWith('PERMISSION_RECORD: '))
+    .join('\n');
+}
+
 // A fake `claude` on PATH: answers --version so claudeOnPath() passes,
 // answers `auth status --json` with a controllable {"loggedIn": ...} (Req
 // 4 round 3: the default headless path now probes this exact same way the
@@ -2314,7 +2416,11 @@ test('run-role CLI: default headless path succeeds when the operator session is 
     const result = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], { PATH: dir });
     assert.strictEqual(result.status, 0);
     assert.strictEqual(result.stdout, FAKE_JSON_RESULT);
-    assert.strictEqual(result.stderr, '');
+    // Sprint 30, Req 5: a PERMISSION_RECORD line is now expected on every
+    // headless launch -- asserted directly, then stripped before checking
+    // nothing else unexpected is on stderr.
+    assert.match(result.stderr, /^PERMISSION_RECORD: \{"role":"qa1"/m);
+    assert.strictEqual(stripPermissionRecordLine(result.stderr), '');
     assert.deepStrictEqual(readArgv(), headlessLaunchArgs(QA1_ROLE, headlessPrompt(QA1_ROLE, '4')));
     assert.ok(!readArgv().includes('--bare'), 'the default path must never pass --bare');
   });
@@ -2327,7 +2433,10 @@ test('run-role CLI (real subprocess, Req 1): a role\'s first launch writes a cla
 
     const first = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
     assert.strictEqual(first.status, 0, 'first launch must succeed');
-    assert.strictEqual(first.stderr, '', 'a role\'s first launch in a tree has nothing to warn about');
+    // Sprint 30, Req 5: PERMISSION_RECORD is expected here too -- "nothing
+    // to warn about" is a claim about the role-claim warning specifically,
+    // not about stderr being literally empty.
+    assert.strictEqual(stripPermissionRecordLine(first.stderr), '', 'a role\'s first launch in a tree has nothing to warn about');
     assert.ok(fs.existsSync(claimsPath), 'the claim must actually be written to disk');
     const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
     assert.ok(claims.qa1 && claims.qa1.startedAt, 'the claim must record qa1 with a start time');
@@ -2348,7 +2457,10 @@ test('run-role CLI (real subprocess, Req 1): a DIFFERENT role launching after qa
     runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
     const result = runRoleCli(['--headless', '--agent', 'dev-team-1', '--sprint', '4'], env);
     assert.strictEqual(result.status, 0);
-    assert.strictEqual(result.stderr, '', 'dev-team-1 has never launched in this tree before -- qa1\'s claim must not leak across roles');
+    assert.strictEqual(
+      stripPermissionRecordLine(result.stderr), '',
+      'dev-team-1 has never launched in this tree before -- qa1\'s claim must not leak across roles'
+    );
   });
 });
 
@@ -2392,7 +2504,7 @@ test('run-role CLI: --bare with --settings alone (no ANTHROPIC_API_KEY) satisfie
     );
     assert.strictEqual(result.status, 0);
     assert.strictEqual(result.stdout, FAKE_JSON_RESULT);
-    assert.strictEqual(result.stderr, '');
+    assert.strictEqual(stripPermissionRecordLine(result.stderr), '');
     assert.deepStrictEqual(
       readArgv(),
       headlessLaunchArgs(QA1_ROLE, headlessPrompt(QA1_ROLE, '4'), { bare: true, settings: '{"apiKeyHelper":"/path/to/helper.sh"}' }),
@@ -2437,7 +2549,7 @@ test('run-role CLI: --prompt-file overrides --sprint when both are given (escape
     // nothing) — and it parses.
     assert.strictEqual(result.stdout, FAKE_JSON_RESULT);
     assert.doesNotThrow(() => JSON.parse(result.stdout));
-    assert.strictEqual(result.stderr, '');
+    assert.strictEqual(stripPermissionRecordLine(result.stderr), '');
     // The FILE's prompt reached claude's real argv, not the --sprint
     // template's composed one.
     assert.deepStrictEqual(readArgv(), headlessLaunchArgs(QA1_ROLE, 'do the sprint 11 audit'));
