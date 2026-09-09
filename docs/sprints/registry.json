@@ -1,5 +1,5 @@
 {
-  "next_id": 23,
+  "next_id": 27,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -132,6 +132,30 @@
       "epic": "Framework rules and distribution",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-22_read-what-the-package-actually-ships-and-record-two-budgets-nobody-is-watching--done.md"
+    },
+    "23": {
+      "title": "Give headless LiveQA the browser access its own job description already assumes",
+      "epic": "Framework rules and distribution",
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-23_give-headless-liveqa-the-browser-access-its-own-job-description-already-assumes--done.md"
+    },
+    "24": {
+      "title": "Close the three gaps between shipping a commit and verifying what actually got served",
+      "epic": "Honest reporting",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-24_close-the-three-gaps-between-shipping-a-commit-and-verifying-what-actually-got-served.md"
+    },
+    "25": {
+      "title": "Warn when another session is already working here, and let a narrowed sprint be renamed",
+      "epic": "Honest reporting",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-25_warn-when-another-session-is-already-working-here-and-let-a-narrowed-sprint-be-renamed.md"
+    },
+    "26": {
+      "title": "Re-grade every permission finding by how it was measured, and find what can be probed without a model",
+      "epic": "Honest reporting",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-26_re-grade-every-permission-finding-by-how-it-was-measured-and-find-what-can-be-probed-without-a-model.md"
     }
   }
 }
