@@ -827,7 +827,24 @@ def state_divergence_warning(
     a redundant `git worktree list` subprocess call per sprint. A caller
     with only one sprint to check (cmd_status with an id, which already
     has `state` loaded) can pass what it already has and let this
-    function derive the rest itself."""
+    function derive the rest itself.
+
+    QA1 round 1 FINDING, FIXED HERE: this used to `return None` the
+    moment THIS tree had no local state file at all — which is exactly
+    the case for a sprint created in main and then started AND closed
+    entirely inside a worktree (CLAUDE.md's own documented order: create
+    the sprint, run /sprint-worktree BEFORE building, start there). That
+    early return bailed out before the REGISTRY comparison below ever
+    ran, so Req 2's own sentence — "must not report a sprint as open
+    when another tree has closed it" — silently failed on exactly the
+    path it names. A missing local state file is real information (there
+    is no local phase to report), not a reason to skip the comparison
+    entirely: `this_phase` stays None and the registry check, which the
+    caller may already have supplied, still runs. Silence is preserved
+    correctly for the genuinely-nothing-to-compare case (see the
+    `this_phase is None and this_registry_status is None` check below) —
+    confirmed directly: a sprint reading 'todo' in both trees, with no
+    state file in either, still produces no warning."""
     if other_roots is None:
         other_roots = _other_worktree_roots()
     if not other_roots:
@@ -835,16 +852,20 @@ def state_divergence_warning(
 
     if this_phase is None:
         this_state_path = state_path(sprint_id)
-        if not this_state_path.exists():
-            return None
-        try:
-            this_phase = json.loads(this_state_path.read_text()).get("phase")
-        except (OSError, json.JSONDecodeError):
-            return None
+        if this_state_path.exists():
+            try:
+                this_phase = json.loads(this_state_path.read_text()).get("phase")
+            except (OSError, json.JSONDecodeError):
+                this_phase = None
+        # else: genuinely no state file here — this_phase stays None,
+        # but execution must continue; the registry comparison below is
+        # still real and still needs to run (this is the bug QA1 found).
     if this_registry_status is None:
         reg = load_registry()
         entry = reg["sprints"].get(str(sprint_id))
         this_registry_status = entry["status"] if entry else None
+    if this_phase is None and this_registry_status is None:
+        return None  # genuinely nothing here to compare against anything
 
     diverging = []
     for other_root in other_roots:
@@ -884,9 +905,10 @@ def state_divergence_warning(
     if not diverging:
         return None
     plural = "worktree" if len(diverging) == 1 else "worktrees"
+    this_phase_desc = f"phase '{this_phase}'" if this_phase is not None else "no state file here at all"
     return (
-        f"WARNING: sprint {sprint_id}'s state here reads phase "
-        f"'{this_phase}' (registry status '{this_registry_status}'), but {len(diverging)} "
+        f"WARNING: sprint {sprint_id}'s state here shows {this_phase_desc} "
+        f"(registry status '{this_registry_status}'), but {len(diverging)} "
         f"other {plural} disagree: {'; '.join(diverging)}. This read is from {ROOT} only — "
         "if another session moved this sprint further (closed it, shipped it, recorded a "
         "verdict) in a different worktree, this may be stale. Not gated: worktrees are "
@@ -1130,6 +1152,37 @@ def cmd_status(args) -> None:
                 if divergence:
                     print(f"  {divergence}")
         return
+
+    # Sprint 29, Req 2 (QA1 round 1 finding): load_state() below dies with
+    # "Run /sprint-start N first" whenever this tree has no local state
+    # file — actively wrong advice for a sprint started AND closed
+    # entirely inside another worktree (CLAUDE.md's documented order:
+    # create in main, /sprint-worktree BEFORE building, start there). It
+    # is not this function's job to render a full detail view from
+    # another tree's data (that would blur "what this tree's own read
+    # says" — the property every other divergence check here protects),
+    # but the refusal message itself can and must stop telling someone to
+    # start a sprint somebody already finished. Checked before
+    # load_state() so the better message wins when there's a better one
+    # to give; falls through to load_state()'s own generic die() — still
+    # correct — when genuinely no tree has this sprint's state at all.
+    if not state_path(args.id).exists():
+        found_elsewhere = []
+        for other_root in _other_worktree_roots():
+            other_state_file = other_root / "docs" / "sprints" / "state" / f"sprint-{args.id}.json"
+            if not other_state_file.exists():
+                continue
+            try:
+                other_phase = json.loads(other_state_file.read_text()).get("phase")
+            except (OSError, json.JSONDecodeError):
+                other_phase = None
+            found_elsewhere.append(f"{other_root} (phase '{other_phase}')" if other_phase else str(other_root))
+        if found_elsewhere:
+            die(f"Sprint {args.id} has no state file in {tree_description()} (this tree), but it "
+                f"exists in {len(found_elsewhere)} other worktree(s): {'; '.join(found_elsewhere)}. "
+                "This sprint was likely started (and possibly closed) entirely inside another "
+                "worktree — it was never /sprint-start'ed here, so there is genuinely nothing "
+                "local to show. Read status from the tree that actually holds it, not this one.")
 
     state = load_state(args.id)
     print(f"Sprint {state['id']}: {state['title']}")

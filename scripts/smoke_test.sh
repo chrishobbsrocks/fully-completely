@@ -1626,10 +1626,16 @@ $SCRIPT status "$SPRINT_STATE_WT" 2>&1 | grep -qE "Phase: (liveqa_live|groundtru
   fail "test setup: this tree's own phase should be unaffected by a close in the other worktree"
 
 STATUS_STATE_OUT=$($SCRIPT status "$SPRINT_STATE_WT" 2>&1)
-echo "$STATUS_STATE_OUT" | grep -q "WARNING" || \
-  fail "status <id> did not surface the stranded close (Req 1 state+registry divergence) -- output: $STATUS_STATE_OUT"
+# Deliberately NOT asserting a bare `grep -q "WARNING"` here on its own:
+# QA1 round 1 found that assertion still passes even with
+# state_divergence_warning() fully dead, because worktree_divergence_warning()
+# (sprint 13's own sprint-FILE check) happens to ALSO fire on this exact
+# incident, since /sprint-complete changes the sprint file's frontmatter
+# too -- see state_divergence_warning()'s own docstring. Asserting the
+# PHASE and the worktree PATH below is what actually pins the new code,
+# since sprint 13's own warning never mentions either.
 echo "$STATUS_STATE_OUT" | grep -q "phase 'complete'" || \
-  fail "status <id>'s state-divergence warning doesn't name the other tree's phase"
+  fail "status <id>'s state-divergence warning doesn't name the other tree's phase -- output: $STATUS_STATE_OUT"
 echo "$STATUS_STATE_OUT" | grep -qF "$(basename "$STATE_WT_DIR")" || \
   fail "status <id>'s state-divergence warning doesn't name the diverging worktree's path"
 
@@ -1640,6 +1646,58 @@ $SCRIPT status 2>&1 | grep -F "Sprint ${SPRINT_STATE_WT}:" -A1 | grep -q "WARNIN
 
 git worktree remove --force "$STATE_WT_DIR" > /dev/null 2>&1 || rm -rf "$STATE_WT_DIR"
 rm -f /tmp/state_wt_user_said.txt
+
+echo "== sprint 29, Req 1/2 (QA1 round 1 finding): the worktree-created-BEFORE-start order -- this tree never has a state file at all for the sprint's entire life =="
+# CLAUDE.md's own documented order for Dev Team 2: create the sprint,
+# then /sprint-worktree "before Dev Team 2 starts building", THEN start
+# there. cmd_new writes a registry entry and no state file; cmd_start
+# writes the state file wherever it runs -- so under this order, THIS
+# tree never has a local state file for this sprint at all, the exact
+# path state_divergence_warning()'s original early return silently
+# swallowed (QA1 round 1: reproduced end to end, isolated to
+# scripts/sprint_lifecycle.py's own early `if not this_state_path.exists():
+# return None`, before the registry comparison ever ran).
+SPRINT_WT_FIRST=$(new_sprint "Worktree-created-first sprint")
+git add -A
+git commit -q -m "commit sprint $SPRINT_WT_FIRST's registry entry (no state file yet -- not started here)"
+
+WT_FIRST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fully-completely-smoke-wt-first.XXXXXX")"
+git worktree add -q -b smoke-wt-first-branch "$WT_FIRST_DIR" > /dev/null
+WT_FIRST_SCRIPT="python3 $WT_FIRST_DIR/scripts/sprint_lifecycle.py"
+
+# Everything -- start through complete -- happens ONLY in the worktree.
+# This tree (main) never runs /sprint-start for this sprint at all.
+$WT_FIRST_SCRIPT start "$SPRINT_WT_FIRST" > /dev/null
+(cd "$WT_FIRST_DIR" && git commit -q --allow-empty -m "sprint $SPRINT_WT_FIRST work")
+$WT_FIRST_SCRIPT qa1 "$SPRINT_WT_FIRST" --verdict PASS --notes ok > /dev/null
+$WT_FIRST_SCRIPT dev-done "$SPRINT_WT_FIRST" > /dev/null
+WT_FIRST_COMMIT=$(cd "$WT_FIRST_DIR" && git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $WT_FIRST_SCRIPT ship "$SPRINT_WT_FIRST" --commit "$WT_FIRST_COMMIT" > /dev/null
+$WT_FIRST_SCRIPT liveqa "$SPRINT_WT_FIRST" --deployed-commit "$WT_FIRST_COMMIT" --verdict PASS --notes ok > /dev/null
+printf 'closing for the worktree-first test\n' > /tmp/wt_first_user_said.txt
+$WT_FIRST_SCRIPT complete "$SPRINT_WT_FIRST" --user-said-file /tmp/wt_first_user_said.txt > /dev/null
+
+# Confirm the test's own premise: main genuinely has no state file for
+# this sprint, ever, not just "hasn't been read yet".
+[ -f "docs/sprints/state/sprint-${SPRINT_WT_FIRST}.json" ] && \
+  fail "test setup: this tree should have NO state file for this sprint (it was never /sprint-start'ed here)"
+
+$SCRIPT list 2>&1 | grep -E "^ *${SPRINT_WT_FIRST} " -A1 | grep -q "WARNING" || \
+  fail "list did not surface a sprint closed in a worktree that was never started here (QA1 round 1 finding)"
+$SCRIPT status 2>&1 | grep -F "Sprint ${SPRINT_WT_FIRST}:" -A1 | grep -q "WARNING" || \
+  fail "status with no id did not surface a sprint closed in a worktree that was never started here (QA1 round 1 finding)"
+
+STATUS_WT_FIRST_OUT=$($SCRIPT status "$SPRINT_WT_FIRST" 2>&1) && \
+  fail "status <id> should refuse (no local state file exists here at all) -- it succeeded instead"
+echo "$STATUS_WT_FIRST_OUT" | grep -qi "run /sprint-start" && \
+  fail "status <id>'s refusal still tells the reader to start a sprint that's already been closed elsewhere -- the exact misleading message QA1 flagged"
+echo "$STATUS_WT_FIRST_OUT" | grep -q "exists in 1 other worktree" || \
+  fail "status <id>'s refusal doesn't name that the sprint exists elsewhere -- output: $STATUS_WT_FIRST_OUT"
+echo "$STATUS_WT_FIRST_OUT" | grep -q "phase 'complete'" || \
+  fail "status <id>'s refusal doesn't name the other tree's phase -- output: $STATUS_WT_FIRST_OUT"
+
+git worktree remove --force "$WT_FIRST_DIR" > /dev/null 2>&1 || rm -rf "$WT_FIRST_DIR"
+rm -f /tmp/wt_first_user_said.txt
 
 echo "== sprint 29, Req 1/2: identical state across trees produces no warning, on status (both forms) and list =="
 SPRINT_STATE_CLEAN=$(new_sprint "State agreement sprint")
