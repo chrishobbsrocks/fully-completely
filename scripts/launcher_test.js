@@ -1477,6 +1477,8 @@ const {
   installOrphanGuard,
   readDeclaredTestCommand,
   HEADLESS_PERMISSION_PROFILES,
+  LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS,
+  LIVEQA_API_ALLOWED_TOOLS,
 } = require('./launcher/run-role');
 
 const QA1_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'qa1');
@@ -1731,6 +1733,106 @@ test('run-role: liveqa is allowlisted npm install (narrow) and npx (deliberately
   assert.ok(liveqaArgs.some((a) => a.includes('Bash(npm install *)')), 'liveqa missing npm install');
   assert.ok(!liveqaArgs.some((a) => a.includes('Bash(npm *)')), 'liveqa must not have blanket npm access');
   assert.ok(liveqaArgs.some((a) => a.includes('Bash(npx *)')), 'liveqa missing npx');
+});
+
+test('run-role: liveqa is allowlisted the full confirmed Playwright MCP tool set, minus the one named "unsafe" (Sprint 23, Req 1)', () => {
+  const liveqaArgs = HEADLESS_PERMISSION_PROFILES.liveqa.allowedTools;
+  for (const tool of LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS) {
+    assert.ok(liveqaArgs.includes(tool), `liveqa missing MCP tool ${tool}`);
+  }
+  assert.ok(
+    !liveqaArgs.includes('mcp__playwright__browser_run_code_unsafe'),
+    'liveqa must not be granted the tool playwright itself names "unsafe" (arbitrary in-page code execution)'
+  );
+  // MCP tool entries are matched as bare literal tool names (confirmed by
+  // running against a real @playwright/mcp server) -- a different shape
+  // from every Bash(...) entry in this file, and NOT a server-level
+  // wildcard (`mcp__playwright__*`), which was also confirmed to work but
+  // was deliberately not used, since it has no way to exclude the one
+  // tool above.
+  for (const tool of LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS) {
+    assert.ok(tool.startsWith('mcp__playwright__'), `${tool} should be a bare mcp__playwright__* tool name`);
+    assert.ok(!tool.includes('Bash('), `${tool} should not be wrapped in a Bash(...) pattern`);
+    assert.ok(!tool.endsWith('*'), `${tool} should be an exact tool name, not a wildcard`);
+  }
+  assert.ok(
+    !liveqaArgs.some((a) => a === 'mcp__playwright__*'),
+    'liveqa should use the enumerated tool list, not the server-level wildcard'
+  );
+});
+
+test('run-role: liveqa is allowlisted curl (unscopable by verb) and a narrow, enumerated, read-only gh subcommand set (Sprint 23, Req 2)', () => {
+  const liveqaArgs = HEADLESS_PERMISSION_PROFILES.liveqa.allowedTools;
+  assert.ok(liveqaArgs.includes('Bash(curl *)'), 'liveqa missing curl');
+  for (const tool of LIVEQA_API_ALLOWED_TOOLS) {
+    assert.ok(liveqaArgs.includes(tool), `liveqa missing ${tool}`);
+  }
+  // Req 2's own narrowness criterion: "a bare wildcard where a verb set
+  // exists is a finding." gh has a real verb set (unlike curl, named
+  // honestly above as the one exception) -- confirm no blanket `gh *`,
+  // and confirm none of the write-capable or arbitrary-endpoint
+  // subcommands snuck in.
+  assert.ok(!liveqaArgs.includes('Bash(gh *)'), 'liveqa must not have blanket gh access');
+  assert.ok(!liveqaArgs.some((a) => a.includes('Bash(gh api')), 'liveqa must not have gh api (arbitrary method+endpoint, same unscopable shape as curl)');
+  for (const writeVerb of ['gh workflow run', 'gh pr merge', 'gh pr close', 'gh pr comment', 'gh issue', 'gh release', 'gh repo edit']) {
+    assert.ok(
+      !liveqaArgs.some((a) => a.includes(`Bash(${writeVerb}`)),
+      `liveqa should not have ${writeVerb} -- LiveQA never writes to what it verifies`
+    );
+  }
+});
+
+test('run-role: sprint 23 touched only the liveqa profile -- every other role\'s permission profile is byte-identical to its pre-sprint-23 shape (Req 3)', () => {
+  // Deliberately hardcoded, exact-array assertions rather than a generic
+  // "still has N entries" check -- Req 3's own acceptance criterion is
+  // "git diff shows no other profile changed," and a snapshot comparison
+  // here is the same claim, just runnable. Sourced from each role's own
+  // profile as committed before this sprint's changes.
+  assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES['master-controller'], {
+    disallowedTools: [],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+  });
+  assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES['dev-team-1'], {
+    disallowedTools: [],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    needsTestCommand: true,
+    eligibleForOwnedRepositoryGrant: true,
+  });
+  assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES['dev-team-2'], {
+    disallowedTools: [],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    needsTestCommand: true,
+    eligibleForOwnedRepositoryGrant: true,
+  });
+  assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES.qa1, {
+    disallowedTools: ['Edit', 'Write'],
+    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    needsTestCommand: true,
+    eligibleForOwnedRepositoryGrant: true,
+  });
+  assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES.pipeman, {
+    disallowedTools: [],
+    allowedTools: [
+      'Bash(node scripts/run-lifecycle.js *)',
+      'Bash(python3 scripts/sprint_lifecycle.py *)',
+      'Bash(npm publish *)',
+      'Bash(npm view *)',
+      'Bash(npm pack *)',
+      'Bash(git status *)',
+      'Bash(git log *)',
+      'Bash(git diff *)',
+      'Bash(git fetch *)',
+      'Bash(git add *)',
+      'Bash(git commit *)',
+      'Bash(git rebase *)',
+      'Bash(git merge *)',
+      'Bash(git checkout *)',
+      'Bash(git push *)',
+    ],
+  });
+  // liveqa's own disallowedTools (Edit/Write) is likewise unchanged --
+  // only allowedTools grew this sprint.
+  assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES.liveqa.disallowedTools, ['Edit', 'Write']);
 });
 
 test('run-role: dev-team-1/2 and qa1 are marked as needing a declared test command; other roles are not', () => {

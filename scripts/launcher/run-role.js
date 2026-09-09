@@ -634,6 +634,161 @@ const OWNED_REPOSITORY_ALLOWED_TOOLS = [
 ];
 const OWNED_REPOSITORY_DISALLOWED_TOOLS = ['Bash(git push *)'];
 
+// Sprint 23, Req 1: liveqa.md opens by saying the role "drives a real
+// browser via Playwright MCP tools (navigate, click, type, snapshot,
+// screenshot, read the accessibility tree)" -- but headless liveqa had no
+// browser tools scoped at all, a gap sprints 17/19 both declined to close
+// because nobody could exercise the result (this file's own sprint-19
+// comment, still true when this sprint started: "The real browser-driving
+// tools (Playwright/Chrome MCP) still aren't scoped here -- out of reach
+// of a synthetic-agent scratch test, untested as such"). This sprint's own
+// downstream reporter changed that: a real unattended orchestrator hit
+// the gap directly.
+//
+// ESTABLISHED BY RUNNING, per this Req's own instruction, not inferred
+// from the shape of the existing `Bash(...)` entries above (a genuinely
+// different pattern shape -- MCP tool names carry no parentheses and no
+// trailing ` *` wildcard-on-arguments, they're matched as literal tool
+// names, the same shape `Edit`/`Write` already use in disallowedTools
+// above): a real `@playwright/mcp` server was launched via `--mcp-config`
+// against a scratch directory, its actual tool names discovered by asking
+// a live session to enumerate them (not assumed from the package's own
+// docs), then `--allowedTools` tested directly against two of them. A
+// bare exact tool name (`mcp__playwright__browser_navigate`) allowed that
+// one call and denied a sibling (`mcp__playwright__browser_close`) not on
+// the list -- confirmed via a real permission_denials entry naming the
+// denied tool exactly. A server-level wildcard (`mcp__playwright__*`)
+// was also confirmed to work, granting every tool from that server. Both
+// mechanisms genuinely work; the list below deliberately uses the
+// enumerated form, not the wildcard, for one reason named plainly:
+// `@playwright/mcp`'s own tool set (24 tools, confirmed by running) includes
+// `browser_run_code_unsafe`, named "unsafe" by its own author -- arbitrary
+// code execution inside the page. Nothing in liveqa.md's job (drive a
+// browser, read what's on the page, click through a real flow) needs
+// that one specifically, and the wildcard has no way to grant everything
+// else while excluding it. Every other tool from the confirmed 24-tool
+// set is included: liveqa.md's own opening sentence names five
+// (navigate, click, type, snapshot, screenshot/read-accessibility-tree)
+// but its own "YOUR TEST PROCESS" and "HUNT SPECIFICALLY FOR" sections
+// name real needs beyond that short list -- waiting on loading states
+// (`wait_for`), catching runtime errors via the console
+// (`console_messages`), trying to break things (`drag`/`drop`,
+// `file_upload`, `fill_form`), handling a dialog that appears mid-flow
+// (`handle_dialog`), checking what a page actually fetched
+// (`network_request(s)`), multi-tab flows (`tabs`), and closing cleanly
+// (`close`). Read-in-page evaluation (`evaluate`) is included too --
+// standard, commonly-needed Playwright automation (reading localStorage,
+// computed state), distinct from the `_unsafe` one specifically excluded
+// above.
+const LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS = [
+  'mcp__playwright__browser_click',
+  'mcp__playwright__browser_close',
+  'mcp__playwright__browser_console_messages',
+  'mcp__playwright__browser_drag',
+  'mcp__playwright__browser_drop',
+  'mcp__playwright__browser_evaluate',
+  'mcp__playwright__browser_file_upload',
+  'mcp__playwright__browser_fill_form',
+  'mcp__playwright__browser_find',
+  'mcp__playwright__browser_handle_dialog',
+  'mcp__playwright__browser_hover',
+  'mcp__playwright__browser_navigate',
+  'mcp__playwright__browser_navigate_back',
+  'mcp__playwright__browser_network_request',
+  'mcp__playwright__browser_network_requests',
+  'mcp__playwright__browser_press_key',
+  'mcp__playwright__browser_resize',
+  'mcp__playwright__browser_select_option',
+  'mcp__playwright__browser_snapshot',
+  'mcp__playwright__browser_tabs',
+  'mcp__playwright__browser_take_screenshot',
+  'mcp__playwright__browser_type',
+  'mcp__playwright__browser_wait_for',
+  // Deliberately excluded: mcp__playwright__browser_run_code_unsafe.
+];
+
+// Sprint 23, Req 2: the non-browser checks liveqa.md's own text already
+// assumes ("use whatever MCP tools or direct API calls (Bash/curl) the
+// project has available") plus what this sprint's own reporter named
+// directly missing -- a CI-pipeline gate and a platform-API gate, one of
+// which used curl alone, the other of which needed a CI-pipeline check
+// this profile had no way to make (no browser tools, no curl, no gh).
+//
+// curl: `Bash(curl *)`, not narrower. Named honestly rather than
+// pretended otherwise: unlike git or gh, curl has no subcommand verb set
+// -- the HTTP method is a flag (`-X POST`), and an allowedTools prefix
+// match on the command line has no way to distinguish `curl -X GET` from
+// `curl -X POST` or `curl -X DELETE` the way `Bash(git status *)` vs
+// `Bash(git push *)` distinguishes two different git subcommands. This is
+// the same shape of exception `Bash(npx *)` already carries above, for
+// the same reason: there is no fixed prefix narrower than the command
+// itself to enumerate against.
+//
+// gh: DOES have a real subcommand verb set, so it's enumerated the way
+// pipeman's own git list is (Req 2's own named model), not wildcarded.
+// Scoped to what a CI-pipeline/PR-status gate actually reads: run
+// list/view/watch, pr checks/view/list, workflow list/view, repo view.
+// Deliberately excluded: `gh api` (like curl, takes an arbitrary
+// method+endpoint that a Bash prefix match can't narrow -- and unlike
+// curl, nothing in this sprint's own named gates required it, so it's
+// left out rather than granted on the strength of curl's own precedent
+// alone) and every subcommand that writes (`gh workflow run`, `gh pr
+// merge/close/comment`, `gh issue *`, `gh release *`, `gh repo edit`,
+// etc.) -- LiveQA never writes to the systems it verifies, only reads
+// from them, and nothing in its own job description asks it to.
+const LIVEQA_API_ALLOWED_TOOLS = [
+  'Bash(curl *)',
+  'Bash(gh run list *)',
+  'Bash(gh run view *)',
+  'Bash(gh run watch *)',
+  'Bash(gh pr checks *)',
+  'Bash(gh pr view *)',
+  'Bash(gh pr list *)',
+  'Bash(gh workflow list *)',
+  'Bash(gh workflow view *)',
+  'Bash(gh repo view *)',
+];
+
+// POSTURE, STATED HONESTLY (Req 2's own explicit acceptance criterion --
+// "if it claims this grant meaningfully widens LiveQA's reach, it is
+// wrong"): `Bash(npx *)` was already present on this profile before this
+// sprint, and is already an arbitrary-execution primitive -- sprint 19
+// demonstrated `curl -o`, `node -e` and `bash -c` all write outside the
+// working directory with zero denials, and `npx` reaches at least as far
+// (it runs a published package's own code, which has the same filesystem
+// reach `node -e` does). Adding the two lists above is convenience for a
+// role that could already reach an equivalent surface, not a new class of
+// capability. Do not read this comment as claiming these additions widen
+// what LiveQA could already do; they widen what it can do *without first
+// improvising through `npx` or an equivalent*, which is a different and
+// much smaller claim.
+//
+// A LOUDER, NEWER FACT, found while establishing the above and stated
+// here because staying silent about it would misrepresent what this
+// profile actually protects: scripts/permission-gate-repro.js (committed
+// separately, QA1-verified independent of any sprint gate) found that on
+// the claude version installed while this sprint was built (2.1.265), a
+// SINGLE, non-chained Bash command with NO matching `allowedTools` entry
+// at all executed with zero permission denials -- reproduced for this
+// exact `liveqa` profile specifically, not inferred from another role's.
+// That directly contradicts the evidence this file's own permission
+// architecture otherwise rests on (docs/sprint-12-permission-scope-findings.md,
+// last re-confirmed on 2.1.261: "every Bash command... needs its own
+// `--allowedTools` entry or it isn't approved -- full stop"). If that
+// finding holds on whatever claude version is actually running a given
+// launch, the lists above are not the operative confinement boundary at
+// all on that version -- an absent entry may already be no different
+// from a present one. This sprint does not fix that (it is explicitly
+// out of scope for a profile-scoping change to fix a CLI-level
+// enforcement question), and narrowing either list above further would
+// not fix it either. The lists still matter for exactly what they always
+// mattered for: what's granted on a version where the gate IS enforcing
+// absence, which every version through 2.1.261 was confirmed to do, and
+// no version has been confirmed NOT to eventually stop doing except this
+// one specific point. Whoever reads this profile next should re-run
+// scripts/permission-gate-repro.js against the claude version they
+// actually have before trusting either list as a real boundary.
+
 const HEADLESS_PERMISSION_PROFILES = {
   'master-controller': {
     disallowedTools: [],
@@ -684,6 +839,8 @@ const HEADLESS_PERMISSION_PROFILES = {
       'Bash(python3 scripts/sprint_lifecycle.py *)',
       'Bash(npm install *)',
       'Bash(npx *)',
+      ...LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS,
+      ...LIVEQA_API_ALLOWED_TOOLS,
     ],
   },
 };
@@ -1413,6 +1570,8 @@ module.exports = {
   unprotectEnvFiles,
   OWNED_REPOSITORY_ALLOWED_TOOLS,
   OWNED_REPOSITORY_DISALLOWED_TOOLS,
+  LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS,
+  LIVEQA_API_ALLOWED_TOOLS,
   PERMISSION_FINDINGS_ANCHOR_VERSION,
   getClaudeVersionString,
   warnIfPermissionFindingsStale,
