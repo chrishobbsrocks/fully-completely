@@ -662,24 +662,47 @@ const OWNED_REPOSITORY_DISALLOWED_TOOLS = ['Bash(git push *)'];
 // mechanisms genuinely work; the list below deliberately uses the
 // enumerated form, not the wildcard, for one reason named plainly:
 // `@playwright/mcp`'s own tool set (24 tools, confirmed by running) includes
-// `browser_run_code_unsafe`, named "unsafe" by its own author -- arbitrary
-// code execution inside the page. Nothing in liveqa.md's job (drive a
-// browser, read what's on the page, click through a real flow) needs
-// that one specifically, and the wildcard has no way to grant everything
-// else while excluding it. Every other tool from the confirmed 24-tool
-// set is included: liveqa.md's own opening sentence names five
-// (navigate, click, type, snapshot, screenshot/read-accessibility-tree)
-// but its own "YOUR TEST PROCESS" and "HUNT SPECIFICALLY FOR" sections
-// name real needs beyond that short list -- waiting on loading states
-// (`wait_for`), catching runtime errors via the console
-// (`console_messages`), trying to break things (`drag`/`drop`,
-// `file_upload`, `fill_form`), handling a dialog that appears mid-flow
-// (`handle_dialog`), checking what a page actually fetched
-// (`network_request(s)`), multi-tab flows (`tabs`), and closing cleanly
-// (`close`). Read-in-page evaluation (`evaluate`) is included too --
-// standard, commonly-needed Playwright automation (reading localStorage,
-// computed state), distinct from the `_unsafe` one specifically excluded
-// above.
+// `browser_run_code_unsafe`. Its own tool description (read directly from
+// the live server, not paraphrased): "Run a Playwright code snippet.
+// Unsafe: executes arbitrary JavaScript in the Playwright server process
+// and is RCE-equivalent." That is HOST-side execution -- on the machine
+// running the agent, with a `page` handle passed in but no browser-page
+// sandbox around the code itself, Node.js-equivalent reach (filesystem,
+// process spawning, network) named by the tool's own author as
+// RCE-equivalent. Nothing in liveqa.md's job needs that, and the wildcard
+// has no way to grant everything else while excluding it specifically --
+// the enumerated list exists for this one exclusion.
+//
+// QA1 round 1 (Sprint 23) correctly caught that this same "arbitrary code
+// execution" language, as originally written here, would apply equally
+// to `browser_evaluate`, which this list DOES grant -- and that the
+// distinction, if real, needed to be stated, not assumed. Checked
+// directly against the live tool definition rather than inferred a
+// second time: `browser_evaluate`'s own description is "Evaluate
+// JavaScript expression on page or element," taking a `function` field
+// documented as `() => {...}` or `(element) => {...}`. That runs inside
+// the BROWSER PAGE's own JavaScript engine -- the same sandbox any
+// website's own script already runs in on that page (DOM, that page's
+// cookies/localStorage, `fetch()` from that page's origin), not on the
+// host machine, no filesystem or process access, nothing RCE-equivalent
+// about it. That is the real distinction: host-process arbitrary
+// execution (`run_code_unsafe`) versus page-sandboxed JavaScript
+// (`evaluate`), not "both are arbitrary code execution" as this comment
+// used to conflate them. `evaluate` is genuinely ordinary, commonly-
+// needed browser automation (reading localStorage, computed DOM state);
+// `run_code_unsafe` is a different capability class entirely, and that
+// is why only one of the two is excluded.
+//
+// Every other tool from the confirmed 24-tool set is included:
+// liveqa.md's own opening sentence names five (navigate, click, type,
+// snapshot, screenshot/read-accessibility-tree) but its own "YOUR TEST
+// PROCESS" and "HUNT SPECIFICALLY FOR" sections name real needs beyond
+// that short list -- waiting on loading states (`wait_for`), catching
+// runtime errors via the console (`console_messages`), trying to break
+// things (`drag`/`drop`, `file_upload`, `fill_form`), handling a dialog
+// that appears mid-flow (`handle_dialog`), checking what a page actually
+// fetched (`network_request(s)`), multi-tab flows (`tabs`), and closing
+// cleanly (`close`).
 const LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS = [
   'mcp__playwright__browser_click',
   'mcp__playwright__browser_close',
