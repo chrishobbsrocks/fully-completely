@@ -2,7 +2,7 @@
 id: 29
 title: "Surface a stranded close and stop the deployed tip moving during the live gate"
 epic: "Honest reporting"
-status: in_progress
+status: done
 created: 2026-09-09T19:47:18+00:00
 ---
 

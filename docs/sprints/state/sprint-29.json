@@ -1,16 +1,16 @@
 {
   "id": 29,
   "title": "Surface a stranded close and stop the deployed tip moving during the live gate",
-  "phase": "liveqa_live",
+  "phase": "complete",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "582e748d5abca0126ed387ac62ac63f466681ac49218e75cbd81fd8a40d67871",
   "qa1_audited_tree_hash": "c64142f9fb46608c0150d7b8541414be475f58834ebf343ed29bf585a5aefe6f",
   "last_shipped_commit": "fdb6f3b1afaf2c1749062810326030310898bf00",
-  "groundtruth_result": null,
+  "groundtruth_result": "PASS",
   "audit_rounds": 2,
-  "live_test_rounds": 0,
+  "live_test_rounds": 1,
   "started": "2026-09-09T20:39:05+00:00",
-  "completed": null,
+  "completed": "2026-09-09T22:22:48+00:00",
   "history": [
     {
       "ts": "2026-09-09T20:39:05+00:00",
@@ -47,11 +47,23 @@
       "actor": "verify-publish",
       "event": "gitHead_check",
       "detail": "MATCH: registry gitHead=fdb6f3b1afaf2c1749062810326030310898bf00 == last_shipped_commit=fdb6f3b1afaf2c1749062810326030310898bf00 for fully-completely@0.2.2."
+    },
+    {
+      "ts": "2026-09-09T22:20:40+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: PASS \u2014 round 1. Live-tested published npm 0.2.2 in scratch repos with real git worktrees and a real bare remote. Environment: macOS Darwin arm64, 2026-09-09. No billed agent runs \u2014 every criterion here is a lifecycle-script and git property.\n\nPROVENANCE\n0.2.2 on the registry; dist-tags.latest 0.2.2; gitHead fdb6f3b1afaf2c1749062810326030310898bf00 == last_shipped_commit; zero `reshipped` events. Content check per sprint 13's rule: all 62 published files byte-identical to `git show fdb6f3b:<path>`, MISMATCHED 0, tarball sha1 matches the registry's dist.shasum.\n\n================================================================\nCRITERION \u2014 REPRODUCE THE STRANDING: PASS, IN THE EXACT ORDER ASKED FOR\n================================================================\nQA1's note was specific that the generic \"close a sprint in a worktree\" case is not a substitute, because round 1 broke on the ordering: the divergence check bailed out before it ever compared registry status, and main carried a registry entry with no state file for the sprint's entire life. I reproduced that order rather than an equivalent-looking one.\n\n  [1] created the sprint IN MAIN, and confirmed the round-1 condition existed before going further:\n        main registry entry for sprint 1: present\n        main state file:                  ABSENT\n  [2] ran /sprint-worktree BEFORE /sprint-start, creating the worktree while main still had no state\n  [3] ran /sprint-start and everything after \u2014 build, qa1, dev-done, ship, liveqa, complete \u2014\n      entirely inside the worktree. It closed there: \"Sprint 1 closed. Confirmed: QA1 audit, LiveQA\n      live test, user authorization.\", worktree phase `complete`, worktree registry `done`.\n  [4] main at that moment: still no state file, registry still reading `todo`.\n\nFrom main, `/sprint-status 1` now says:\n  \"ERROR: Sprint 1 has no state file in /private/tmp/wt-main (branch: main) (this tree), but it exists\n   in 1 other worktree(s): /private/tmp/wt-main-devteam2-sprint-1 (phase 'complete'). This sprint was\n   likely started (and possibly closed) entirely inside another worktree \u2014 it was never\n   /sprint-start'ed here, so there is genuinely nothing local to show. Read status from the tree that\n   actually holds it, not this one.\"\n\nIt surfaces the disagreement rather than reporting the sprint open. Three things it gets right that sprint 7's version of this message could not: it looks across worktrees rather than only reporting local absence, it names which worktree holds the sprint, and it reports the phase found there \u2014 `complete`, the fact that was actually being lost. A reader in main learns the sprint is closed, not merely that this tree can't see it.\n\nWorth being precise about what round 1's failure was, since it explains why the ordering matters: with no state file in main, a check that begins by loading local state has nothing to compare and returns early. The registry entry \u2014 the one thing main did have \u2014 was never consulted. Fixing that is why this order, and only this order, exercises it.\n\n================================================================\nCRITERION \u2014 REPRODUCE THE TIP MOVE: PASS\n================================================================\nBuilt a scratch repo with a real bare remote, drove a sprint to liveqa_live, pushed the ship bookkeeping, then pushed a further commit touching only `docs/sprints/`.\n\n  shipped: a914c29    origin/main after the sprint-data-only push: 0a18d33\n\n  \"NOTE: origin/main carries 2 commits beyond this sprint's own recorded last_shipped_commit\n   (a914c29...): 0a18d33 docs/sprints only; 8502aa4 ship bookkeeping. This means the remote and this\n   record have drifted apart \u2014 it does NOT mean someone bypassed the push-only-Pipeman rule. The most\n   common causes: a second, real ship...; or ordinary, legitimate work on another sprint landing on\n   the same shared branch \u2014 any push moves the one tip everyone shares, regardless of which worktree\n   it came from. Not a block \u2014 informational.\"\n\nThe framework notices, and this release's improvement is visible in the message itself: it now NAMES THE COMMITS (\"0a18d33 docs/sprints only; 8502aa4 ship bookkeeping\") where the sprint-24 version I tested gave only a count. That is the difference between \"something moved, go investigate\" and \"these two things moved, and both are bookkeeping\" \u2014 a reader can classify the drift without leaving the message. It also now names the second common cause (another sprint's legitimate work on the shared branch), which is the explanation a multi-worktree project actually needs.\n\n================================================================\nCRITERION \u2014 IDENTICAL STATE ACROSS TREES PRODUCES SILENCE: PASS\n================================================================\nCreated a sprint in main, started it, committed the state, and only then created the worktree so both trees held the same committed state.\n\n  state files byte-identical across the two trees: YES (cmp)\n  /sprint-status 1 from main:      clean status output, nothing else\n  /sprint-status 1 from worktree:  clean status output, nothing else\n  divergence/worktree warnings across both invocations: 0\n\nNothing to disagree about, nothing said. This is the same property sprint 25 established for the collision warning, and it matters for the same reason: a warning that fires when the trees agree is noise, and noise is what teaches people to skim past the one that matters. Both of this sprint's new signals \u2014 the stranding message and the tip-move note \u2014 stay quiet when the condition is absent.\n\n================================================================\nWHAT I OBSERVED VS ACCEPTED\n================================================================\nEvery result here I produced directly against published 0.2.2, with real `git worktree` trees created by the shipped `dev2_worktree.sh` and a real bare remote. The round-1 condition (registry entry present, state file absent) I verified existed before running the reproduction, rather than assuming the ordering produced it. Pipeman's report that the drift note now names the exact commit is confirmed \u2014 I saw it in my own scratch repo, independently of their verify-publish output.\n\nNo corrections to my own method this round.\n\n================================================================\nRECOMMENDATION\n================================================================\nShip-ready. The stranding case is fixed in the exact order that broke it, and the message a main-checkout reader gets now carries the fact that was previously lost \u2014 that the sprint is closed, and where. The tip-move note names what moved rather than counting it. And both signals stay silent when the trees agree, which is the property that keeps either of them worth reading.\n\nNothing carries forward from this sprint. The two items still open are from earlier gates and unchanged: the hollow-green CI case remains unobserved (sprint 24/28), and no role is designated to commit its own verdict (QA1's, twice flagged, Master Controller's to resolve).\n\nThis PASS means the code is ready, not that anyone is authorized to close sprint 29."
+    },
+    {
+      "ts": "2026-09-09T22:22:48+00:00",
+      "actor": "dev-team",
+      "event": "sprint_closed",
+      "detail": "user_said=User invoked /sprint-complete 29 directly in this session, with no further text -- explicit real-time authorization to close sprint 29 right now."
     }
   ],
   "last_claim": {
-    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-09T22:16:17+00:00"
+    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-09T22:22:48+00:00"
   }
 }
