@@ -2998,6 +2998,25 @@ test('warnIfPermissionFindingsStale: warns, naming both versions and the finding
   });
 });
 
+test('warnIfPermissionFindingsStale: the "survived one real CLI update unchanged" claim is gone, not merely updated (Sprint 26, Req 5)', () => {
+  withFakeClaudeVersion('9.9.999 (Claude Code)', () => {
+    const lines = captureStderr(() => warnIfPermissionFindingsStale());
+    assert.strictEqual(lines.length, 1);
+    // The exact claim this Req removes -- checked for its absence
+    // directly, not inferred from the message being merely different.
+    assert.doesNotMatch(lines[0], /survived/i);
+    assert.doesNotMatch(lines[0], /unchanged/i);
+    // The corrected message must not swap "re-verified" (implies
+    // establishment) back in either -- "examined" is the word Req 5
+    // asks for instead.
+    assert.doesNotMatch(lines[0], /re-verified/i);
+    assert.match(lines[0], /examined/i);
+    // Points the reader at the actual accounting rather than asserting
+    // a conclusion inline.
+    assert.match(lines[0], /Sprint 26 re-grading/);
+  });
+});
+
 test('runHeadless (real subprocess): the staleness warning appears on stderr but never blocks the run when claude reports a different version', () => {
   withScratchLauncherInstall((scratchRoot) => {
     const noOpProtectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-version-mismatch-claude-'));

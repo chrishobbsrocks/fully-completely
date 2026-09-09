@@ -125,17 +125,33 @@ function getClaudeVersionString() {
 }
 
 // Sprint 21, Req 3: staleness made visible, never a gate. A version
-// difference is not itself a defect -- this exact evidence base already
-// survived one real CLI update unchanged (this sprint's own
-// re-verification, ~2.1.257-258 through 2.1.261) -- so this warns and
-// keeps going, on every headless launch, rather than blocking the moment
-// claude updates for no demonstrated reason. Deliberately NOT modeled on
-// the `repo=` banner, which prints unconditionally on every invocation
-// and was read wrong four times because it never says anything different
-// depending on whether it matters: this only ever produces output when
-// there is an actual, positively-observed version difference to report,
-// so silence is the common case and the warning stays meaningful when it
-// does appear.
+// difference is not itself a defect, so this warns and keeps going, on
+// every headless launch, rather than blocking the moment claude updates
+// for no demonstrated reason. Deliberately NOT modeled on the `repo=`
+// banner, which prints unconditionally on every invocation and was read
+// wrong four times because it never says anything different depending on
+// whether it matters: this only ever produces output when there is an
+// actual, positively-observed version difference to report, so silence
+// is the common case and the warning stays meaningful when it does
+// appear.
+//
+// Sprint 26, Req 5: this function's own message used to say the evidence
+// base "already survived one real CLI update unchanged." That claim is
+// gone, not updated to a new count -- it was never true the way it read.
+// A downstream consumer ran scripts/permission-gate-repro.js twice
+// against the SAME claude binary, same version, nothing differing but
+// the clock: three of eight verdicts moved, and no (role, probe) pair
+// reproduced a DRIFT verdict twice. Most of this document's entries were
+// measured the identical way (launch a role, instruct it, read
+// permission_denials from the envelope) -- a method that cannot tell a
+// real bound from a coin, per that same result. "Survived one real CLI
+// update unchanged" was a claim of stability this method was never shown
+// able to support, at any version, including the one it was supposedly
+// stable across. See docs/sprint-12-permission-scope-findings.md's own
+// "Sprint 26 re-grading" section for the full accounting: which entries
+// are model-mediated (now unestablished, not disproved -- the
+// observations still happened) and which were measured directly and
+// still stand.
 function warnIfPermissionFindingsStale() {
   const running = getClaudeVersionString();
   if (!running || running === PERMISSION_FINDINGS_ANCHOR_VERSION) return;
@@ -151,14 +167,18 @@ function warnIfPermissionFindingsStale() {
   // it directly, and a downstream operator at least knows there's a real
   // evidence base to ask about upstream, rather than a dangling path.
   console.error(
-    `NOTE: this session is running claude ${running}, but the headless permission-scope evidence ` +
+    `NOTE: this session is running claude ${running}. The headless permission-scope evidence ` +
       "the fully-completely framework's own profiles rest on (docs/sprint-12-permission-scope-" +
       'findings.md in the fully-completely framework\'s own upstream repository -- not a file ' +
       'copied into an installed project, so it will only be present here if this session IS that ' +
-      `repository) was last re-verified against ${PERMISSION_FINDINGS_ANCHOR_VERSION}. Not a ` +
-      "defect and not a block -- this bound has already survived one real CLI update unchanged -- " +
-      "but if a permission behaviour in this session doesn't match what that document describes, " +
-      'this is the first place to look, or to ask upstream about.'
+      `repository) was last examined against ${PERMISSION_FINDINGS_ANCHOR_VERSION}. Not a defect ` +
+      'and not a block on its own. Read that document\'s own "Sprint 26 re-grading" section ' +
+      'before treating "examined" as "confirmed," though: most of its entries were measured by ' +
+      'launching a role and reading what it reported, and sprint 26 found that method does not ' +
+      'reliably reproduce even run twice, back to back, at the identical claude version -- so a ' +
+      'version match here says nothing about whether those entries currently hold. If a ' +
+      "permission behaviour in this session doesn't match what that document describes, this is " +
+      'still the first place to look, or to ask upstream about.'
   );
 }
 

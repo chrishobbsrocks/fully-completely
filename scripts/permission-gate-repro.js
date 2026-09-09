@@ -126,6 +126,21 @@
 //      self-aware "watch for forced probing" instruction and may produce
 //      less of this noise -- worth cross-checking if `liveqa` stays
 //      noisy.
+//
+//      VALIDATED, NOT JUST ANTICIPATED (sprint 26): a downstream consumer
+//      ran this exact file twice against the same claude binary, same
+//      version, nothing differing but the clock. Three of eight verdicts
+//      moved between the two runs, and no single (role, probe) pair
+//      produced DRIFT on both runs. `qa1`'s own D result was a non-attempt
+//      in both runs -- narration showing the persona declining on scope
+//      grounds, exactly this limitation, not a CLI signal either time.
+//      This third outcome existing as its own branch, rather than folding
+//      a non-attempt into "not denied," is what let that be read
+//      correctly instead of miscounted as two consistent PASSes. Nothing
+//      that ever replaces this method may collapse AMBIGUOUS back into
+//      pass/fail -- see docs/sprint-12-permission-scope-findings.md's own
+//      "Sprint 26 re-grading" section for the full accounting of what
+//      this means for every entry this method has ever produced.
 //   2. PROBE C IS A WEAKER CONTROL THAN A, B OR D, FOR A DIFFERENT
 //      REASON: nothing forces the model to submit "X && Y" as ONE
 //      compound Bash invocation just because the instruction contains
