@@ -1,11 +1,11 @@
 {
   "id": 29,
   "title": "Surface a stranded close and stop the deployed tip moving during the live gate",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "582e748d5abca0126ed387ac62ac63f466681ac49218e75cbd81fd8a40d67871",
   "qa1_audited_tree_hash": "c64142f9fb46608c0150d7b8541414be475f58834ebf343ed29bf585a5aefe6f",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "fdb6f3b1afaf2c1749062810326030310898bf00",
   "groundtruth_result": null,
   "audit_rounds": 2,
   "live_test_rounds": 0,
@@ -35,11 +35,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-09T22:12:28+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=fdb6f3b | ci=green: 1 CI run(s) for fdb6f3b1afaf2c1749062810326030310898bf00 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-09T22:08:52+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-09T22:12:28+00:00"
   }
 }
