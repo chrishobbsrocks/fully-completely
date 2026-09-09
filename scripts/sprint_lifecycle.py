@@ -1131,8 +1131,14 @@ def check_ci_status(commit_sha: str):
     configured, or it hasn't started); or every run found is still
     pending. Per this Req's own explicit instruction, undeterminable is
     NOT treated as red — a project with no CI, or CI this tool can't see,
-    must not become unshippable by accident. cmd_ship prints this as a
-    warning and proceeds; it never gates on it.
+    must not become unshippable by accident. Both callers — cmd_ship AND
+    cmd_reship (Req 4, added mid-flight once QA1 named the gap: a
+    reshipped commit has never been through QA1's static audit at all,
+    so exempting it here would give the least-audited path the least
+    mechanical scrutiny) — print this as a warning and proceed; neither
+    gates on it. Keep both callers consistent if this function's own
+    grading ever changes; two call sites giving different answers to the
+    same question is exactly the defect Req 4 exists to remove.
 
     Every subprocess call here is wrapped the same way
     git_tree_hash_excluding() and git_commit_sha() already are —
@@ -1350,8 +1356,33 @@ def cmd_reship(args) -> None:
         if reshipped_commit is None:
             die(f"'{args.commit or ''}' does not resolve to a real commit in this repo. "
                 "--commit must be an actual commit hash Pipeman is about to push.")
+
+        # Sprint 24, Req 4 (added mid-flight, on QA1's own carried
+        # question): the identical check cmd_ship runs, same reasoning.
+        # Req 2 as originally written named /sprint-ship only, which was a
+        # correct reading of the text and the wrong place to stop — a
+        # reshipped commit carries STRICTLY LESS verification than a
+        # shipped one (it has never been through QA1's static audit at
+        # all, see this function's own opening comment), so exempting it
+        # from the CI check would mean the least-audited path gets the
+        # least mechanical scrutiny, the exact inversion of what this
+        # sprint exists to fix. Same three outcomes, same undeterminable-
+        # status decision, applied consistently rather than decided twice.
+        ci_status, ci_detail = check_ci_status(reshipped_commit)
+        if ci_status == CI_STATUS_RED:
+            die(f"Sprint {args.id}: CI is red for the exact commit being reshipped "
+                f"({reshipped_commit}): {ci_detail} Fix CI and land a green run for this "
+                "commit before reshipping. No override.")
+        elif ci_status == CI_STATUS_UNDETERMINABLE:
+            print(f"WARNING: could not determine CI status for {reshipped_commit}: {ci_detail} "
+                  "Reshipping anyway — an undeterminable status is not treated as red (Req 2/4, "
+                  "sprint 24): a project with no CI, or CI this tool can't see, must not "
+                  "become unshippable by accident.", file=sys.stderr)
+        else:
+            print(f"CI check: {ci_detail}")
+
         state["last_shipped_commit"] = reshipped_commit
-        log_event(state, "pipeman", "reshipped", f"commit={args.commit or ''}")
+        log_event(state, "pipeman", "reshipped", f"commit={args.commit or ''} | ci={ci_status}: {ci_detail}")
         save_state(args.id, state)
     # Sprint 15, Req 2: says, at the moment reship runs (not buried in an
     # agent file nobody re-reads mid-loop), that this exact commit is

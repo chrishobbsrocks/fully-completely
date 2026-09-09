@@ -1100,6 +1100,43 @@ grep -q "WARNING: could not determine CI status" /tmp/out.txt || fail "ship's pe
 grep -q "have not finished yet" /tmp/out.txt || fail "ship's pending-run warning doesn't say the run hasn't finished, distinct from no CI at all"
 rm -f /tmp/out.txt
 
+echo "== sprint 24, Req 4 (added mid-flight): reship refuses over a red CI run for the exact commit, same as ship =="
+SPRINT_RESHIP_CI=$(new_sprint "Reship CI status sprint")
+$SCRIPT start "$SPRINT_RESHIP_CI" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_RESHIP_CI work"
+$SCRIPT qa1 "$SPRINT_RESHIP_CI" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_RESHIP_CI" > /dev/null
+RESHIP_CI_SHIPPED=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_RESHIP_CI" --commit "$RESHIP_CI_SHIPPED" > /dev/null
+# A reship needs the sprint mid the LiveQA fix loop, not complete_ready --
+# record a FAIL first, same as every other reship setup in this file.
+$SCRIPT liveqa "$SPRINT_RESHIP_CI" --deployed-commit "$RESHIP_CI_SHIPPED" --verdict FAIL --notes "found a bug" > /dev/null
+git commit -q --allow-empty -m "fix for sprint $SPRINT_RESHIP_CI"
+RESHIP_CI_FIX=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=red $SCRIPT reship "$SPRINT_RESHIP_CI" --commit "$RESHIP_CI_FIX" \
+  > /tmp/out.txt 2>&1 && fail "reship succeeded despite a red CI run for the exact commit being reshipped (Req 4 regression)" || true
+grep -q "CI is red for the exact commit being reshipped" /tmp/out.txt || fail "reship's CI-red refusal message is missing"
+grep -qF "$RESHIP_CI_FIX" /tmp/out.txt || fail "reship's CI-red refusal doesn't name the commit"
+STATUS_AFTER_RED_RESHIP=$($SCRIPT status "$SPRINT_RESHIP_CI" --verbose 2>&1)
+echo "$STATUS_AFTER_RED_RESHIP" | grep -qF "$RESHIP_CI_FIX" && \
+  fail "a CI-red reship attempt must not have recorded the fix commit as last_shipped_commit"
+rm -f /tmp/out.txt
+
+echo "== sprint 24, Req 4: reship refuses when CI 'succeeded' but no real step executed, same specificity as ship =="
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=no-steps $SCRIPT reship "$SPRINT_RESHIP_CI" --commit "$RESHIP_CI_FIX" \
+  > /tmp/out.txt 2>&1 && fail "reship succeeded on a run that reported success but never executed a real step" || true
+grep -q "no real step actually executed" /tmp/out.txt || fail "reship's no-real-steps-executed refusal message is missing"
+rm -f /tmp/out.txt
+
+echo "== sprint 24, Req 4: an undeterminable CI status warns but does not gate a reship either -- the same decision, not decided twice =="
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=none $SCRIPT reship "$SPRINT_RESHIP_CI" --commit "$RESHIP_CI_FIX" \
+  > /tmp/out.txt 2>&1 || fail "reship refused when CI status was genuinely undeterminable -- Req 4 requires the identical decision cmd_ship makes"
+grep -q "WARNING: could not determine CI status" /tmp/out.txt || fail "reship's undeterminable-CI-status warning is missing"
+grep -q "fix reshipped" /tmp/out.txt || fail "reship should have proceeded (undeterminable does not gate) -- its own success output is missing"
+$SCRIPT status "$SPRINT_RESHIP_CI" --verbose 2>&1 | grep -qF "$RESHIP_CI_FIX" || \
+  fail "reship should have recorded the fix commit as last_shipped_commit (undeterminable does not gate)"
+rm -f /tmp/out.txt
+
 echo "== sprint 24, Req 3: origin-ahead-of-record warns in status and liveqa, never gates, and doesn't misread as a bypassed push rule =="
 SPRINT_ORIGIN=$(new_sprint "Origin-ahead sprint")
 $SCRIPT start "$SPRINT_ORIGIN" > /dev/null
