@@ -2,7 +2,7 @@
 id: 24
 title: "Close the three gaps between shipping a commit and verifying what actually got served"
 epic: "Honest reporting"
-status: todo
+status: in_progress
 created: 2026-09-08T21:56:14+00:00
 ---
 
@@ -45,9 +45,13 @@ Their LiveQA verified the product code was byte-identical to what QA1 audited *b
    - **It warns; it does not gate.** A record lagging origin is recoverable and common; blocking on it would make a normal state unworkable.
    - The message must distinguish **"origin carries a commit your record does not"** from **"you shipped the wrong thing."** Pipeman's first reading of this was that someone had bypassed the push rule — the message must not invite that.
 
-4. **Bump `package.json` to 0.1.25.** One line.
+4. **`cmd_reship` gets the same CI check as `cmd_ship`.** *Added mid-flight, on QA1's carried question, while a re-audit was already required for the version renumbering.* Req 2 as originally written named `/sprint-ship` only, which was a correct reading of the text and the wrong place to stop.
+   - **A reship ships a commit gate 1 has never seen.** That is the path's whole purpose — a live-loop fix goes out without a full re-audit. So a reshipped commit carries strictly less verification than a shipped one, and exempting it means **the least-audited path gets the least mechanical scrutiny.**
+   - Same specificity as Req 2: the conclusion of the latest run for the exact commit, and whether its steps executed. Same undeterminable-status decision, applied consistently rather than decided twice.
 
-5. **Test coverage in `scripts/smoke_test.sh`.** At minimum: a bookkeeping-only difference between shipped and deployed is accepted; a product-code difference is still refused; the CI check refuses a run that completed without executing its steps; the undeterminable-status decision behaves as chosen; the origin-ahead warning appears and does not gate.
+5. **Bump `package.json` to 0.1.28.** One line. *Renumbered from 0.1.25 — sprint 26 jumped the queue and consumed 0.1.25 through 0.1.27, and Pipeman caught that publishing 0.1.25 now would set `dist-tags.latest` backwards and silently regress every unpinned user from 0.1.27.*
+
+6. **Test coverage in `scripts/smoke_test.sh`.** At minimum: a bookkeeping-only difference between shipped and deployed is accepted; a product-code difference is still refused; the CI check refuses a run that completed without executing its steps; the undeterminable-status decision behaves as chosen; the origin-ahead warning appears and does not gate.
 
 ### Acceptance Criteria
 
@@ -58,13 +62,14 @@ Their LiveQA verified the product code was byte-identical to what QA1 audited *b
 - **Req 2's specificity is the whole point.** Confirm the check would refuse a run that exited `EUSAGE` at install in five seconds. **A check satisfied by "a run exists" or "a run completed" is the defect, not the fix.**
 - Req 2: confirm the undeterminable-status decision is recorded with its reasoning, and that a project with no CI configured is not silently unshippable.
 - Req 3: confirm it warns and never gates, and read the message cold. **If it could be read as "someone bypassed the push rule", it fails** — that is the misreading it exists to prevent, and it has already happened once.
-- Req 4: `package.json` is `0.1.25`, one-line diff.
-- Req 5: **run the suite**, and confirm the five listed cases.
+- Req 4: confirm `cmd_reship` uses the same check and the same undeterminable-status behaviour as `cmd_ship`. **Two different answers to the same question in one sprint is the finding.**
+- Req 5: `package.json` is `0.1.28`, one-line diff.
+- Req 6: **run the suite**, and confirm the five listed cases.
 - Run `scripts/verify-tarball.sh`.
 
 **LiveQA verifies live, after Pipeman publishes:**
 
-- **Confirm 0.1.25 is on the registry**, verifying published bytes against the audited commit per sprint 13's rule.
+- **Confirm 0.1.28 is on the registry**, verifying published bytes against the audited commit per sprint 13's rule.
 - **Reproduce the reported scenario.** Ship a commit in a scratch repo, land a bookkeeping commit on top, and record a verdict against the later commit. **That is the exact case that has cost a manual reship on every sprint of theirs.**
 - **The relaxation did not open a hole.** Land a one-line product change between the shipped and the tested commit and confirm the verdict is still refused.
 - **The CI refusal fires.** Construct or find a commit whose run completed without executing its steps and confirm the ship refuses. If that cannot be constructed here, say so plainly rather than inferring it.

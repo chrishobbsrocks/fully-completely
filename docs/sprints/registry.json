@@ -1,5 +1,5 @@
 {
-  "next_id": 27,
+  "next_id": 28,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -142,8 +142,8 @@
     "24": {
       "title": "Close the three gaps between shipping a commit and verifying what actually got served",
       "epic": "Honest reporting",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-24_close-the-three-gaps-between-shipping-a-commit-and-verifying-what-actually-got-served.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-24_close-the-three-gaps-between-shipping-a-commit-and-verifying-what-actually-got-served.md"
     },
     "25": {
       "title": "Warn when another session is already working here, and let a narrowed sprint be renamed",
@@ -156,6 +156,12 @@
       "epic": "Honest reporting",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-26_re-grade-every-permission-finding-by-how-it-was-measured-and-find-what-can-be-probed-without-a-model--done.md"
+    },
+    "27": {
+      "title": "Make the sprint record durable at the moments people rely on it",
+      "epic": "Honest reporting",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-27_make-the-sprint-record-durable-at-the-moments-people-rely-on-it.md"
     }
   }
 }

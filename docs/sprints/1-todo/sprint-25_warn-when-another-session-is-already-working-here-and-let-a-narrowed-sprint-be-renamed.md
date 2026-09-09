@@ -41,7 +41,7 @@ They have since written into their own sprint that they **do not build it, do no
    - **Preserve the original title.** A sprint that narrowed legitimately should show what it was and what it became; a rename that erases the first is a half-record.
    - **Renaming does not change a sprint's phase, verdicts, hashes or history.** Confirm the sprint-file hash gate behaves correctly across a rename — if renaming invalidates a recorded QA1 PASS, say so and decide whether that is right rather than discovering it at a gate.
 
-5. **Bump `package.json` to 0.1.26.** One line.
+5. **Bump `package.json` to 0.1.29.** One line.
 
 6. **Test coverage** in whichever suite fits each half: a second launch of the same role warns and does not block; a first launch does not warn; a rename updates all three of registry, frontmatter and filename; a rename preserves the original title; a rename leaves phase and verdicts untouched.
 
@@ -54,13 +54,13 @@ They have since written into their own sprint that they **do not build it, do no
 - Req 2: confirm the reachability question was **established by running**. If the answer is "not reachable", confirm what would be needed is named rather than left as a shrug.
 - **Req 3 is the honesty check.** Confirm the code states what this does not catch — specifically that a build in progress is invisible until the next launch or command. Four comments in this project have had to be corrected for claiming more than the evidence supported; this is the fifth chance to get it right first time.
 - Req 4: confirm all three of registry, frontmatter and filename move together, and that the original title survives. **Confirm the hash behaviour across a rename was tested rather than assumed** — a rename that silently invalidates a QA1 PASS would surface at `/sprint-dev-done` as a refusal nobody could explain.
-- Req 5: `package.json` is `0.1.26`, one-line diff.
+- Req 5: `package.json` is `0.1.29`, one-line diff.
 - Req 6: **run both suites.**
 - Run `scripts/verify-tarball.sh`.
 
 **LiveQA verifies live, after Pipeman publishes:**
 
-- **Confirm 0.1.26 is on the registry**, verifying published bytes against the audited commit per sprint 13's rule.
+- **Confirm 0.1.29 is on the registry**, verifying published bytes against the audited commit per sprint 13's rule.
 - **Reproduce the reported collision.** Launch the same role twice in one tree from a published install and confirm the second warns, names the first, and still launches.
 - **Confirm the blind spot is real and stated.** Start a session outside the launcher and confirm the warning does not claim to have seen it — this is the case the message must not overstate.
 - **Rename a sprint end to end** and confirm the registry, frontmatter and filename agree afterwards, the original title is preserved, and the phase and verdicts are unchanged.
