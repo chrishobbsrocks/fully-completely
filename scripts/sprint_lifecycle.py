@@ -431,15 +431,58 @@ def git_tree_hash_excluding(ref: str, exclude_patterns) -> Optional[str]:
     return hashlib.sha256("\n".join(entries).encode("utf-8")).hexdigest()
 
 
+def differing_paths_excluding(ref_a: str, ref_b: str, exclude_patterns) -> Optional[list]:
+    """Sprint 24, Req 1: when git_tree_hash_excluding(ref_a, ...) and
+    git_tree_hash_excluding(ref_b, ...) disagree, a caller needs to say
+    WHICH paths actually differ, not just that the hashes do — the
+    reporter's own LiveQA had to run this by hand to know its verdict was
+    valid, which is exactly the gap this closes.
+
+    `git diff --name-only ref_a ref_b` lists every path that changed
+    between the two trees (added, removed, or modified); paths matching
+    exclude_patterns are dropped the same way git_tree_hash_excluding()
+    drops them, so what's left is exactly the set of paths responsible
+    for a content-hash mismatch computed with the same exclude_patterns —
+    if the hashes disagree, this list is never empty, and if the hashes
+    agree, calling this at all is pointless (callers should check the
+    hash first, this only explains a real mismatch, it doesn't detect
+    one).
+
+    Returns None, not an empty list, if the diff itself couldn't be
+    computed at all (bad ref, not a git repo) — collapsing every
+    subprocess failure the same way git_tree_hash_excluding() does, for
+    the same reason: distinguishing "no ref" from "ref resolved but diff
+    failed" is not a distinction any caller here needs to make."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "diff", "--name-only", ref_a, ref_b],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    paths = [p for p in result.stdout.splitlines() if p.strip()]
+    paths = [p for p in paths if not any(fnmatch.fnmatch(p, pattern) for pattern in exclude_patterns)]
+    paths.sort()
+    return paths
+
+
 def git_commit_sha(ref: str) -> Optional[str]:
     """Resolve a git ref to its full commit SHA, not the tree hash. Used to
-    record exactly which commit Pipeman shipped, and later to check that
-    LiveQA's live test ran against that same commit. This is an
-    identity check, not a content check like the QA1-to-ship tree-hash
-    comparison: there's no legitimate rebase/squash/merge step between
-    shipping and deploying that would need tolerating here, a mismatch
-    always means LiveQA tested something other than what actually
-    went out. Returns None if the ref doesn't resolve."""
+    record exactly which commit Pipeman shipped, and to resolve whatever
+    ref a caller (cmd_liveqa, cmd_ship, the live-loop audit) needs turned
+    into a real commit identity. Returns None if the ref doesn't resolve.
+
+    Sprint 24: this function's own docstring used to also claim there's
+    "no legitimate rebase/squash/merge step between shipping and
+    deploying" that cmd_liveqa's comparison would need to tolerate — that
+    claim belonged to cmd_liveqa's specific use of this function, not to
+    this function itself (git_commit_sha() is also called from cmd_ship
+    and elsewhere, where no such claim was ever true or relevant), and it
+    turned out to be wrong for cmd_liveqa's own case besides: a
+    bookkeeping commit landing on top of a shipped commit before
+    deployment is exactly this kind of step, and it's legitimate. See
+    cmd_liveqa's own comment for the corrected reasoning about what its
+    comparison protects and how."""
     try:
         result = subprocess.run(  # nosec B603 B607
             ["git", "rev-parse", ref],
@@ -614,6 +657,91 @@ def worktree_divergence_warning(sprint_id: int) -> Optional[str]:
     )
 
 
+def origin_ahead_of_record_warning(last_shipped: Optional[str]) -> Optional[str]:
+    """Sprint 24, Req 3 (Finding C): `cmd_ship` never runs when Claude
+    Code's own permission classifier denies the push step before
+    `cmd_ship` starts — confirmed directly, both entry points, same
+    denial. So nothing INSIDE `cmd_ship` can prevent a push landing
+    without its matching state write (a second, real ship — often a
+    headless Pipeman's own twin — closing the window before this one's
+    bookkeeping caught up). Detection after the fact, wherever
+    `last_shipped_commit` is read to make a decision, is the achievable
+    thing; this is that detector.
+
+    ADDRESSING `worktree_divergence_warning()`'s OWN PRECEDENT DIRECTLY,
+    rather than silently building something that looks like it
+    contradicts it: that function's docstring rules out comparing against
+    `origin/*` at all, because "a stale or unfetched remote ref produces
+    a NEW confidently-wrong answer." This function also reads
+    `origin/<upstream>`, and does NOT `git fetch` first either — so it
+    earns re-examining that ruling, not just citing a different Req
+    number past it.
+
+    The two checks are not the same shape, and that's why the ruling
+    doesn't transfer. `worktree_divergence_warning()` was answering "does
+    another location have a DIFFERENT sprint file than this one" — a
+    stale origin ref there could read as agreement when the real answer
+    is unknown in either direction, a genuine false confidence. This
+    function only ever answers "does origin contain at least one commit
+    beyond `last_shipped_commit`" — a strictly MONOTONIC, one-directional
+    question. Git history is append-only on a branch nobody force-pushes
+    (this project's own standing assumption elsewhere: only Pipeman
+    pushes, and never with --force). Under that assumption, a stale local
+    view of `origin/<upstream>` can only ever make this function see
+    FEWER of origin's commits than actually exist, never invent commits
+    that aren't there — so staleness here produces under-reporting
+    (silently missing a real drift a fresh fetch would show), never a
+    false alarm. That is a real, named limitation, not a hidden one: run
+    `git fetch` yourself first for the freshest picture. It is not the
+    same failure mode `worktree_divergence_warning()` was refusing to
+    risk, which is why this function is allowed to exist where that
+    ruling still correctly stands for its own, different check.
+
+    Returns None — the common, correct case — when there is nothing to
+    report: no `last_shipped_commit` yet, not a git repository, no
+    upstream configured for the current branch (detached HEAD, a
+    local-only branch), or origin is not ahead. Returns a warning STRING,
+    never raises, when it is: worded to say exactly "origin carries a
+    commit your record does not," never "someone bypassed the push
+    rule" — Pipeman's own first, wrong reading of this exact situation,
+    the misreading this message exists to prevent."""
+    if not last_shipped or not is_git_repository():
+        return None
+    upstream = subprocess.run(  # nosec B603 B607
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if upstream.returncode != 0:
+        return None  # no upstream configured — nothing to compare against
+    origin_ref = upstream.stdout.strip()
+    if not origin_ref:
+        return None
+    ahead = subprocess.run(  # nosec B603 B607
+        ["git", "rev-list", "--count", f"{last_shipped}..{origin_ref}"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if ahead.returncode != 0:
+        return None  # last_shipped or origin_ref doesn't resolve locally
+    try:
+        count = int(ahead.stdout.strip())
+    except ValueError:
+        return None
+    if count <= 0:
+        return None
+    plural = "commit" if count == 1 else "commits"
+    return (
+        f"NOTE: {origin_ref} carries {count} {plural} beyond this sprint's own recorded "
+        f"last_shipped_commit ({last_shipped}). This means the remote and this record have "
+        "drifted apart — it does NOT mean someone bypassed the push-only-Pipeman rule. The "
+        "most common cause is a second, real ship (often a headless Pipeman's own instance) "
+        "landing after this one, before its own bookkeeping state write caught up. Not a "
+        "block — informational, and worth a fresh /sprint-status re-check, or `git log "
+        f"{last_shipped}..{origin_ref}` to see exactly what's there. (Compares against the "
+        "locally cached view of origin — run `git fetch` first for the freshest picture; a "
+        "stale local view under-reports this, it never over-reports it.)"
+    )
+
+
 def update_frontmatter_status(path: Path, new_status: str) -> None:
     """Rewrite the `status:` line in a sprint file's YAML frontmatter so the
     file itself agrees with registry.json instead of only the registry
@@ -762,6 +890,13 @@ def cmd_status(args) -> None:
     divergence = worktree_divergence_warning(args.id)
     if divergence:
         print(divergence)
+    # Sprint 24, Req 3 (Finding C): same "warns, never gates" shape, a
+    # different divergence — see origin_ahead_of_record_warning()'s own
+    # docstring for why comparing against origin here doesn't repeat the
+    # mistake worktree_divergence_warning() above was written to rule out.
+    origin_drift = origin_ahead_of_record_warning(state.get("last_shipped_commit"))
+    if origin_drift:
+        print(origin_drift)
     if args.verbose:
         print("\nHistory:")
         for h in state["history"]:
@@ -940,6 +1075,169 @@ def cmd_dev_done(args) -> None:
     print("Pipeman: run /sprint-ship when ready to push to remote.")
 
 
+# Sprint 24, Req 2: CI is red for exactly the commit being shipped, and
+# nothing checked it — the reporter's own two-day-red build, `npm ci`
+# exiting `EUSAGE` in five to seven seconds because a lockfile was out of
+# sync, lint/test/build never running at all. Their own diagnosis is the
+# requirement: a check asking only "did a run exist" or "did it finish"
+# would have passed every red run they had. This checks the CONCLUSION of
+# the latest run(s) for the EXACT commit, and whether real steps executed
+# — not merely that something with that name happened.
+CI_STATUS_GREEN = "green"
+CI_STATUS_RED = "red"
+CI_STATUS_UNDETERMINABLE = "undeterminable"
+
+
+def check_ci_status(commit_sha: str):
+    """Returns (status, detail). status is one of CI_STATUS_GREEN,
+    CI_STATUS_RED, CI_STATUS_UNDETERMINABLE — never raises, mirroring
+    every other git/network-touching function in this file: a caller
+    here should never have to separately catch an exception on top of
+    branching on the result.
+
+    Implementation: `gh run list --commit <sha>` (GitHub CLI; this
+    project already depends on it being available and authenticated for
+    Pipeman's own documented flow, so no new external dependency is
+    introduced here). Filtering by the exact commit SHA, not by branch or
+    "latest run" generally, is deliberate and load-bearing — a check
+    scoped to a branch can read a DIFFERENT commit's green run as this
+    one's, which is a worse defect than the one being fixed here.
+
+    CI_STATUS_RED fires on ANY run found for this commit that either (a)
+    completed with a conclusion other than "success" (failure, cancelled,
+    timed_out, etc. — this alone already catches the reporter's own
+    5-second `EUSAGE` case, since a failed install step fails the job),
+    or (b) completed with conclusion "success" but, on inspection via
+    `gh run view --json jobs`, has no job with at least one step that
+    actually reports `status: completed` and a non-skipped conclusion —
+    guarding against a workflow trivially "succeeding" because its real
+    steps never ran at all (an `if:` misconfiguration, an empty job), the
+    literal "whether its steps actually executed" half of this Req, which
+    a bare conclusion check alone would miss. No project-specific step
+    names (no hardcoded "lint"/"test"/"build") — this framework can't
+    know a downstream project's own job structure, so the check is
+    generic: real steps ran, or they didn't.
+
+    A run still `in_progress`/`queued`/not yet `completed` for this
+    commit is NOT graded red — this tool has no wait/poll mechanism (out
+    of scope; a synchronous CLI command blocking on a running CI job is a
+    materially bigger feature nobody asked for) — it is graded
+    undeterminable, with its own distinct wording, so it isn't confused
+    with "no CI at all."
+
+    CI_STATUS_UNDETERMINABLE fires when: `gh` isn't installed/
+    authenticated or this isn't a GitHub repository (the subprocess call
+    itself fails); no runs exist yet for this exact commit (no CI
+    configured, or it hasn't started); or every run found is still
+    pending. Per this Req's own explicit instruction, undeterminable is
+    NOT treated as red — a project with no CI, or CI this tool can't see,
+    must not become unshippable by accident. cmd_ship prints this as a
+    warning and proceeds; it never gates on it.
+
+    Every subprocess call here is wrapped the same way
+    git_tree_hash_excluding() and git_commit_sha() already are —
+    (CalledProcessError is never raised, `check` is never passed, but
+    FileNotFoundError/OSError are caught) — because `gh` simply not being
+    installed at all (not just unauthenticated, or the wrong repo) is a
+    real, ordinary case for a downstream project, and it must degrade to
+    undeterminable exactly like every other unreachable-CI case, never an
+    unhandled crash taking `cmd_ship` down with it. A 30s timeout on each
+    call exists for the same reason `resolve_text()`'s file-read failures
+    get a legible message instead of hanging forever: a network-touching
+    command that can hang must not be able to wedge Pipeman's whole ship
+    step waiting on it."""
+    try:
+        probe = subprocess.run(  # nosec B603 B607
+            ["gh", "run", "list", "--commit", commit_sha, "--limit", "20",
+             "--json", "databaseId,conclusion,status,workflowName,name"],
+            cwd=ROOT, capture_output=True, text=True, timeout=30,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+        return (CI_STATUS_UNDETERMINABLE,
+                f"could not run gh to query CI runs for {commit_sha} ({exc}) — gh may not be "
+                "installed, or the query timed out.")
+    if probe.returncode != 0:
+        reason = (probe.stderr or "").strip() or "gh run list failed"
+        return (CI_STATUS_UNDETERMINABLE,
+                f"could not query CI runs for {commit_sha} ({reason}) — gh may not be "
+                "installed or authenticated, or this may not be a GitHub repository.")
+    try:
+        runs = json.loads(probe.stdout or "[]")
+    except json.JSONDecodeError:
+        return (CI_STATUS_UNDETERMINABLE, f"gh run list returned unparseable output for {commit_sha}.")
+    if not runs:
+        return (CI_STATUS_UNDETERMINABLE,
+                f"no CI runs found for commit {commit_sha} — either no CI is configured, or "
+                "it hasn't run yet for this exact commit.")
+
+    problems = []
+    pending = []
+    for run in runs:
+        label = run.get("workflowName") or run.get("name") or str(run.get("databaseId"))
+        status = run.get("status")
+        conclusion = run.get("conclusion")
+        if status != "completed":
+            pending.append(f"{label}: still {status or 'unknown'}")
+            continue
+        if conclusion != "success":
+            problems.append(f"{label}: concluded {conclusion or 'unknown'}")
+            continue
+        run_id = run.get("databaseId")
+        try:
+            view = subprocess.run(  # nosec B603 B607
+                ["gh", "run", "view", str(run_id), "--json", "jobs"],
+                cwd=ROOT, capture_output=True, text=True, timeout=30,
+            )
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+            problems.append(f"{label}: could not inspect its jobs to confirm steps actually executed ({exc})")
+            continue
+        if view.returncode != 0:
+            problems.append(f"{label}: could not inspect its jobs to confirm steps actually executed")
+            continue
+        try:
+            jobs = json.loads(view.stdout or "{}").get("jobs", [])
+        except json.JSONDecodeError:
+            problems.append(f"{label}: job detail was unparseable")
+            continue
+        if not jobs:
+            problems.append(f"{label}: reported success but has no jobs recorded")
+            continue
+        for job in jobs:
+            steps = job.get("steps") or []
+            # GitHub Actions itself always injects "Set up job" and
+            # "Complete job" (and a "Post <action>" cleanup step per
+            # `uses:` action) — confirmed against a real run's own step
+            # list, not assumed. Those succeed trivially even when EVERY
+            # step the workflow's own author actually defined was skipped
+            # (a misconfigured `if:`, an empty job) — checking for "any
+            # non-skipped completed step" without excluding them would
+            # make this check pass on precisely the case it exists to
+            # catch, since "Set up job" alone already satisfies it. Real
+            # work means something OTHER than these synthetic bookends
+            # actually ran.
+            real_steps = [
+                s for s in steps
+                if s.get("name") not in ("Set up job", "Complete job")
+                and not str(s.get("name", "")).startswith("Post ")
+            ]
+            executed = [
+                s for s in real_steps
+                if s.get("status") == "completed" and s.get("conclusion") not in ("skipped", None)
+            ]
+            if not executed:
+                problems.append(f"{label} / {job.get('name', '?')}: reported success but no real step actually executed (only setup/teardown, or everything skipped)")
+
+    if problems:
+        return (CI_STATUS_RED, "; ".join(problems))
+    if pending:
+        return (CI_STATUS_UNDETERMINABLE,
+                f"CI run(s) for {commit_sha} exist but have not finished yet: "
+                f"{'; '.join(pending)}. This check does not wait for a run to complete — "
+                "re-run /sprint-ship once it has finished.")
+    return (CI_STATUS_GREEN,
+            f"{len(runs)} CI run(s) for {commit_sha} all completed successfully with real steps executed.")
+
+
 def cmd_ship(args) -> None:
     with locked(f"sprint-{args.id}"):
         state = load_state(args.id)
@@ -986,9 +1284,30 @@ def cmd_ship(args) -> None:
             die(f"'{args.commit}' resolved a tree hash but not a full commit SHA - "
                 "unexpected, please investigate before shipping.")
 
+        # Sprint 24, Req 2: by this point pipeman.md's own documented flow
+        # has already pushed shipped_commit to remote (step 6, before
+        # /sprint-ship is even run in step 8) — so a CI run for this exact
+        # commit either exists or has had the chance to start. pipeman.md
+        # step 3 already told Pipeman to "check the CI/CD pipeline status,
+        # all checks green" — prose nothing enforced, which is exactly how
+        # a two-day-red build shipped: Pipeman found it only by going to
+        # look afterwards. This is that check made mechanical.
+        ci_status, ci_detail = check_ci_status(shipped_commit)
+        if ci_status == CI_STATUS_RED:
+            die(f"Sprint {args.id}: CI is red for the exact commit being shipped "
+                f"({shipped_commit}): {ci_detail} Fix CI and land a green run for this "
+                "commit before shipping. No override.")
+        elif ci_status == CI_STATUS_UNDETERMINABLE:
+            print(f"WARNING: could not determine CI status for {shipped_commit}: {ci_detail} "
+                  "Shipping anyway — an undeterminable status is not treated as red (Req 2, "
+                  "sprint 24): a project with no CI, or CI this tool can't see, must not "
+                  "become unshippable by accident.", file=sys.stderr)
+        else:
+            print(f"CI check: {ci_detail}")
+
         state["phase"] = LIVEQA_PHASE
         state["last_shipped_commit"] = shipped_commit
-        log_event(state, "pipeman", "shipped", f"commit={args.commit or ''}")
+        log_event(state, "pipeman", "shipped", f"commit={args.commit or ''} | ci={ci_status}: {ci_detail}")
         save_state(args.id, state)
     # Sprint 15, Req 4: shipped_commit (the resolved SHA, already computed
     # above and what's actually stored as last_shipped_commit) rather than
@@ -1185,6 +1504,13 @@ def cmd_verify_publish(args) -> None:
             "(or /sprint-reship) first, there is nothing here yet to verify against the "
             "registry.")
 
+    # Sprint 24, Req 3: this reads last_shipped_commit to decide what to
+    # verify against the registry — exactly the kind of read the warning
+    # exists for. Warns, never gates: see origin_ahead_of_record_warning().
+    origin_drift = origin_ahead_of_record_warning(last_shipped)
+    if origin_drift:
+        print(origin_drift)
+
     package = args.package
     if not package:
         pkg_json_path = ROOT / "package.json"
@@ -1277,11 +1603,25 @@ def cmd_liveqa(args) -> None:
             die(f"{ROOT} is not a git repository. Run this from inside a real git repository - "
                 "there is nothing here for --deployed-commit to resolve against.")
 
-        # Identity check, not a content check: unlike the QA1-to-ship
-        # tree-hash comparison, there's no legitimate rebase/squash step
-        # between shipping and deploying that would need tolerating here —
-        # a mismatch always means this live test ran against something
-        # other than what Pipeman actually shipped.
+        # Sprint 24, Req 1: WAS a pure identity check ("no legitimate
+        # rebase/squash step between shipping and deploying that would
+        # need tolerating here"). That was wrong for the shape of drift
+        # this Req exists to fix: on any target that deploys from a
+        # branch, the served commit is routinely the SHIPPED commit plus
+        # Pipeman's own bookkeeping landing on top of it (see cmd_ship's
+        # own comment above) — a real, legitimate, expected step, not an
+        # anomaly. What this check was protecting is unchanged and still
+        # protects it: a mismatch must still mean this live test ran
+        # against something genuinely OTHER than what Pipeman shipped — a
+        # real different deployment, a stale one, the wrong environment.
+        # What changes is that bookkeeping-only drift is no longer treated
+        # as "something other". Reuses git_tree_hash_excluding() and
+        # SHIP_HASH_EXCLUDE_PATTERNS — sprint 13 already carried this exact
+        # reasoning through a FAIL-level audit on the ship side (does a
+        # rebase/squash that preserves content still ship); this is a
+        # second call site for that same, already-audited mechanism, not a
+        # new one, per this Req's own explicit instruction not to build a
+        # second.
         deployed_commit = git_commit_sha(args.deployed_commit)
         if deployed_commit is None:
             die(f"'{args.deployed_commit}' does not resolve to a real commit in this repo. "
@@ -1297,10 +1637,32 @@ def cmd_liveqa(args) -> None:
                 "hasn't actually run /sprint-ship yet). Run /sprint-ship (or /sprint-reship) "
                 "first so there's something real to check this against. No override.")
         if deployed_commit != last_shipped:
-            die(f"Sprint {args.id}: the commit you tested ({deployed_commit}) doesn't match "
-                f"what Pipeman actually shipped ({last_shipped}). Re-test against what was "
-                "actually deployed, or if the wrong thing went out, Pipeman needs a fresh "
-                "/sprint-ship or /sprint-reship first. No override.")
+            deployed_tree = git_tree_hash_excluding(deployed_commit, SHIP_HASH_EXCLUDE_PATTERNS)
+            shipped_tree = git_tree_hash_excluding(last_shipped, SHIP_HASH_EXCLUDE_PATTERNS)
+            if deployed_tree is None or shipped_tree is None or deployed_tree != shipped_tree:
+                diffs = differing_paths_excluding(last_shipped, deployed_commit, SHIP_HASH_EXCLUDE_PATTERNS)
+                if diffs:
+                    where = "differs in: " + ", ".join(diffs)
+                elif deployed_tree is None or shipped_tree is None:
+                    where = "the content comparison itself could not be computed (a ref failed to resolve)"
+                else:
+                    where = "differs, but the exact paths could not be listed"
+                die(f"Sprint {args.id}: the commit you tested ({deployed_commit}) doesn't match "
+                    f"what Pipeman actually shipped ({last_shipped}), and it's not just "
+                    f"bookkeeping — {where}. Re-test against what was actually deployed, or if "
+                    "the wrong thing went out, Pipeman needs a fresh /sprint-ship or "
+                    "/sprint-reship first. No override.")
+            # Content matches — the exact commit differs only by
+            # bookkeeping on top (or below/around) it. Accepted, and
+            # recorded as such rather than silently treated as identical,
+            # so the history shows what actually happened.
+            print(f"Sprint {args.id}: deployed commit ({deployed_commit}) differs from "
+                  f"last_shipped_commit ({last_shipped}) by identity, but their shipped "
+                  "content is byte-identical (bookkeeping only). Accepted.")
+
+        origin_warning = origin_ahead_of_record_warning(last_shipped)
+        if origin_warning:
+            print(origin_warning)
 
         verdict = args.verdict.upper()
         if verdict not in VALID_VERDICTS:

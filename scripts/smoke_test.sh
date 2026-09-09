@@ -48,6 +48,48 @@ git config user.name "Smoke Test"
 git add -A
 git commit -q -m "sandbox baseline"
 
+# Sprint 24, Req 2: check_ci_status() shells out to the real `gh` CLI, and
+# this sandbox is a throwaway `git init` repo with no GitHub remote at
+# all -- confirmed directly that real `gh` fails fast and cleanly against
+# exactly that shape ("failed to determine base repo: no git remotes
+# found", non-zero exit, no hang, no network attempt), which is why every
+# OTHER `ship` call in this file below, unmodified, safely lands on
+# CI_STATUS_UNDETERMINABLE and never gates -- this sandbox needing no
+# retrofit anywhere else is itself evidence the undeterminable path is
+# safe by default. But testing the RED and "success with no real steps"
+# paths needs a `gh` that can actually claim a run exists. Faithful to
+# this project's own precedent for exactly this shape of problem
+# (launcher_test.js's withFakeClaude(): a fake executable installed at
+# the front of PATH only for the specific invocation under test, real
+# subprocess behaviour underneath, never left in place for any other
+# test in this file): a fake `gh`, controlled by $FAKE_GH_MODE, prepended
+# to PATH only on the individual command lines that need it below.
+FAKE_GH_DIR="$SANDBOX/.fake-gh"
+mkdir -p "$FAKE_GH_DIR"
+cat > "$FAKE_GH_DIR/gh" <<'FAKEGH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "run list")
+    case "${FAKE_GH_MODE:-}" in
+      pending) echo '[{"databaseId":1,"conclusion":null,"status":"in_progress","workflowName":"CI"}]' ;;
+      red) echo '[{"databaseId":1,"conclusion":"failure","status":"completed","workflowName":"CI"}]' ;;
+      no-steps) echo '[{"databaseId":1,"conclusion":"success","status":"completed","workflowName":"CI"}]' ;;
+      green) echo '[{"databaseId":1,"conclusion":"success","status":"completed","workflowName":"CI"}]' ;;
+      *) echo "[]" ;;
+    esac
+    ;;
+  "run view")
+    case "${FAKE_GH_MODE:-}" in
+      no-steps) echo '{"jobs":[{"name":"build","conclusion":"success","steps":[{"name":"Set up job","status":"completed","conclusion":"success"},{"name":"npm ci","status":"completed","conclusion":"skipped"},{"name":"Complete job","status":"completed","conclusion":"success"}]}]}' ;;
+      green) echo '{"jobs":[{"name":"build","conclusion":"success","steps":[{"name":"Set up job","status":"completed","conclusion":"success"},{"name":"Run tests","status":"completed","conclusion":"success"}]}]}' ;;
+      *) echo '{"jobs":[]}' ;;
+    esac
+    ;;
+  *) exit 1 ;;
+esac
+FAKEGH
+chmod +x "$FAKE_GH_DIR/gh"
+
 # docs/sprints/ doesn't exist yet at this point in the sandbox, so this also
 # covers the "no state directory at all" path, not just "zero completed
 # sprints with a state dir present".
@@ -477,19 +519,62 @@ $SCRIPT dev-done "$SPRINT_GT_CHECK" > /dev/null
 GT_SHIPPED_COMMIT=$(git rev-parse HEAD)
 $SCRIPT ship "$SPRINT_GT_CHECK" --commit "$GT_SHIPPED_COMMIT" > /dev/null
 
-git commit -q --allow-empty -m "an unrelated later commit, never shipped for this sprint"
+# Sprint 24, Req 1: this MUST be a real content change, not
+# --allow-empty. An empty commit has byte-identical tree content to its
+# parent, and under Req 1's new content-based comparison that is now
+# correctly ACCEPTED as a bookkeeping-only difference (see the dedicated
+# test for exactly that below) — so an empty commit no longer exercises
+# "genuinely different deployment," it would exercise the opposite case
+# and this test would start passing for the wrong reason (or rather,
+# stop refusing at all, which a naive `|| true` here would silently
+# paper over). A real product-code line is what still has to refuse,
+# unconditionally, per this Req's own FAIL-level acceptance criterion.
+echo "unaudited product change, never shipped for this sprint" > "sprint24-unshipped-product-change.txt"
+git add "sprint24-unshipped-product-change.txt"
+git commit -q -m "an unrelated later commit, never shipped for this sprint"
 UNSHIPPED_COMMIT=$(git rev-parse HEAD)
 $SCRIPT liveqa "$SPRINT_GT_CHECK" --deployed-commit "$UNSHIPPED_COMMIT" --verdict PASS --notes "tested the wrong thing" \
   > /tmp/out.txt 2>&1 && fail "liveqa accepted a --deployed-commit that was never shipped for this sprint" || true
 grep -q "doesn't match what Pipeman actually shipped" /tmp/out.txt || fail "deployed-commit mismatch refusal message missing"
 grep -q "$GT_SHIPPED_COMMIT" /tmp/out.txt || fail "mismatch refusal should name the commit that was actually shipped"
 grep -q "$UNSHIPPED_COMMIT" /tmp/out.txt || fail "mismatch refusal should name the commit that was actually tested"
+# Sprint 24, Req 1: the message must name which paths actually differ,
+# not just that the hashes do.
+grep -q "sprint24-unshipped-product-change.txt" /tmp/out.txt || fail "mismatch refusal should name the differing path (Req 1)"
 rm -f /tmp/out.txt
 
 echo "== liveqa refuses a --deployed-commit that doesn't resolve to a real commit =="
 $SCRIPT liveqa "$SPRINT_GT_CHECK" --deployed-commit not-a-real-commit --verdict PASS --notes ok \
   > /tmp/out.txt 2>&1 && fail "liveqa accepted a --deployed-commit that doesn't resolve" || true
 grep -q "does not resolve to a real commit" /tmp/out.txt || fail "unresolvable deployed-commit refusal message missing"
+rm -f /tmp/out.txt
+
+echo "== sprint 24, Req 1: liveqa ACCEPTS a --deployed-commit that differs from last_shipped_commit only by bookkeeping content =="
+SPRINT_LIVEQA_BOOKKEEPING=$(new_sprint "LiveQA bookkeeping-tolerance sprint")
+$SCRIPT start "$SPRINT_LIVEQA_BOOKKEEPING" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_LIVEQA_BOOKKEEPING work"
+$SCRIPT qa1 "$SPRINT_LIVEQA_BOOKKEEPING" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_LIVEQA_BOOKKEEPING" > /dev/null
+LIVEQA_BOOKKEEPING_SHIPPED=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_LIVEQA_BOOKKEEPING" --commit "$LIVEQA_BOOKKEEPING_SHIPPED" > /dev/null
+# Same technique as sprint 13's own ship-side bookkeeping-tolerance test
+# above (SPRINT_BOOKKEEPING): a real, unrelated sprint gets registered —
+# exactly the shape of what this lifecycle itself writes as bookkeeping,
+# landing on top before deployment, reproducing Context's Finding A
+# scenario (bookkeeping commit on top of the real shipped commit) rather
+# than a synthetic stand-in for it.
+new_sprint "Another unrelated bookkeeping sprint" > /dev/null
+git add docs/sprints
+git commit -q -m "bookkeeping: registered another sprint, landed on top of the deploy"
+LIVEQA_BOOKKEEPING_DEPLOYED=$(git rev-parse HEAD)
+[ "$LIVEQA_BOOKKEEPING_SHIPPED" != "$LIVEQA_BOOKKEEPING_DEPLOYED" ] || \
+  fail "test setup broken: the bookkeeping commit didn't actually create a new SHA"
+$SCRIPT liveqa "$SPRINT_LIVEQA_BOOKKEEPING" --deployed-commit "$LIVEQA_BOOKKEEPING_DEPLOYED" --verdict PASS --notes "content matched" \
+  > /tmp/out.txt 2>&1 || fail "liveqa refused a --deployed-commit that differs from last_shipped_commit only by bookkeeping content (Req 1 regression) -- output: $(cat /tmp/out.txt)"
+grep -q "bookkeeping only" /tmp/out.txt || fail "liveqa's bookkeeping-only acceptance message is missing"
+grep -qF "$LIVEQA_BOOKKEEPING_DEPLOYED" /tmp/out.txt || fail "liveqa's bookkeeping-only acceptance doesn't name the deployed commit"
+$SCRIPT status "$SPRINT_LIVEQA_BOOKKEEPING" 2>&1 | grep -q "LiveQA live result: PASS" || \
+  fail "the bookkeeping-tolerant liveqa verdict wasn't actually recorded"
 rm -f /tmp/out.txt
 
 echo "== liveqa succeeds once --deployed-commit actually matches what was shipped =="
@@ -951,5 +1036,125 @@ $SCRIPT new --title-file "$MISSING_FILE_PATH" > /tmp/out.txt 2>&1 && \
 grep -qF "Could not read '$MISSING_FILE_PATH'" /tmp/out.txt || fail "new's missing-title-file message doesn't name the path"
 grep -qi "traceback" /tmp/out.txt && fail "new's missing-title-file case raised a raw traceback instead of failing legibly"
 rm -f /tmp/out.txt
+
+echo "== sprint 24, Req 2: ship refuses over a red CI run for the exact commit being shipped =="
+SPRINT_CI=$(new_sprint "CI status sprint")
+$SCRIPT start "$SPRINT_CI" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_CI work"
+$SCRIPT qa1 "$SPRINT_CI" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_CI" > /dev/null
+CI_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=red $SCRIPT ship "$SPRINT_CI" --commit "$CI_COMMIT" \
+  > /tmp/out.txt 2>&1 && fail "ship succeeded despite a red CI run for the exact commit being shipped" || true
+grep -q "CI is red for the exact commit being shipped" /tmp/out.txt || fail "ship's CI-red refusal message is missing"
+grep -qF "$CI_COMMIT" /tmp/out.txt || fail "ship's CI-red refusal doesn't name the commit"
+$SCRIPT status "$SPRINT_CI" 2>&1 | grep -q "Phase: dev_agreed_done" || \
+  fail "a CI-red ship attempt must not have moved the sprint's phase"
+rm -f /tmp/out.txt
+
+echo "== sprint 24, Req 2: ship refuses when CI 'succeeded' but no step actually executed -- not merely that a run existed or finished =="
+# This is the specific case the reporter's own two-day-red build was: npm
+# ci exiting EUSAGE in 5-7 seconds, lint/test/build never running. A run
+# whose own top-level conclusion still reads "success" (this fake
+# simulates a workflow that's misconfigured to report success trivially)
+# but whose only completed, non-skipped step is "Set up job" must still
+# refuse -- a check satisfied by "a run exists" or "a run completed"
+# would pass this exact case, which is the defect this Req exists to fix.
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=no-steps $SCRIPT ship "$SPRINT_CI" --commit "$CI_COMMIT" \
+  > /tmp/out.txt 2>&1 && fail "ship succeeded on a run that reported success but never executed a real step" || true
+grep -q "no real step actually executed" /tmp/out.txt || fail "ship's no-real-steps-executed refusal message is missing"
+rm -f /tmp/out.txt
+
+echo "== sprint 24, Req 2: an undeterminable CI status (no runs found) warns but does NOT gate -- the explicit decision this Req requires =="
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=none $SCRIPT ship "$SPRINT_CI" --commit "$CI_COMMIT" \
+  > /tmp/out.txt 2>&1 || fail "ship refused when CI status was genuinely undeterminable -- a project with no CI, or CI this tool can't see, must not become unshippable by accident (Req 2)"
+grep -q "WARNING: could not determine CI status" /tmp/out.txt || fail "ship's undeterminable-CI-status warning is missing"
+grep -q "no CI runs found" /tmp/out.txt || fail "ship's undeterminable warning doesn't explain why"
+$SCRIPT status "$SPRINT_CI" 2>&1 | grep -qE "Phase: (liveqa_live|groundtruth_live)" || \
+  fail "ship should have proceeded (undeterminable does not gate) and moved phase to the LiveQA phase"
+rm -f /tmp/out.txt
+
+echo "== sprint 24, Req 2: a genuinely green CI run (real steps executed) ships cleanly =="
+SPRINT_CI_GREEN=$(new_sprint "CI green sprint")
+$SCRIPT start "$SPRINT_CI_GREEN" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_CI_GREEN work"
+$SCRIPT qa1 "$SPRINT_CI_GREEN" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_CI_GREEN" > /dev/null
+CI_GREEN_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_CI_GREEN" --commit "$CI_GREEN_COMMIT" \
+  > /tmp/out.txt 2>&1 || fail "ship refused despite a genuinely green CI run with real steps executed -- output: $(cat /tmp/out.txt)"
+grep -q "CI check:.*completed successfully with real steps executed" /tmp/out.txt || \
+  fail "ship's green-CI confirmation message is missing"
+rm -f /tmp/out.txt
+
+echo "== sprint 24, Req 2: a run still in progress is undeterminable (does not gate), not red, and says so distinctly =="
+SPRINT_CI_PENDING=$(new_sprint "CI pending sprint")
+$SCRIPT start "$SPRINT_CI_PENDING" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_CI_PENDING work"
+$SCRIPT qa1 "$SPRINT_CI_PENDING" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_CI_PENDING" > /dev/null
+CI_PENDING_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=pending $SCRIPT ship "$SPRINT_CI_PENDING" --commit "$CI_PENDING_COMMIT" \
+  > /tmp/out.txt 2>&1 || fail "ship refused on a run still in progress -- this tool has no wait/poll mechanism, an in-progress run is undeterminable, not red"
+grep -q "WARNING: could not determine CI status" /tmp/out.txt || fail "ship's pending-run warning is missing"
+grep -q "have not finished yet" /tmp/out.txt || fail "ship's pending-run warning doesn't say the run hasn't finished, distinct from no CI at all"
+rm -f /tmp/out.txt
+
+echo "== sprint 24, Req 3: origin-ahead-of-record warns in status and liveqa, never gates, and doesn't misread as a bypassed push rule =="
+SPRINT_ORIGIN=$(new_sprint "Origin-ahead sprint")
+$SCRIPT start "$SPRINT_ORIGIN" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_ORIGIN work"
+$SCRIPT qa1 "$SPRINT_ORIGIN" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_ORIGIN" > /dev/null
+ORIGIN_SHIPPED_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_ORIGIN" --commit "$ORIGIN_SHIPPED_COMMIT" > /dev/null
+
+# Simulate a second, real ship (often a headless Pipeman's own twin, per
+# Finding C) landing on origin before this one's own bookkeeping caught
+# up: a bare remote standing in for "origin", set up AFTER the commit
+# this sprint already shipped, then advanced past it.
+ORIGIN_BARE="$SANDBOX/.origin-bare.git"
+git init -q --bare "$ORIGIN_BARE"
+git remote add origin "$ORIGIN_BARE"
+git push -q -u origin HEAD:main
+echo "a second, real ship landing on origin" > "sprint24-second-ship.txt"
+git add "sprint24-second-ship.txt"
+git commit -q -m "a second, real ship (e.g. a headless Pipeman's own twin) landing on origin"
+git push -q origin HEAD:main
+# Deliberately do NOT run /sprint-ship for this second commit against
+# THIS sprint's own record — that's the whole scenario: origin moved,
+# last_shipped_commit did not, because cmd_ship's own state write for
+# this second push hasn't happened (or belongs to a different sprint
+# entirely; either way, this sprint's own record is now behind origin).
+
+STATUS_ORIGIN_OUT=$($SCRIPT status "$SPRINT_ORIGIN" 2>&1)
+echo "$STATUS_ORIGIN_OUT" | grep -q "carries 1 commit beyond this sprint's own recorded last_shipped_commit" || \
+  fail "status did not surface the origin-ahead drift (Req 3) -- output: $STATUS_ORIGIN_OUT"
+# The message legitimately CONTAINS the word "bypassed" -- as part of an
+# explicit denial ("does NOT mean someone bypassed..."), the same
+# foreclose-the-conflation wording pipeman.md itself already uses
+# elsewhere. The actual test is that the denial is there, explicit and
+# unambiguous, not that the word never appears.
+echo "$STATUS_ORIGIN_OUT" | grep -q "does NOT mean someone bypassed" || \
+  fail "status's origin-ahead warning should explicitly foreclose the bypassed-push-rule misreading, not just avoid repeating it"
+
+# Warns, never gates: liveqa against the ORIGINAL shipped commit must
+# still succeed cleanly despite origin now being ahead of the record.
+LIVEQA_ORIGIN_OUT=$($SCRIPT liveqa "$SPRINT_ORIGIN" --deployed-commit "$ORIGIN_SHIPPED_COMMIT" --verdict PASS --notes ok 2>&1) || \
+  fail "liveqa refused (or otherwise failed) solely because origin is ahead of the record -- Req 3 must never gate on this -- output: $LIVEQA_ORIGIN_OUT"
+echo "$LIVEQA_ORIGIN_OUT" | grep -q "carries 1 commit beyond this sprint's own recorded last_shipped_commit" || \
+  fail "liveqa did not surface the origin-ahead drift while reading last_shipped_commit to make a decision (Req 3)"
+
+echo "== sprint 24, Req 3: origin-ahead-of-record warning is silent when there's nothing to report =="
+SPRINT_ORIGIN_CLEAN=$(new_sprint "Origin clean sprint")
+$SCRIPT start "$SPRINT_ORIGIN_CLEAN" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_ORIGIN_CLEAN work"
+$SCRIPT qa1 "$SPRINT_ORIGIN_CLEAN" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_ORIGIN_CLEAN" > /dev/null
+ORIGIN_CLEAN_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_ORIGIN_CLEAN" --commit "$ORIGIN_CLEAN_COMMIT" > /dev/null
+git push -q origin HEAD:main
+$SCRIPT status "$SPRINT_ORIGIN_CLEAN" 2>&1 | grep -q "carries.*commit.*beyond" && \
+  fail "status warned about origin drift when origin and the record actually agree (false positive)"
 
 echo "ALL SMOKE TESTS PASSED"
