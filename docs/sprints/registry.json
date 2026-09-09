@@ -166,8 +166,8 @@
     "28": {
       "title": "Split the undeterminable CI case, and give an orphaned shipped commit a way back",
       "epic": "Honest reporting",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-28_split-the-undeterminable-ci-case-and-give-an-orphaned-shipped-commit-a-way-back.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-28_split-the-undeterminable-ci-case-and-give-an-orphaned-shipped-commit-a-way-back--done.md"
     },
     "29": {
       "title": "Surface a stranded close and stop the deployed tip moving during the live gate",

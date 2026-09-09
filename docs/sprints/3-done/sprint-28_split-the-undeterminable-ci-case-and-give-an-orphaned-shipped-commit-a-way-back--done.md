@@ -2,7 +2,7 @@
 id: 28
 title: "Split the undeterminable CI case, and give an orphaned shipped commit a way back"
 epic: "Honest reporting"
-status: in_progress
+status: done
 created: 2026-09-09T19:44:20+00:00
 ---
 
