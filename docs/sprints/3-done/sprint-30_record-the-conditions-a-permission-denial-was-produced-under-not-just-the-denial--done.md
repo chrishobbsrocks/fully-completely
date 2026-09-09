@@ -2,7 +2,7 @@
 id: 30
 title: "Record the conditions a permission denial was produced under, not just the denial"
 epic: "Headless permission model"
-status: in_progress
+status: done
 created: 2026-09-09T22:37:40+00:00
 ---
 
