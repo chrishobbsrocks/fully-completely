@@ -1,11 +1,11 @@
 {
   "id": 28,
   "title": "Split the undeterminable CI case, and give an orphaned shipped commit a way back",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "bc3a41a5866618c7399cad931784029ae960dc824f793cbdbf424f7e805c62de",
   "qa1_audited_tree_hash": "ee910efceb53ffd2991e20f6bf771da982e7336ef74c9b950588a9e3d7f0826b",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "8fec6e603b0df753e3c308c6bd110114f7c3df06",
   "groundtruth_result": null,
   "audit_rounds": 1,
   "live_test_rounds": 0,
@@ -29,11 +29,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-09T20:24:06+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=8fec6e6 | ci=green: 1 CI run(s) for 8fec6e603b0df753e3c308c6bd110114f7c3df06 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-09T20:17:34+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-09T20:24:06+00:00"
   }
 }
