@@ -2,7 +2,7 @@
 id: 25
 title: "Warn when another session is already working here, and let a narrowed sprint be renamed"
 epic: "Honest reporting"
-status: todo
+status: done
 created: 2026-09-08T23:02:45+00:00
 ---
 

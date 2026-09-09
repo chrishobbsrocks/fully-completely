@@ -148,8 +148,8 @@
     "25": {
       "title": "Warn when another session is already working here, and let a narrowed sprint be renamed",
       "epic": "Honest reporting",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-25_warn-when-another-session-is-already-working-here-and-let-a-narrowed-sprint-be-renamed.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-25_warn-when-another-session-is-already-working-here-and-let-a-narrowed-sprint-be-renamed--done.md"
     },
     "26": {
       "title": "Re-grade every permission finding by how it was measured, and find what can be probed without a model",
