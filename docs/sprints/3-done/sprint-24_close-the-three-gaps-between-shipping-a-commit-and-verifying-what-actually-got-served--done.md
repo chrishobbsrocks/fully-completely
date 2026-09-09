@@ -2,7 +2,7 @@
 id: 24
 title: "Close the three gaps between shipping a commit and verifying what actually got served"
 epic: "Honest reporting"
-status: in_progress
+status: done
 created: 2026-09-08T21:56:14+00:00
 ---
 

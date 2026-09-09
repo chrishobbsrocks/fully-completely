@@ -142,8 +142,8 @@
     "24": {
       "title": "Close the three gaps between shipping a commit and verifying what actually got served",
       "epic": "Honest reporting",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-24_close-the-three-gaps-between-shipping-a-commit-and-verifying-what-actually-got-served.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-24_close-the-three-gaps-between-shipping-a-commit-and-verifying-what-actually-got-served--done.md"
     },
     "25": {
       "title": "Warn when another session is already working here, and let a narrowed sprint be renamed",
