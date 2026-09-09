@@ -211,6 +211,24 @@ def slugify(title: str) -> str:
     return slug or "untitled"
 
 
+# Sprint 27, Req 1: every path a writing command actually wrote THIS
+# invocation, populated by atomic_write() itself below — the one function
+# every real file write in this script funnels through (save_state,
+# save_registry, update_frontmatter_status, cmd_new's own sprint-file
+# creation, cmd_rename's frontmatter rewrite; nothing else in this file
+# writes a file's content anywhere). Hooking the lowest common choke
+# point, the same shape sprint 25's last_claim stamping already
+# established one level up at save_state() specifically, means no
+# individual command needed to be touched to get this notice, and a
+# future command that writes a file gets it automatically as long as it
+# goes through atomic_write() — which every write in this file already
+# must, since it's the only function here that performs one safely.
+# Reset per-process (this script is a fresh interpreter on every
+# invocation, never long-running), so this only ever reflects THIS
+# invocation's own writes.
+_WRITES_THIS_INVOCATION: list = []
+
+
 def atomic_write(path: Path, content: str) -> None:
     """Write content to path atomically: write to a temp file in the same
     directory, then rename over the target. A crash or interrupt mid-write
@@ -225,6 +243,10 @@ def atomic_write(path: Path, content: str) -> None:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
         raise
+    try:
+        _WRITES_THIS_INVOCATION.append(str(path.relative_to(ROOT)))
+    except ValueError:
+        _WRITES_THIS_INVOCATION.append(str(path))
 
 
 def resolve_text(value: Optional[str], file_value: Optional[str]) -> str:
@@ -1762,6 +1784,59 @@ def cmd_liveqa(args) -> None:
         if origin_warning:
             print(origin_warning)
 
+        # Sprint 27, Req 3: RECORDS a sprint file changed since QA1's PASS.
+        # Does NOT refuse. This is deliberately asymmetric with
+        # cmd_dev_done's own hash gate (which DOES refuse, no override) —
+        # stated here, not just in the sprint file, because a future
+        # reader must see this was decided, not overlooked (Out of Scope:
+        # "A symmetric hash gate at liveqa_live. Rejected on reasoning both
+        # projects arrived at independently").
+        #
+        # WHY REFUSE THERE BUT NOT HERE: cmd_dev_done's refusal has a cheap
+        # recovery — re-run /sprint-qa1, then /sprint-dev-done again, both
+        # in the same sitting, no live test involved yet. A refusal HERE
+        # would cost a full lap instead: CONDITIONAL, back to dev_build, a
+        # fresh gate-1 audit, dev-done, a reship, another live round — for
+        # what is very often a legitimate prose amendment (an
+        # unsatisfiable acceptance criterion, an unbuildable requirement,
+        # discovered exactly where a Master Controller reading this file
+        # during the live-test window would find it). A refusal whose only
+        # recovery is disproportionate to the change makes the honest,
+        # recorded amendment more expensive than a quiet, unrecorded one —
+        # the exact failure mode this records-not-refuses shape exists to
+        # avoid, per this project's own transition-precondition rule (the
+        # role that hits a precondition must be able to clear it cheaply,
+        # or the precondition needs a real recovery path; here there is no
+        # cheap recovery to offer, so this isn't a precondition at all).
+        #
+        # WHAT RE-GATING WOULD ACTUALLY COST, checked against the code
+        # rather than assumed (Req 3's own instruction): a QA1 verdict
+        # recorded here — via /sprint-qa1 while this sprint sits in
+        # LIVEQA_PHASES — is an OPINION, not a re-gate. Confirmed directly:
+        # cmd_qa1's own phase dispatch (`if state["phase"] in
+        # LIVE_LOOP_AUDIT_PHASES: _qa1_live_loop_audit(args, state);
+        # return`) returns immediately for a sprint in this phase and never
+        # reaches the gate-1 logic below it that writes qa1_audit_result,
+        # qa1_audit_file_hash, or qa1_audited_tree_hash.
+        # _qa1_live_loop_audit()'s own docstring states, and its own body
+        # confirms, that log_event() is its ONLY mutation of state —
+        # nothing in this codebase can silently repair the gate-1 hash
+        # from inside the live-test loop; only a fresh, real gate-1 audit,
+        # after this sprint returns to dev_build, can.
+        sprint_file_drift = None
+        audited_hash = state.get("qa1_audit_file_hash")
+        if audited_hash is not None:
+            current_hash = file_hash(registry_sprint_file(args.id))
+            if current_hash is not None and current_hash != audited_hash:
+                sprint_file_drift = (
+                    f"NOTE: sprint {args.id}'s file has changed since QA1's PASS "
+                    f"(audited hash {audited_hash[:12]}..., current {current_hash[:12]}...). "
+                    "Recorded, not refused — see this function's own comment for why. If this "
+                    "sprint's own acceptance criteria changed for a real reason, that's worth a "
+                    "fresh /sprint-qa1 look once the live-test loop settles; if it was a "
+                    "cosmetic edit, this note is the whole record of it."
+                )
+
         verdict = args.verdict.upper()
         if verdict not in VALID_VERDICTS:
             die(f"Verdict must be one of {sorted(VALID_VERDICTS)}.")
@@ -1774,6 +1849,12 @@ def cmd_liveqa(args) -> None:
         # this rename is an audit trail of what actually happened and stays
         # exactly as recorded, never rewritten.
         log_event(state, "liveqa", "live_test", f"{verdict}: {notes}")
+        if sprint_file_drift:
+            # A separate history event, distinguishable from the live_test
+            # verdict itself — this is a fact about the file, not part of
+            # what was tested.
+            log_event(state, "liveqa", "sprint_file_drift_since_audit", sprint_file_drift)
+            print(sprint_file_drift)
 
         if verdict == "PASS":
             state["phase"] = "complete_ready"
@@ -2374,7 +2455,44 @@ def main() -> None:
     print(f"[sprint_lifecycle] repo={ROOT} script={Path(__file__).resolve()}", file=sys.stderr)
     parser = build_parser()
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    finally:
+        # Sprint 27, Req 1: a completion NOTICE, not a drift warning —
+        # deliberately not a `git status` check. "Is docs/sprints/ dirty"
+        # would be true almost always (bookkeeping is uncommitted by
+        # default after every transition, per this Req's own Context),
+        # which is exactly the always-fires `repo=` banner above, read
+        # wrong four times because it never says anything different
+        # depending on whether it matters. This instead states a fact
+        # that's true unconditionally, once, right when a write actually
+        # happened: _WRITES_THIS_INVOCATION only ever contains paths THIS
+        # process itself wrote, via atomic_write() (see that function's
+        # own comment) — empty for every read-only command (status, list,
+        # gates never call atomic_write at all), so this never fires for
+        # them, and the wording is a receipt, not an alarm, checked by
+        # QA1's own criterion for exactly that tone. Runs in `finally` so
+        # a command that writes something and THEN dies() partway through
+        # still gets an honest receipt for what actually landed on disk —
+        # what's there is there, uncommitted, regardless of whether the
+        # command's own logic finished.
+        #
+        # Deliberately does NOT commit anything itself (Req 1's own "do
+        # not make the script commit" — the script owns state, git
+        # belongs to a role, and that boundary is checked by QA1 as a
+        # zero-`git commit`/`git add`-calls-in-this-file criterion). This
+        # only ever prints; committing what it names is Req 2's rule, for
+        # whichever role's session is running the command.
+        if _WRITES_THIS_INVOCATION:
+            seen = []
+            for p in _WRITES_THIS_INVOCATION:
+                if p not in seen:
+                    seen.append(p)
+            print(
+                f"Wrote: {', '.join(seen)}. Not committed — this script never touches git, by "
+                "design. Commit these before handing off (CLAUDE.md's own commit rule).",
+                file=sys.stderr,
+            )
 
 
 if __name__ == "__main__":

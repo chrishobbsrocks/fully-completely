@@ -943,6 +943,36 @@ function readDeclaredTestCommand(root = ROOT) {
   return command;
 }
 
+// Sprint 27, Req 4: same shape as readDeclaredTestCommand() immediately
+// above, deliberately -- the identical "the framework can't know this in
+// advance, so the project declares it" reasoning, one settings key over.
+// Unlike the test command, this value is passed straight through to
+// claude's own `--mcp-config` (a path to a JSON file, or a raw JSON
+// string, per that flag's own accepted forms) with no further parsing or
+// validation here -- claude itself is what actually has to make sense of
+// it, and re-validating its shape here would just be a second, likely
+// incomplete copy of that parsing. Returns null on anything short of a
+// real, non-empty declared string -- same conservative-default shape as
+// every other declared setting in this project.
+function readDeclaredMcpConfig(root = ROOT) {
+  const settingsPath = path.join(root, '.vscode', 'settings.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(settingsPath, 'utf8');
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = parseJsonc(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const value = parsed['fullyCompletely.liveqaMcpConfig'];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 // Sprint 19: bare interpreters that, combined with the trailing ` *`
 // wildcard readDeclaredTestCommand()'s caller appends, yield arbitrary
 // code execution (`Bash(node *)` matches `node -e "<anything>"` just as
@@ -1336,13 +1366,62 @@ function headlessPermissionArgs(role, root = ROOT) {
 // nothing ever reclaims any. Comfortable now; worth a maintainer's
 // attention once a single role's
 // JSON gets meaningfully closer to the limit, not before.
-function headlessLaunchArgs(role, prompt, { bare, settings } = {}) {
+function headlessLaunchArgs(role, prompt, { bare, settings, root = ROOT } = {}) {
   const meta = readAgentMeta(role.id);
   const body = agentBody(role.id);
   const definition = { description: (meta && meta.description) || role.label, prompt: body };
   if (meta && meta.model) definition.model = meta.model;
   const agentsJson = JSON.stringify({ [role.id]: definition });
   const base = ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json', ...headlessPermissionArgs(role)];
+  // Sprint 27, Req 4: LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS (sprint 23)
+  // reaches nothing without a real MCP server behind it -- confirmed
+  // directly, this sprint, the same way sprint 23 established the
+  // allowedTools scoping mechanism itself: a real headless launch with
+  // the tools allowlisted but no --mcp-config, asked to call one of them,
+  // gets back "Error: No such tool available: mcp__playwright__<name>" --
+  // a tool-resolution failure, not a permission denial, not reachable.
+  // Sprint 23's own Context described this observation as "TOOL NOT
+  // AVAILABLE"; the exact text confirmed here is the literal denial
+  // string, not a paraphrase of it. ESTABLISHED BY RUNNING (this Req's own instruction)
+  // that this launcher CANNOT usefully supply one itself: `npx -y
+  // @playwright/mcp@latest` genuinely works as a server (confirmed,
+  // sprint 25's own investigation already ran it end to end), but
+  // hardcoding it here would mean every headless LiveQA launch, on every
+  // project, downloads and launches a real Chromium instance whether or
+  // not that project even ships a web app (liveqa.md's own text: a
+  // package-only project's LiveQA never touches a browser at all), with
+  // no way for this launcher to know in advance which kind of project
+  // it's running against, or whether headless Chromium is even
+  // installable in that environment. That is "cannot supply one usefully
+  // without knowing the target project's setup" -- this Req's own named
+  // acceptable outcome. What this launcher CAN do, mirroring
+  // readDeclaredTestCommand()'s own established shape exactly (the
+  // identical "the framework can't know this in advance, so the project
+  // declares it" reasoning): read an opt-in declaration and pass it
+  // through, silent no-op when absent, loud when the tools are granted
+  // but nothing was declared -- never silent either way.
+  if (role.id === 'liveqa') {
+    const mcpConfig = readDeclaredMcpConfig(root);
+    if (mcpConfig) {
+      base.push('--mcp-config', mcpConfig);
+    } else {
+      console.error(
+        'NOTE: this liveqa profile allowlists Playwright MCP browser tools, but no MCP server ' +
+          'is configured for this launch -- confirmed directly, this sprint: calling one of ' +
+          'these tools with no server configured returns "Error: No such tool available: ' +
+          'mcp__playwright__<name>" -- a tool-resolution failure, not a permission denial, and ' +
+          'not from a network request that ever went out. This launcher cannot supply a server ' +
+          "itself (it can't know whether this project even has a browser to test, or whether " +
+          'headless Chromium is installable here) -- declare ' +
+          '"fullyCompletely.liveqaMcpConfig" in .vscode/settings.json (a path to an MCP config ' +
+          'JSON file, or the JSON itself, e.g. {"mcpServers":{"playwright":{"command":"npx",' +
+          '"args":["-y","@playwright/mcp@latest","--headless"]}}} -- confirmed working end to ' +
+          'end with exactly this config) to fix this. Package-only projects with no deployed web ' +
+          "app don't need this at all -- see liveqa.md's own text on the npx/npm-install gate as " +
+          'the equivalent for that case.'
+      );
+    }
+  }
   if (bare) {
     const settingsArgs = settings ? ['--settings', settings] : [];
     return [...base, '--bare', ...settingsArgs, prompt];
@@ -1623,6 +1702,7 @@ module.exports = {
   LAUNCHER_FAILURE_EXIT_CODE,
   installOrphanGuard,
   readDeclaredTestCommand,
+  readDeclaredMcpConfig,
   HEADLESS_PERMISSION_PROFILES,
   isBareInterpreter,
   isGitRepository,

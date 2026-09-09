@@ -1563,6 +1563,7 @@ const {
   LAUNCHER_FAILURE_EXIT_CODE,
   installOrphanGuard,
   readDeclaredTestCommand,
+  readDeclaredMcpConfig,
   HEADLESS_PERMISSION_PROFILES,
   LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS,
   LIVEQA_API_ALLOWED_TOOLS,
@@ -1570,6 +1571,7 @@ const {
 
 const QA1_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'qa1');
 const DEV_TEAM_2_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'dev-team-2');
+const LIVEQA_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'liveqa');
 
 // Req 6 (interactive path unchanged): exact-argv-shape assertions on the
 // pure builders extracted from the pre-sprint-11 launchFresh()/resume
@@ -2014,6 +2016,89 @@ test('readDeclaredTestCommand: a bare interpreter is rejected end to end -- no p
 test('readDeclaredTestCommand: a real command starting with an interpreter name still works (only the BARE form is rejected)', () => {
   withScratchSettings('{"fullyCompletely.testCommand": "node test/all.js"}', (dir) => {
     assert.strictEqual(readDeclaredTestCommand(dir), 'node test/all.js');
+  });
+});
+
+// -------------------------------------------------------------------------
+// readDeclaredMcpConfig() -- sprint 27, Req 4. Same shape and same test
+// coverage style as readDeclaredTestCommand() immediately above,
+// deliberately, since it's the identical mechanism one settings key over.
+// -------------------------------------------------------------------------
+test('readDeclaredMcpConfig: no .vscode/settings.json at all -> null, not a throw', () => {
+  withScratchSettings(null, (dir) => {
+    assert.strictEqual(readDeclaredMcpConfig(dir), null);
+  });
+});
+
+test('readDeclaredMcpConfig: key absent entirely -> null', () => {
+  withScratchSettings('{"fullyCompletely.testCommand": "npm test"}', (dir) => {
+    assert.strictEqual(readDeclaredMcpConfig(dir), null);
+  });
+});
+
+test('readDeclaredMcpConfig: key present but empty string -> null', () => {
+  withScratchSettings('{"fullyCompletely.liveqaMcpConfig": ""}', (dir) => {
+    assert.strictEqual(readDeclaredMcpConfig(dir), null);
+  });
+});
+
+test('readDeclaredMcpConfig: a real declared JSON-string value is returned, trimmed, unparsed (claude itself parses it)', () => {
+  const raw = '{"mcpServers":{"playwright":{"command":"npx","args":["-y","@playwright/mcp@latest"]}}}';
+  withScratchSettings(`{"fullyCompletely.liveqaMcpConfig": "  ${raw.replace(/"/g, '\\"')}  "}`, (dir) => {
+    assert.strictEqual(readDeclaredMcpConfig(dir), raw);
+  });
+});
+
+test('readDeclaredMcpConfig: a real declared file-path value is also returned as-is (either form is valid for --mcp-config)', () => {
+  withScratchSettings('{"fullyCompletely.liveqaMcpConfig": "./mcp-config.json"}', (dir) => {
+    assert.strictEqual(readDeclaredMcpConfig(dir), './mcp-config.json');
+  });
+});
+
+test('readDeclaredMcpConfig: unparseable JSON, a non-string value, and root-not-an-object all degrade to null, not a crash', () => {
+  withScratchSettings('{ this is not json', (dir) => {
+    assert.strictEqual(readDeclaredMcpConfig(dir), null);
+  });
+  withScratchSettings('{"fullyCompletely.liveqaMcpConfig": true}', (dir) => {
+    assert.strictEqual(readDeclaredMcpConfig(dir), null);
+  });
+  withScratchSettings('[1, 2, 3]', (dir) => {
+    assert.strictEqual(readDeclaredMcpConfig(dir), null);
+  });
+});
+
+test('run-role: headlessLaunchArgs passes --mcp-config through for liveqa when declared, and never for another role even with the identical declaration', () => {
+  withScratchSettings('{"fullyCompletely.liveqaMcpConfig": "{\\"mcpServers\\":{}}"}', (dir) => {
+    const liveqaArgs = headlessLaunchArgs(LIVEQA_ROLE, 'X', { root: dir });
+    assert.ok(liveqaArgs.includes('--mcp-config'), 'liveqa should receive --mcp-config when declared');
+    assert.strictEqual(liveqaArgs[liveqaArgs.indexOf('--mcp-config') + 1], '{"mcpServers":{}}');
+
+    const qa1Args = headlessLaunchArgs(QA1_ROLE, 'X', { root: dir });
+    assert.ok(!qa1Args.includes('--mcp-config'), 'qa1 has no Playwright tools granted and must never receive --mcp-config');
+  });
+});
+
+test('run-role: headlessLaunchArgs omits --mcp-config for liveqa when nothing is declared, and warns naming what to configure (Req 4)', () => {
+  withScratchSettings(null, (dir) => {
+    let args;
+    const lines = captureStderr(() => {
+      args = headlessLaunchArgs(LIVEQA_ROLE, 'X', { root: dir });
+    });
+    assert.ok(!args.includes('--mcp-config'), 'no declaration means no --mcp-config -- the launcher never invents one');
+    assert.strictEqual(lines.length, 1);
+    assert.match(lines[0], /Playwright MCP browser tools/);
+    assert.match(lines[0], /fullyCompletely\.liveqaMcpConfig/);
+    // Req 4's own instruction: if a server can't be supplied, the message
+    // must name what a project must configure -- not just that something
+    // is missing.
+    assert.match(lines[0], /mcpServers/);
+  });
+});
+
+test('run-role: headlessLaunchArgs prints no MCP note at all for a role other than liveqa, declared or not', () => {
+  withScratchSettings(null, (dir) => {
+    const lines = captureStderr(() => headlessLaunchArgs(QA1_ROLE, 'X', { root: dir }));
+    assert.deepStrictEqual(lines, []);
   });
 });
 

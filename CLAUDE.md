@@ -124,6 +124,26 @@ point into *this* repo's `scripts/sprint_lifecycle.py`, stop, you're looking
 at output from a different tool (a stale global command, a same-named script
 elsewhere on disk), not this project's lifecycle state.
 
+**The role that runs a lifecycle command commits the bookkeeping that
+command produced, before handing off** (sprint 27, Req 2 — extending a
+rule sprint 18 first added to Master Controller alone, for sprint-file
+amendments specifically, after five instances where it wasn't). `/sprint-start`
+moves a file between phase folders and writes a state file; `/sprint-complete`
+does the equivalent on the way out; every gate in between writes to
+`docs/sprints/registry.json` and the sprint's own state file.
+`sprint_lifecycle.py` never commits any of this itself, deliberately — the
+script owns state, git belongs to a role, and that boundary stays intact
+(see `## Changes to this repo's own tooling` for why this framework's own
+copy of that script must never gain a `git commit`/`git add` call). That
+means nothing else does either, unless the role sitting at the keyboard
+does it. Every writing command now prints what it just wrote and that
+it's uncommitted — a receipt, not a warning, printed once at the moment
+it's true — precisely so this rule has something concrete to act on
+instead of being trusted to remember on its own; prose alone has already
+failed this exact way once (sprint 9's publish ordering, fixed in prose
+and drifted on the very next release). Commit what the notice names
+before telling the next role to act on it.
+
 **QA1 audits code, not just the sprint file**: the same PASS that records
 the sprint-file hash also records the audited commit's tree hash, the
 content of the files at that commit, not its SHA. `/sprint-ship` resolves

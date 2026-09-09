@@ -1324,4 +1324,100 @@ $SCRIPT rename 999999 --title "Doesn't matter" > /tmp/out.txt 2>&1 && fail "rena
 grep -q "not found in registry" /tmp/out.txt || fail "unknown-sprint-id refusal message missing"
 rm -f /tmp/out.txt
 
+echo "== sprint 27, Req 1: sprint_lifecycle.py itself performs zero git commit/add calls (static, mechanical, FAIL-level per QA1's own criterion) =="
+grep -qE '"git",\s*"(commit|add)"|'"'"'git'"'"',\s*'"'"'(commit|add)'"'"'' "$REPO_ROOT/scripts/sprint_lifecycle.py" && \
+  fail "sprint_lifecycle.py contains a git commit/add call -- this property must stay at zero (Req 1)"
+
+echo "== sprint 27, Req 1: a writing command prints the completion notice, naming exactly what it wrote =="
+SPRINT_NOTICE=$(new_sprint "Completion notice sprint")
+$SCRIPT start "$SPRINT_NOTICE" > /tmp/out.txt 2>&1 || fail "start failed -- output: $(cat /tmp/out.txt)"
+grep -q "^Wrote: " /tmp/out.txt || fail "start did not print the completion notice (Req 1)"
+grep -q "sprint-${SPRINT_NOTICE}_" /tmp/out.txt || fail "the notice doesn't name the sprint file it moved/wrote"
+grep -q "docs/sprints/registry.json" /tmp/out.txt || fail "the notice doesn't name registry.json"
+grep -q "docs/sprints/state/sprint-${SPRINT_NOTICE}.json" /tmp/out.txt || fail "the notice doesn't name the new state file"
+grep -qi "not committed" /tmp/out.txt || fail "the notice doesn't say these are uncommitted"
+# The notice must read as a receipt, not an alarm -- read cold, per QA1's
+# own acceptance criterion.
+grep -qi "warning\|drift\|error" /tmp/out.txt && \
+  fail "the completion notice reads like a problem report rather than a statement of what just happened (Req 1's own tone requirement)"
+rm -f /tmp/out.txt
+# And the notice is honest -- these files really are uncommitted right now.
+git status --porcelain "docs/sprints/state/sprint-${SPRINT_NOTICE}.json" | grep -q "^??" || \
+  fail "test setup broken: the state file the notice named should genuinely be untracked"
+
+echo "== sprint 27, Req 1: a read-only command prints no completion notice =="
+$SCRIPT status "$SPRINT_NOTICE" > /tmp/out.txt 2>&1 || fail "status failed"
+grep -q "^Wrote: " /tmp/out.txt && fail "status (read-only) printed a completion notice -- it must never write anything (Req 1)"
+rm -f /tmp/out.txt
+$SCRIPT list > /tmp/out.txt 2>&1 || fail "list failed"
+grep -q "^Wrote: " /tmp/out.txt && fail "list (read-only) printed a completion notice"
+rm -f /tmp/out.txt
+$SCRIPT gates > /tmp/out.txt 2>&1 || fail "gates failed"
+grep -q "^Wrote: " /tmp/out.txt && fail "gates (read-only) printed a completion notice"
+rm -f /tmp/out.txt
+
+echo "== sprint 27, Req 1: the notice still fires (an honest receipt for what DID land) even when the command later refuses =="
+$SCRIPT qa1 "$SPRINT_NOTICE" --verdict BOGUS --notes "invalid verdict, should refuse after nothing further is written" \
+  > /tmp/out.txt 2>&1 && fail "qa1 accepted an invalid verdict (test setup broken)" || true
+grep -q "^Wrote: " /tmp/out.txt && fail "a refused command with NOTHING written must not print a notice -- nothing landed on disk"
+rm -f /tmp/out.txt
+
+echo "== sprint 27, Req 3: cmd_liveqa RECORDS a sprint file amended since QA1's PASS -- it does not refuse =="
+SPRINT_DRIFT_LQ=$(new_sprint "LiveQA sprint-file drift sprint")
+$SCRIPT start "$SPRINT_DRIFT_LQ" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_DRIFT_LQ work"
+$SCRIPT qa1 "$SPRINT_DRIFT_LQ" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_DRIFT_LQ" > /dev/null
+DRIFT_LQ_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_DRIFT_LQ" --commit "$DRIFT_LQ_COMMIT" > /dev/null
+
+# Amend the sprint file itself -- exactly Finding B's own scenario: a
+# Master Controller (or anyone) editing the file during the live-test
+# window, no lifecycle command involved.
+DRIFT_LQ_FILE=$(find docs/sprints/2-in-progress -name "sprint-${SPRINT_DRIFT_LQ}_*.md")
+[ -n "$DRIFT_LQ_FILE" ] || fail "test setup broken: could not find sprint $SPRINT_DRIFT_LQ's file"
+printf '\n**Amended mid-flight, discovered an unsatisfiable acceptance criterion.**\n' >> "$DRIFT_LQ_FILE"
+
+LQ_DRIFT_OUT=$($SCRIPT liveqa "$SPRINT_DRIFT_LQ" --deployed-commit "$DRIFT_LQ_COMMIT" --verdict PASS --notes "live test itself was fine" 2>&1)
+LQ_DRIFT_STATUS=$?
+[ "$LQ_DRIFT_STATUS" -eq 0 ] || fail "liveqa REFUSED over a sprint file amended since QA1's PASS -- Req 3 is explicit this must never refuse (FAIL-level) -- output: $LQ_DRIFT_OUT"
+echo "$LQ_DRIFT_OUT" | grep -q "has changed since QA1's PASS" || \
+  fail "liveqa's own verdict output doesn't surface the sprint-file drift (Req 3) -- output: $LQ_DRIFT_OUT"
+# Not a die()-style refusal -- no "ERROR:" prefix (die()'s own, checked
+# elsewhere throughout this file) and the verdict itself still printed as
+# a real PASS below, not just a non-zero-exit check in isolation.
+echo "$LQ_DRIFT_OUT" | grep -q "^ERROR:" && \
+  fail "liveqa's drift notice came through die()'s own refusal path -- output: $LQ_DRIFT_OUT"
+echo "$LQ_DRIFT_OUT" | grep -q "PASSED" || \
+  fail "liveqa's own verdict output doesn't confirm the PASS went through -- output: $LQ_DRIFT_OUT"
+# Recorded in the durable history, not only printed once and lost.
+python3 -c "
+import json
+state = json.load(open('docs/sprints/state/sprint-${SPRINT_DRIFT_LQ}.json'))
+events = [h['event'] for h in state['history']]
+assert 'sprint_file_drift_since_audit' in events, f'drift event missing from history: {events}'
+assert state['groundtruth_result'] == 'PASS', f'the live-test verdict itself was not recorded: {state[\"groundtruth_result\"]!r}'
+assert state['phase'] == 'complete_ready', f'a PASS verdict should still move the sprint to complete_ready, drift or not: {state[\"phase\"]!r}'
+"
+$SCRIPT status "$SPRINT_DRIFT_LQ" 2>&1 | grep -q "LiveQA live result: PASS" || \
+  fail "the live-test PASS itself must still be recorded and visible, drift or not"
+
+echo "== sprint 27, Req 3: a sprint file UNCHANGED since QA1's PASS gets no drift note =="
+SPRINT_NODRIFT_LQ=$(new_sprint "LiveQA no-drift sprint")
+$SCRIPT start "$SPRINT_NODRIFT_LQ" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_NODRIFT_LQ work"
+$SCRIPT qa1 "$SPRINT_NODRIFT_LQ" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_NODRIFT_LQ" > /dev/null
+NODRIFT_LQ_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_NODRIFT_LQ" --commit "$NODRIFT_LQ_COMMIT" > /dev/null
+NODRIFT_OUT=$($SCRIPT liveqa "$SPRINT_NODRIFT_LQ" --deployed-commit "$NODRIFT_LQ_COMMIT" --verdict PASS --notes ok 2>&1)
+echo "$NODRIFT_OUT" | grep -q "has changed since QA1's PASS" && \
+  fail "liveqa reported sprint-file drift when the file genuinely never changed (false positive)"
+python3 -c "
+import json
+state = json.load(open('docs/sprints/state/sprint-${SPRINT_NODRIFT_LQ}.json'))
+events = [h['event'] for h in state['history']]
+assert 'sprint_file_drift_since_audit' not in events, f'a drift event was recorded when nothing drifted: {events}'
+"
+
 echo "ALL SMOKE TESTS PASSED"
