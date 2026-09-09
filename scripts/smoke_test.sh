@@ -723,8 +723,18 @@ protected = ['phase', 'qa1_audit_result', 'audit_rounds', 'qa1_audit_file_hash',
 for field in protected:
     if before[field] != after[field]:
         raise SystemExit(f'protected field {field} changed: {before[field]!r} -> {after[field]!r}')
-before_no_history = {k: v for k, v in before.items() if k != 'history'}
-after_no_history = {k: v for k, v in after.items() if k != 'history'}
+# Sprint 25, Req 2: last_claim now legitimately changes on EVERY
+# save_state() call, stamped uniformly regardless of which command wrote
+# -- excluded here the same way history already is, for the identical
+# reason: it's expected to change, on purpose, every time. Not asserted
+# that ts itself differs here: now() has one-second resolution and two
+# calls this close together can legitimately land in the same second --
+# that the mechanism actually stamps a fresh value is proven separately,
+# with an explicit before/after env override, in this file's own
+# dedicated sprint-25 Req 2 tests below.
+ignored_fields = ('history', 'last_claim')
+before_no_history = {k: v for k, v in before.items() if k not in ignored_fields}
+after_no_history = {k: v for k, v in after.items() if k not in ignored_fields}
 if before_no_history != after_no_history:
     raise SystemExit(f'a field outside the five named ones changed too: before={before_no_history} after={after_no_history}')
 if len(after['history']) != len(before['history']) + 1:
@@ -790,8 +800,13 @@ protected = ['phase', 'qa1_audit_result', 'audit_rounds', 'qa1_audit_file_hash',
 for field in protected:
     if before[field] != after[field]:
         raise SystemExit(f'protected field {field} changed: {before[field]!r} -> {after[field]!r}')
-before_no_history = {k: v for k, v in before.items() if k != 'history'}
-after_no_history = {k: v for k, v in after.items() if k != 'history'}
+# Sprint 25, Req 2: same exclusion as the first live-loop diff check above
+# -- last_claim legitimately changes on every save_state() call now (not
+# asserted here that ts itself differs -- now() has one-second resolution
+# and this file's own dedicated Req 2 tests prove the stamping directly).
+ignored_fields = ('history', 'last_claim')
+before_no_history = {k: v for k, v in before.items() if k not in ignored_fields}
+after_no_history = {k: v for k, v in after.items() if k not in ignored_fields}
 if before_no_history != after_no_history:
     raise SystemExit(f'a field outside the five named ones changed too: before={before_no_history} after={after_no_history}')
 if len(after['history']) != len(before['history']) + 1:
@@ -1193,5 +1208,120 @@ PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_ORIGIN_CLEAN"
 git push -q origin HEAD:main
 $SCRIPT status "$SPRINT_ORIGIN_CLEAN" 2>&1 | grep -q "carries.*commit.*beyond" && \
   fail "status warned about origin drift when origin and the record actually agree (false positive)"
+
+echo "== sprint 25, Req 2: a write command's session identity, when the environment provides one, is recorded and surfaced by status (read-only) =="
+SPRINT_CLAIM=$(new_sprint "Session claim sprint")
+$SCRIPT start "$SPRINT_CLAIM" > /dev/null
+CLAUDE_CODE_SESSION_ID="test-session-abc123" CLAUDE_CODE_AGENT="test-agent-xyz" \
+  $SCRIPT qa1 "$SPRINT_CLAIM" --verdict PASS --notes ok > /dev/null
+CLAIM_STATUS_OUT=$($SCRIPT status "$SPRINT_CLAIM" 2>&1)
+echo "$CLAIM_STATUS_OUT" | grep -q "Last touched by: test-agent-xyz, session test-session-abc123" || \
+  fail "status did not surface the recorded claim's exact agent/session (Req 2) -- output: $CLAIM_STATUS_OUT"
+
+echo "== sprint 25, Req 2: an honest 'no session identity available' when the environment provides none, not a silently missing line =="
+env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_AGENT $SCRIPT dev-done "$SPRINT_CLAIM" > /dev/null
+NOSESSION_STATUS_OUT=$($SCRIPT status "$SPRINT_CLAIM" 2>&1)
+echo "$NOSESSION_STATUS_OUT" | grep -q "Last touched by: (unknown" || \
+  fail "status did not honestly report a missing session identity -- output: $NOSESSION_STATUS_OUT"
+
+echo "== sprint 25, Req 2: status itself never writes a claim -- it stays read-only =="
+STATUS_HASH_BEFORE=$(sha256sum "docs/sprints/state/sprint-${SPRINT_CLAIM}.json" | cut -d' ' -f1)
+$SCRIPT status "$SPRINT_CLAIM" > /dev/null 2>&1
+STATUS_HASH_AFTER=$(sha256sum "docs/sprints/state/sprint-${SPRINT_CLAIM}.json" | cut -d' ' -f1)
+[ "$STATUS_HASH_BEFORE" = "$STATUS_HASH_AFTER" ] || fail "status must never modify the sprint's own state file (Req 2's own explicit instruction)"
+
+echo "== sprint 25, Req 4: rename updates registry, frontmatter and filename together, and preserves the original title =="
+SPRINT_RENAME=$(new_sprint "Original working title")
+$SCRIPT start "$SPRINT_RENAME" > /dev/null
+RENAME_FILE_BEFORE=$($SCRIPT status "$SPRINT_RENAME" > /dev/null 2>&1; find docs/sprints/2-in-progress -name "sprint-${SPRINT_RENAME}_*.md")
+[ -n "$RENAME_FILE_BEFORE" ] || fail "test setup broken: could not find sprint $SPRINT_RENAME's file before renaming"
+
+$SCRIPT rename "$SPRINT_RENAME" --title "A narrower, more accurate title" > /tmp/out.txt 2>&1 || \
+  fail "rename failed -- output: $(cat /tmp/out.txt)"
+grep -q 'renamed: "Original working title" -> "A narrower, more accurate title"' /tmp/out.txt || \
+  fail "rename's own confirmation message is missing or wrong"
+rm -f /tmp/out.txt
+
+RENAME_FILE_AFTER=$(find docs/sprints/2-in-progress -name "sprint-${SPRINT_RENAME}_*.md")
+[ "$RENAME_FILE_AFTER" != "$RENAME_FILE_BEFORE" ] || fail "the filename did not actually change"
+[ -f "$RENAME_FILE_AFTER" ] || fail "the new filename does not exist on disk"
+[ ! -f "$RENAME_FILE_BEFORE" ] || fail "the old filename still exists on disk -- rename should move, not copy"
+echo "$RENAME_FILE_AFTER" | grep -q "narrower-more-accurate-title" || fail "the new filename doesn't reflect the new title"
+
+grep -q 'title: "A narrower, more accurate title"' "$RENAME_FILE_AFTER" || fail "the frontmatter's title: line was not updated"
+grep -q 'original_title: "Original working title"' "$RENAME_FILE_AFTER" || fail "the frontmatter's original_title: line is missing or wrong"
+
+REGISTRY_TITLE=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_RENAME}']['title'])")
+[ "$REGISTRY_TITLE" = "A narrower, more accurate title" ] || fail "registry title was not updated to the new title"
+REGISTRY_ORIGINAL=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_RENAME}']['original_title'])")
+[ "$REGISTRY_ORIGINAL" = "Original working title" ] || fail "registry did not preserve the original title"
+
+STATE_TITLE=$(python3 -c "import json; print(json.load(open('docs/sprints/state/sprint-${SPRINT_RENAME}.json'))['title'])")
+[ "$STATE_TITLE" = "A narrower, more accurate title" ] || fail "state.json's own title was not updated"
+
+echo "== sprint 25, Req 4: renaming a second time still preserves the TRUE original title, not just the pre-rename one =="
+$SCRIPT rename "$SPRINT_RENAME" --title "Yet another title" > /dev/null
+SECOND_RENAME_ORIGINAL=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_RENAME}']['original_title'])")
+[ "$SECOND_RENAME_ORIGINAL" = "Original working title" ] || \
+  fail "a second rename overwrote original_title with the intermediate name instead of preserving the true original"
+
+echo "== sprint 25, Req 4: rename refuses an empty title, and refuses renaming to the same title =="
+$SCRIPT rename "$SPRINT_RENAME" --title "" > /tmp/out.txt 2>&1 && fail "rename accepted an empty title" || true
+grep -q "cannot be empty" /tmp/out.txt || fail "empty-title refusal message missing"
+rm -f /tmp/out.txt
+$SCRIPT rename "$SPRINT_RENAME" --title "Yet another title" > /tmp/out.txt 2>&1 && fail "rename accepted renaming to the exact current title" || true
+grep -q "already titled" /tmp/out.txt || fail "same-title refusal message missing"
+rm -f /tmp/out.txt
+
+echo "== sprint 25, Req 4: rename does NOT touch phase, verdicts, or history =="
+$SCRIPT qa1 "$SPRINT_RENAME" --verdict PASS --notes "before another rename" > /dev/null
+PHASE_BEFORE=$($SCRIPT status "$SPRINT_RENAME" 2>&1 | grep "^Phase:")
+HISTORY_LEN_BEFORE=$(python3 -c "import json; print(len(json.load(open('docs/sprints/state/sprint-${SPRINT_RENAME}.json'))['history']))")
+$SCRIPT rename "$SPRINT_RENAME" --title "Renamed once more, post-PASS" > /dev/null
+PHASE_AFTER=$($SCRIPT status "$SPRINT_RENAME" 2>&1 | grep "^Phase:")
+[ "$PHASE_BEFORE" = "$PHASE_AFTER" ] || fail "rename changed the sprint's phase -- must not (Req 4)"
+HISTORY_LEN_AFTER=$(python3 -c "import json; print(len(json.load(open('docs/sprints/state/sprint-${SPRINT_RENAME}.json'))['history']))")
+[ "$HISTORY_LEN_BEFORE" = "$HISTORY_LEN_AFTER" ] || fail "rename appended to history -- must not (Req 4)"
+QA1_RESULT_AFTER=$($SCRIPT status "$SPRINT_RENAME" 2>&1 | grep "^QA1 audit result:")
+echo "$QA1_RESULT_AFTER" | grep -q "PASS" || fail "rename changed the recorded QA1 verdict -- must not (Req 4)"
+
+echo "== sprint 25, Req 4: THE HASH QUESTION, TESTED NOT ASSUMED -- a rename after a QA1 PASS DOES require a fresh QA1 look, and this is the intended, correct behaviour =="
+# A fresh, dedicated sprint, isolated from the phase/history test above
+# (whose own rename of $SPRINT_RENAME already made ITS file stale relative
+# to ITS own QA1 PASS by design -- that's the same mechanism this test
+# checks directly and deliberately, not a bug to route around here).
+SPRINT_RENAME_HASH=$(new_sprint "Hash gate rename sprint")
+$SCRIPT start "$SPRINT_RENAME_HASH" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_RENAME_HASH work"
+$SCRIPT qa1 "$SPRINT_RENAME_HASH" --verdict PASS --notes ok > /dev/null
+$SCRIPT rename "$SPRINT_RENAME_HASH" --title "Renamed between QA1 PASS and dev-done" > /dev/null
+$SCRIPT dev-done "$SPRINT_RENAME_HASH" > /tmp/out.txt 2>&1 && \
+  fail "dev-done succeeded despite the sprint file changing (the rename itself) after QA1's PASS -- the hash gate should have caught this, per Req 4's own tested decision" || true
+grep -q "requirements may have been amended after the audit" /tmp/out.txt || \
+  fail "dev-done's refusal after a post-PASS rename doesn't give the expected reason -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+# And the documented recovery path works: a fresh QA1 look on the CURRENT
+# (renamed) file, then dev-done succeeds.
+$SCRIPT qa1 "$SPRINT_RENAME_HASH" --verdict PASS --notes "re-audited the renamed file" > /dev/null
+$SCRIPT dev-done "$SPRINT_RENAME_HASH" > /tmp/out.txt 2>&1 || \
+  fail "dev-done still refused after a fresh QA1 PASS on the current (renamed) file -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 25, Req 4: renaming BEFORE any QA1 PASS has nothing to invalidate =="
+SPRINT_RENAME_EARLY=$(new_sprint "Pre-audit rename sprint")
+$SCRIPT start "$SPRINT_RENAME_EARLY" > /dev/null
+$SCRIPT rename "$SPRINT_RENAME_EARLY" --title "Renamed before QA1 ever looked" > /tmp/out.txt 2>&1 || \
+  fail "rename before any audit failed -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+git commit -q --allow-empty -m "sprint $SPRINT_RENAME_EARLY work"
+$SCRIPT qa1 "$SPRINT_RENAME_EARLY" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_RENAME_EARLY" > /tmp/out.txt 2>&1 || \
+  fail "dev-done refused for a sprint renamed before QA1 ever audited it -- nothing should be invalidated here -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 25, Req 4: rename refuses cleanly for an unknown sprint id =="
+$SCRIPT rename 999999 --title "Doesn't matter" > /tmp/out.txt 2>&1 && fail "rename succeeded for a nonexistent sprint id" || true
+grep -q "not found in registry" /tmp/out.txt || fail "unknown-sprint-id refusal message missing"
+rm -f /tmp/out.txt
 
 echo "ALL SMOKE TESTS PASSED"

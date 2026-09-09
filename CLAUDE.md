@@ -236,9 +236,12 @@ alone did not.
 /sprint-liveqa <N> --deployed-commit <sha> --verdict PASS|FAIL|CONDITIONAL --notes "..."        # LiveQA
 /sprint-complete <N> --user-said "..."                                                          # Dev Team 1/2
 /sprint-abort <N> --reason "..."                                                                # Dev Team 1/2
+/sprint-rename <N> --title "..."                                                                # Master Controller
 ```
 
 `/sprint-abort` isn't attributed to a role anywhere else in this file (it's absent from the lifecycle diagram above); "Dev Team 1/2" here is inferred from the "Command ownership" note further up — lifecycle transition commands belong to whichever Dev Team owns the sprint, not Master Controller — not a direct quote like the other eleven labels are.
+
+`/sprint-rename` (sprint 25) isn't a lifecycle-phase transition at all — it doesn't move a sprint between phases, it corrects a title that's stopped describing the sprint's current scope, the same kind of correction `/sprint-new` makes at creation. Master Controller here follows that same ownership, not the Dev Team pattern `/sprint-abort` uses. It updates the registry entry, the sprint file's own frontmatter, and the filename together, and preserves the original title. It never touches phase, verdicts, hashes, or history — but it does edit the sprint file itself, so renaming a sprint that already has a QA1 PASS on record will correctly require a fresh `/sprint-qa1` audit before `/sprint-dev-done` proceeds, the same as any other post-PASS edit to that file.
 
 ## Sprint data persistence
 

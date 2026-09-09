@@ -6,3 +6,9 @@ __pycache__/
 # to serialize concurrent sprint_lifecycle.py invocations, never meant to
 # be committed.
 docs/sprints/.locks/
+
+# Sprint 25, Req 1: run-role.js's own best-effort, per-machine record of
+# which role most recently launched in this tree (see
+# scripts/launcher/role-claims.js). Advisory, local-machine bookkeeping,
+# never meant to be shared or committed.
+.claude/role-claims.json

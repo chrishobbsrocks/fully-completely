@@ -101,6 +101,93 @@ const {
   resolveSession,
 } = require('./launcher/session');
 
+// -------------------------------------------------------------------------
+// role-claims.js: sprint 25, Req 1 -- best-effort role-launch record
+// -------------------------------------------------------------------------
+const {
+  claimsFilePath,
+  readClaims,
+  recordRoleClaim,
+  roleClaimWarning,
+} = require('./launcher/role-claims');
+
+function withTmpRepoRoot(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-role-claims-repo-'));
+  try {
+    fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('role-claims: readClaims on a repo with no claims file yet returns {} rather than crashing', () => {
+  withTmpRepoRoot((repoRoot) => {
+    assert.deepStrictEqual(readClaims(repoRoot), {});
+  });
+});
+
+test('role-claims: a role\'s first claim returns null (nothing previous) and writes the file', () => {
+  withTmpRepoRoot((repoRoot) => {
+    const previous = recordRoleClaim('qa1', repoRoot, { sessionId: 'abc-123' });
+    assert.strictEqual(previous, null);
+    assert.ok(fs.existsSync(claimsFilePath(repoRoot)));
+    const claims = readClaims(repoRoot);
+    assert.strictEqual(claims.qa1.sessionId, 'abc-123');
+    assert.match(claims.qa1.startedAt, /^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+test('role-claims: a role\'s second claim returns the FIRST claim, not null, and overwrites it with the new one', () => {
+  withTmpRepoRoot((repoRoot) => {
+    const firstNow = () => new Date('2026-01-01T00:00:00.000Z');
+    recordRoleClaim('qa1', repoRoot, { sessionId: 'first-session', now: firstNow });
+    const secondNow = () => new Date('2026-01-02T00:00:00.000Z');
+    const previous = recordRoleClaim('qa1', repoRoot, { sessionId: 'second-session', now: secondNow });
+    assert.deepStrictEqual(previous, { sessionId: 'first-session', startedAt: '2026-01-01T00:00:00.000Z' });
+    const claims = readClaims(repoRoot);
+    assert.strictEqual(claims.qa1.sessionId, 'second-session', 'the record now reflects the newer launch, not the one being warned about');
+  });
+});
+
+test('role-claims: two DIFFERENT roles never see each other\'s claims (independent keys)', () => {
+  withTmpRepoRoot((repoRoot) => {
+    recordRoleClaim('qa1', repoRoot, { sessionId: 'qa1-session' });
+    const previousForDifferentRole = recordRoleClaim('dev-team-1', repoRoot, { sessionId: 'dt1-session' });
+    assert.strictEqual(previousForDifferentRole, null, 'dev-team-1 launching for the first time must not see qa1\'s claim');
+  });
+});
+
+test('role-claims: a write failure (unwritable directory) never throws -- Req 1\'s own "it warns; it never gates" applies to the record itself', () => {
+  withTmpRepoRoot((repoRoot) => {
+    const claudeDir = path.join(repoRoot, '.claude');
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.chmodSync(claudeDir, 0o444);
+    try {
+      assert.doesNotThrow(() => recordRoleClaim('qa1', repoRoot, { sessionId: 'irrelevant' }));
+    } finally {
+      fs.chmodSync(claudeDir, 0o755); // restore so withTmpRepoRoot's own cleanup can remove it
+    }
+  });
+});
+
+test('role-claims: roleClaimWarning is null when there is no previous claim -- silence on a role\'s first launch', () => {
+  assert.strictEqual(roleClaimWarning('QA1', null), null);
+});
+
+test('role-claims: roleClaimWarning names the earlier session\'s start time and its own blind spot (Req 1/3)', () => {
+  const warning = roleClaimWarning('QA1', { sessionId: 'xyz-789', startedAt: '2026-01-01T00:00:00.000Z' });
+  assert.match(warning, /2026-01-01T00:00:00\.000Z/, 'must name when the earlier session started');
+  assert.match(warning, /xyz-789/, 'must name the earlier session');
+  // Req 1's own required wording: a reader must not be able to conclude
+  // from silence that nobody else is working here.
+  assert.match(warning, /nobody else is working here/i);
+  // Req 3: states its own blind spot -- only launches through this
+  // script, only at launch time, never a mid-build collision.
+  assert.match(warning, /only sees launches that went through this script/i);
+  // Req 1: never gates.
+  assert.match(warning, /never blocks/i);
+});
+
 function withTmpHome(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-launcher-home-'));
   try {
@@ -2019,11 +2106,30 @@ test('prompts: headlessPrompt tells every role not to append shell chaining like
 // sub-agent call), against this worktree's real .claude/agents/*.md files.
 const RUN_ROLE_PATH = path.join(REPO_ROOT, 'scripts', 'launcher', 'run-role.js');
 
+// Sprint 25: every real run-role.js invocation now records a role-launch
+// claim (see role-claims.js). Every call through this helper points that
+// at a FRESH scratch path, per call, via the override role-claims.js
+// itself documents — otherwise every CLI-level test in this file would
+// share this repo's own real .claude/role-claims.json, and the second
+// test to launch any given role would see the first's claim and print an
+// unwanted warning, breaking every exact-stderr assertion below and
+// leaving real test artifacts in this repo's own working tree. Tests
+// that specifically exercise the claim/warning behavior override this
+// again themselves, deliberately, to share one path across two calls.
+function freshRoleClaimsPathOverride() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-role-claims-'));
+  return path.join(dir, 'role-claims.json');
+}
+
 function runRoleCli(args, envOverrides) {
   return spawnSync(process.execPath, [RUN_ROLE_PATH, ...args], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
-    env: { ...process.env, ...envOverrides },
+    env: {
+      ...process.env,
+      FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: freshRoleClaimsPathOverride(),
+      ...envOverrides,
+    },
   });
 }
 
@@ -2129,9 +2235,41 @@ test('run-role CLI: default headless path succeeds when the operator session is 
   });
 });
 
+test('run-role CLI (real subprocess, Req 1): a role\'s first launch writes a claim and stays silent; the SAME role\'s second launch warns but still launches', () => {
+  withFakeClaude(true, ({ dir, readArgv }) => {
+    const claimsPath = freshRoleClaimsPathOverride();
+    const env = { PATH: dir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath };
+
+    const first = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
+    assert.strictEqual(first.status, 0, 'first launch must succeed');
+    assert.strictEqual(first.stderr, '', 'a role\'s first launch in a tree has nothing to warn about');
+    assert.ok(fs.existsSync(claimsPath), 'the claim must actually be written to disk');
+    const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
+    assert.ok(claims.qa1 && claims.qa1.startedAt, 'the claim must record qa1 with a start time');
+
+    const second = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
+    // Req 1's own FAIL-level criterion: a launch that warns must still launch.
+    assert.strictEqual(second.status, 0, 'a second launch of the same role must still succeed -- never gates');
+    assert.strictEqual(second.stdout, FAKE_JSON_RESULT, 'the launch itself proceeded normally, warning or not');
+    assert.match(second.stderr, /NOTE: another QA1 session was recorded starting at/, 'must name that an earlier session exists');
+    assert.match(second.stderr, /nobody else is working here/i, 'must state its own blind spot in the message, not only in a comment');
+  });
+});
+
+test('run-role CLI (real subprocess, Req 1): a DIFFERENT role launching after qa1 is a first launch for IT -- no warning', () => {
+  withFakeClaude(true, ({ dir }) => {
+    const claimsPath = freshRoleClaimsPathOverride();
+    const env = { PATH: dir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath };
+    runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
+    const result = runRoleCli(['--headless', '--agent', 'dev-team-1', '--sprint', '4'], env);
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stderr, '', 'dev-team-1 has never launched in this tree before -- qa1\'s claim must not leak across roles');
+  });
+});
+
 test('run-role CLI: --bare with neither ANTHROPIC_API_KEY nor --settings fails without ever probing operator auth', () => {
   withFakeClaude(({ dir, readArgv }) => {
-    const env = { ...process.env, PATH: dir };
+    const env = { ...process.env, PATH: dir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: freshRoleClaimsPathOverride() };
     delete env.ANTHROPIC_API_KEY;
     const result = spawnSync(
       process.execPath,
@@ -2150,7 +2288,7 @@ test('run-role CLI: --bare with neither ANTHROPIC_API_KEY nor --settings fails w
 // unchanged in round 3, scoped to --bare.
 test('run-role CLI: --bare with --settings alone (no ANTHROPIC_API_KEY) satisfies the precondition and reaches claude', () => {
   withFakeClaude(({ dir, readArgv }) => {
-    const env = { ...process.env, PATH: dir };
+    const env = { ...process.env, PATH: dir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: freshRoleClaimsPathOverride() };
     delete env.ANTHROPIC_API_KEY;
     const result = spawnSync(
       process.execPath,

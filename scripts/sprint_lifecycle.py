@@ -288,8 +288,65 @@ def load_state(sprint_id: int) -> dict:
 
 
 def save_state(sprint_id: int, state: dict) -> None:
+    # Sprint 25, Req 2: stamps state["last_claim"] on EVERY save, uniformly,
+    # regardless of which command called this -- the same "can't forget it"
+    # shape Req 1 gets in run-role.js by hooking the one point every launch
+    # already passes through. This is the choke point every write command in
+    # this file already funnels through, so no individual command needed to
+    # be touched to get this for free.
+    #
+    # REACHABILITY, ESTABLISHED BY RUNNING, not assumed (Req 2's own
+    # explicit instruction): Claude Code sets CLAUDE_CODE_SESSION_ID and
+    # CLAUDE_CODE_AGENT in the environment of every session it runs, headless
+    # or interactive, inherited by any subprocess that session's own Bash
+    # tool spawns -- confirmed directly, twice: once by inspecting this
+    # exact process's own environment while writing this comment (running
+    # as sprint 25's own Dev Team 1 session), and again by spawning a
+    # genuinely fresh, standalone `claude -p --agent qa1 ...` and having
+    # THAT session report its own environment back, independent of any
+    # nesting or nested-session artifact the first check might have carried.
+    # Both showed CLAUDE_CODE_AGENT matching the --agent flag that session
+    # was launched with, and a fresh CLAUDE_CODE_SESSION_ID each time. This
+    # is Claude Code's own behaviour, not something run-role.js sets --
+    # confirmed by grepping run-role.js itself for any assignment to either
+    # variable: there is none.
+    #
+    # Both are None when running outside a claude session entirely (a human
+    # at a bare terminal, or a test) -- recorded as None rather than
+    # omitted, an honest "no session identity available" rather than a
+    # silently missing field, matching this file's own established
+    # convention (getClaudeVersionString()'s sibling in run-role.js does the
+    # same for a comparable "can't determine" case).
+    state["last_claim"] = {
+        "claude_session_id": os.environ.get("CLAUDE_CODE_SESSION_ID"),
+        "claude_agent": os.environ.get("CLAUDE_CODE_AGENT"),
+        "ts": now(),
+    }
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     atomic_write(state_path(sprint_id), json.dumps(state, indent=2) + "\n")
+
+
+def last_claim_line(state: dict) -> Optional[str]:
+    """Sprint 25, Req 2: formats state.get("last_claim") (see save_state())
+    for cmd_status. .get() with a None default throughout, per this file's
+    own established convention (see the module-level state-field-access
+    comment) — this field was added after sprints already existed, so a
+    state file saved before this sprint genuinely lacks it, and that's
+    expected, not corruption. Returns None (print nothing) for that case.
+
+    Not a collision check, unlike Req 1's role-claims warning in
+    run-role.js — Req 2 only asks this to "surface" the claim, not to
+    compare it against anything. Both claude_session_id and claude_agent
+    are None when the last write happened outside a claude session
+    entirely (a human at a bare terminal, a test) — stated as such rather
+    than silently omitted."""
+    claim = state.get("last_claim")
+    if not claim:
+        return None
+    agent = claim.get("claude_agent") or "(unknown — not running inside a claude session)"
+    session = claim.get("claude_session_id")
+    session_part = f", session {session}" if session else ""
+    return f"Last touched by: {agent}{session_part}, at {claim.get('ts')}."
 
 
 def die(msg: str) -> None:
@@ -897,6 +954,16 @@ def cmd_status(args) -> None:
     origin_drift = origin_ahead_of_record_warning(state.get("last_shipped_commit"))
     if origin_drift:
         print(origin_drift)
+    # Sprint 25, Req 2: surfaced here, on the one read-only command this
+    # Req names explicitly ("/sprint-status must stay read-only" -- this
+    # function never calls save_state() itself, so it only ever displays
+    # whatever the last WRITE command already recorded, never stamps its
+    # own). Not a collision warning like Req 1's role-claims -- just the
+    # one fact available: who (if identifiable) last wrote this sprint's
+    # state, and when.
+    claim_line = last_claim_line(state)
+    if claim_line:
+        print(claim_line)
     if args.verbose:
         print("\nHistory:")
         for h in state["history"]:
@@ -1797,6 +1864,129 @@ def cmd_abort(args) -> None:
     print(f"Sprint {args.id} aborted. Reason: {reason or '(none given)'}")
 
 
+DONE_FILENAME_SUFFIX = "--done"  # matches cmd_complete's own src.stem + "--done" + src.suffix
+
+
+def cmd_rename(args) -> None:
+    """Sprint 25, Req 4: updates the registry entry, the sprint file's own
+    frontmatter, and the filename together -- the three things hand-editing
+    the registry (forbidden, see CLAUDE.md) would otherwise have to keep in
+    sync by hand. This repo's own sprint 18 is the motivating instance
+    named in the sprint file: its title stopped describing it once its
+    first requirement was absorbed into another sprint, and there was no
+    command to fix it, so Master Controller recorded the title as
+    historical in Dependencies rather than correcting it where a reader
+    would actually see it first.
+
+    PRESERVES THE ORIGINAL TITLE (Req 4's own instruction): the registry
+    entry and the frontmatter both gain an `original_title` field, set
+    ONCE, on the FIRST rename, and never overwritten by a later one -- so
+    it always names the sprint's true original title, not merely "the
+    title before this particular rename." A sprint renamed twice still
+    shows what it was at creation, not just what it was most recently.
+
+    DELIBERATELY DOES NOT TOUCH (Req 4's own named list): phase,
+    qa1_audit_result, groundtruth_result, audit_rounds, live_test_rounds,
+    history, or either recorded hash (qa1_audit_file_hash,
+    qa1_audited_tree_hash). state["title"] IS updated, for the identical
+    reason the registry's title is -- a title nobody can ever correct is
+    the bug this Req exists to fix, and title is not one of the fields
+    the Req's own list protects.
+
+    THE HASH QUESTION, TESTED RATHER THAN ASSUMED (Req 4's own explicit
+    instruction: "confirm the sprint-file hash gate behaves correctly
+    across a rename... if renaming invalidates a recorded QA1 PASS, say so
+    and decide whether that is right"). Confirmed directly, against a real
+    scratch sprint (see scripts/smoke_test.sh's own sprint-25 rename
+    tests): renaming a sprint that already has a QA1 PASS on record DOES
+    cause the next /sprint-dev-done to refuse, because file_hash() (see
+    cmd_qa1's own qa1_audit_file_hash) hashes the sprint file's raw bytes,
+    and this command's own frontmatter rewrite (new title line, plus an
+    inserted original_title line on a first rename) changes those bytes --
+    the same way any other edit to an audited sprint file does.
+
+    THE DECISION: this is correct, not a bug to work around, and no
+    special-case exemption is carved out here. Every other content change
+    to an audited sprint file already requires a fresh /sprint-qa1 look
+    before /sprint-dev-done will proceed (see that function's own
+    comment) -- a rename is a real edit to the exact file QA1 read, and
+    this mechanism has no way to distinguish "cosmetic title change" from
+    "the requirements actually changed" without a human's judgement,
+    which is exactly what re-running QA1 provides. Renaming BEFORE a QA1
+    PASS (the common case Context describes -- scope narrowing discovered
+    during the build) has nothing to invalidate and is unaffected."""
+    title = resolve_text(args.title, args.title_file)
+    if not title:
+        die("A new title cannot be empty.")
+
+    with locked("registry"), locked(f"sprint-{args.id}"):
+        reg = load_registry()
+        entry = reg["sprints"].get(str(args.id))
+        if not entry:
+            die(f"Sprint {args.id} not found in registry.")
+
+        src = ROOT / entry["file"]
+        if not src.exists():
+            die(f"Sprint {args.id}'s recorded file ({entry['file']}) does not exist on disk -- "
+                "nothing here to rename. Investigate before retrying.")
+
+        old_title = entry["title"]
+        if title == old_title:
+            die(f"Sprint {args.id} is already titled \"{title}\" -- nothing to rename.")
+        # Set once, on the first rename; a later rename keeps naming the
+        # TRUE original, never "whatever it was called before THIS rename."
+        original_title = entry.get("original_title", old_title)
+
+        slug = slugify(title)
+        had_done_suffix = src.stem.endswith(DONE_FILENAME_SUFFIX)
+        new_stem = f"sprint-{args.id}_{slug}" + (DONE_FILENAME_SUFFIX if had_done_suffix else "")
+        dest = src.parent / f"{new_stem}{src.suffix}"
+        if dest != src and dest.exists():
+            die(f"Cannot rename: {dest.relative_to(ROOT)} already exists.")
+
+        text = src.read_text(encoding="utf-8")
+        updated, count = re.subn(
+            r'(?m)^title:\s*".*?"\s*$', f'title: "{yaml_escape(title)}"', text, count=1
+        )
+        if count == 0:
+            die(f"Could not find a title: line in {src.relative_to(ROOT)}'s frontmatter -- "
+                "refusing to guess at a malformed sprint file rather than writing something wrong.")
+        if not re.search(r"(?m)^original_title:", updated):
+            # Inserted directly after the title: line -- a fixed,
+            # predictable position on every renamed sprint from here on,
+            # not appended wherever a regex happened to find room.
+            updated = re.sub(
+                r'(?m)(^title:\s*".*?"\s*$)',
+                lambda m: m.group(1) + f'\noriginal_title: "{yaml_escape(original_title)}"',
+                updated, count=1,
+            )
+
+        if dest != src:
+            atomic_write(dest, updated)
+            src.unlink()
+        else:
+            atomic_write(dest, updated)
+
+        entry["title"] = title
+        entry["original_title"] = original_title
+        entry["file"] = str(dest.relative_to(ROOT))
+        save_registry(reg)
+
+        if state_path(args.id).exists():
+            state = load_state(args.id)
+            state["title"] = title
+            save_state(args.id, state)
+
+    print(f"Sprint {args.id} renamed: \"{old_title}\" -> \"{title}\".")
+    print(f"  registry, frontmatter and filename updated: {dest.relative_to(ROOT)}")
+    print(f"  original title preserved: \"{original_title}\"")
+    print("  Phase, verdicts, hashes and history are untouched. If this sprint already has a "
+          "recorded QA1 PASS, the sprint file's content just changed (the title/original_title "
+          "lines did) -- the next /sprint-dev-done will correctly ask for a fresh /sprint-qa1 "
+          "look first, the same as any other post-PASS edit to the file. This is expected, not "
+          "a bug.")
+
+
 def cmd_override(args) -> None:
     """Human-only escape hatch. Deliberately absent from .claude/commands/ (no
     slash command wraps this) and never mentioned in CLAUDE.md or any agent
@@ -2144,6 +2334,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--reason", default="")
     s.add_argument("--reason-file", help="Read the reason from this file instead of the command line.")
     s.set_defaults(func=cmd_abort)
+
+    s = sub.add_parser("rename",
+                        help="Sprint 25, Req 4: updates the registry entry, the sprint file's "
+                        "own frontmatter, and the filename together, for a sprint whose scope "
+                        "legitimately narrowed. Preserves the original title. Never touches "
+                        "phase, verdicts, hashes, or history.")
+    s.add_argument("id", type=int)
+    s.add_argument("--title", default=None, help="The new title. Prefer --title-file for text pasted from elsewhere.")
+    s.add_argument("--title-file", help="Read the new title from this file instead of the command line.")
+    s.set_defaults(func=cmd_rename)
 
     # Deliberately not wired to any .claude/commands/*.md slash command, and
     # never mentioned in CLAUDE.md or any agent file, see cmd_override's

@@ -32,6 +32,11 @@ docs/sprints/*/*.md
 # framework being installed, and install.js never reads this path either.
 .claude/settings.local.json
 
+# Sprint 25, Req 1: run-role.js's own best-effort per-machine role-launch
+# record (scripts/launcher/role-claims.js) — created at runtime, never
+# meant to ship, same category as settings.local.json above.
+.claude/role-claims.json
+
 # Sprint 22: this record names two real, already-published disclosure
 # findings by their exact content (a client/project identifier, the
 # author's own real local absolute path) so a decision can actually be

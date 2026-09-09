@@ -60,12 +60,14 @@
 // what headless does differently from the interactive path above, and why.
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 const { ROOT, ROLES, agentFilePath, readAgentMeta, agentBody } = require('./agents');
 const { initialPrompt, devTeam2ResumePrompt, headlessPrompt } = require('./prompts');
 const { resolveSession } = require('./session');
 const { checkAuth } = require('./auth');
 const { parseJsonc } = require('./jsonc');
+const { recordRoleClaim, roleClaimWarning } = require('./role-claims');
 const { claudeCommand } = require('./claude-cmd');
 
 // Req 10: every launcher-level failure — claude not on PATH, an unreadable
@@ -1497,6 +1499,25 @@ async function main() {
   const role = ROLES.find((r) => r.id === roleId);
   if (!role) {
     fail(`Unknown role '${roleId}'. Expected one of: ${ROLES.map((r) => r.id).join(', ')}.`);
+  }
+
+  // Sprint 25, Req 1: recorded here, before the headless/interactive
+  // branch below, so it applies uniformly to both paths -- this is the
+  // one point in this file every real launch, of either kind, already
+  // passes through. `crypto.randomUUID()` here, not resolveSession()'s
+  // own deterministic UUIDv5 scheme: that scheme answers a different
+  // question (which session file to resume) and headless launches never
+  // call it at all (see headlessLaunchArgs(), no --session-id there) --
+  // reusing it here would either leave headless with no id at all or
+  // require computing a resume-scheme id headless has no other use for.
+  // A single fresh random id, minted uniformly for both paths, is the
+  // simpler and more honest choice. See role-claims.js's own comments for
+  // what this can and cannot see -- stated there in the code, not only in
+  // the sprint file, per Req 3.
+  const previousRoleClaim = recordRoleClaim(role.id, ROOT, { sessionId: crypto.randomUUID() });
+  const roleWarning = roleClaimWarning(role.label, previousRoleClaim);
+  if (roleWarning) {
+    console.error(roleWarning);
   }
 
   if (!claudeOnPath()) {
