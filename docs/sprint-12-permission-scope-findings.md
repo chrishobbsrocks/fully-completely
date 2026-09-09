@@ -592,15 +592,21 @@ length, cross-checked by a second person, and still be model-mediated.
   tool call. The layer evaluates `tool_use` blocks the model itself
   produces during a live turn; it has no other input.
 
-**The count (Req 2).** Of the 15 distinct claims this document has ever
-made about permission behaviour (enumerated below), **14 are
-model-mediated and are now graded UNESTABLISHED** — not disproved, not
-deleted, the observations are kept in place inline, tagged, above. **1 is
-graded direct and keeps its CONFIRMED grade.** The 15th (the Req 4
-six-role narrative discovery pass) was already excluded from this
-grading system by sprint 21's own text, for an unrelated reason (a
-historical record of one run, never presented as a standing behavioural
-claim) — left exactly as sprint 21 left it.
+**The count (Req 2), stated precisely rather than rounded** — QA1 round 1
+correctly caught this document's own first draft undercounting by one:
+this document has made **16 distinct, gradable claims** about permission
+behaviour, organized as **15 numbered entries**, since entry 14 splits
+into two sub-claims (14a, 14b) that warrant different method grades and
+so are graded separately rather than as one. Of those 16 claims: **14
+are model-mediated and are now graded UNESTABLISHED** (rows 1–13, plus
+14b) — not disproved, not deleted, the observations are kept in place
+inline, tagged, above. **1 (14a) is graded direct and keeps its CONFIRMED
+grade.** The remaining numbered entry, **15** (the Req 4 six-role
+narrative discovery pass), was already excluded from this grading system
+by sprint 21's own text, for an unrelated reason (a historical record of
+one run, never presented as a standing behavioural claim) — left exactly
+as sprint 21 left it. 14 + 1 + 1 (excluded) accounts for all 16 claims
+across all 15 numbered entries.
 
 | # | Entry (short form) | Method | Grade after sprint 26 | Fresher context |
 |---|---|---|---|---|
@@ -645,7 +651,7 @@ say than "unestablished, no further data":
   ran, `browser_run_code_unsafe` was denied by name, a role granted no
   MCP tools at all was denied `browser_navigate` outright) — a mechanism
   this document never previously tested at all, so it isn't one of the
-  15 rows above, but it is real, current, model-mediated evidence that
+  15 numbered entries above, but it is real, current, model-mediated evidence that
   **the drift found in row 1/2 is scoped to unlisted single Bash commands
   writing inside the working directory specifically, not a general
   collapse of `allowedTools` enforcement.**
