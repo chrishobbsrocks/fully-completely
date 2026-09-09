@@ -1,5 +1,5 @@
 {
-  "next_id": 31,
+  "next_id": 33,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -180,6 +180,18 @@
       "epic": "Headless permission model",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-30_record-the-conditions-a-permission-denial-was-produced-under-not-just-the-denial--done.md"
+    },
+    "31": {
+      "title": "Make a role's invocation match the grant it holds, and protect the args-derivation property in CI",
+      "epic": "Headless permission model",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-31_make-a-role-s-invocation-match-the-grant-it-holds-and-protect-the-args-derivation-property-in-ci.md"
+    },
+    "32": {
+      "title": "Extend the bookkeeping-commit rule to the two gate roles, in the two shapes it actually needs",
+      "epic": "Sprint record durability",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-32_extend-the-bookkeeping-commit-rule-to-the-two-gate-roles-in-the-two-shapes-it-actually-needs.md"
     }
   }
 }
