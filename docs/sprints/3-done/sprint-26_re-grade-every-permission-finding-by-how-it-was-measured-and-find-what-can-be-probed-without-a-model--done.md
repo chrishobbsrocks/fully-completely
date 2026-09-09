@@ -2,7 +2,7 @@
 id: 26
 title: "Re-grade every permission finding by how it was measured, and find what can be probed without a model"
 epic: "Honest reporting"
-status: todo
+status: done
 created: 2026-09-09T00:14:02+00:00
 ---
 
