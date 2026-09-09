@@ -2,7 +2,7 @@
 id: 27
 title: "Make the sprint record durable at the moments people rely on it"
 epic: "Honest reporting"
-status: todo
+status: in_progress
 created: 2026-09-09T03:09:56+00:00
 ---
 
@@ -45,9 +45,17 @@ Two instances reported, both from one operator in one day across two projects; o
 4. **Either supply an MCP server or say the grant needs one.** The 27 allowlisted Playwright tools reach nothing without `--mcp-config`. **Whichever way this goes, the failure must stop being silent** — a downstream LiveQA currently gets `TOOL NOT AVAILABLE` with nothing telling it a server was never configured.
    - **Determine by running** whether the launcher can supply one usefully without knowing the target project's setup. **"It cannot, and here is what a project must configure" is an acceptable outcome** — as long as it is said where someone hits it.
 
-5. **Bump `package.json` to 0.1.30.** One line. *0.1.28 and 0.1.29 belong to sprints 24 and 25.*
+5. **Say what 0.2.0 signals, where a consumer sees it before acting.** *This sprint's version target changed from 0.1.30 — it is the milestone release, not the next patch.*
+   - **Nothing here is breaking.** Every change since 0.1.6 has been additive or corrective. **But in `0.x` a minor bump conventionally signals a breaking change**, and a downstream consumer pins this package and re-verifies its contract against every published version. They will read 0.2.0 as breaking and do work that is not needed unless told otherwise.
+   - State it in the README or equivalent, not only in a commit message: 0.2.0 marks that **the framework's own debts are paid** — the package has been read for what it discloses (0.1.23), its permission findings are honestly graded (0.1.27), and its sprint record is durable (this release) — **and that it is not a breaking release.**
 
-6. **Test coverage** for Reqs 1 and 3 in `scripts/smoke_test.sh`: a writing command prints the notice; a read-only command does not; an amended sprint file is recorded at `cmd_liveqa` and the verdict still records.
+6. **Write a CHANGELOG.** **Twenty-eight versions have been published and nothing records what changed between them.** A consumer pinning a version has no way to know what moving costs, and one has been re-deriving it from our commits every release.
+   - **The mapping already exists** — every closed sprint is an entry. 0.1.10 is the Windows path fix, 0.1.19 is the ownership grant, 0.1.23 is the disclosure sweep. **Transcription, not archaeology.**
+   - **Mark the corrections as corrections.** Several releases fixed what an earlier one got wrong: 0.1.5 shipped a mechanism that reached no existing install, 0.1.8 shipped a message that stated a falsehood, 0.1.27 re-graded fourteen findings this project had cited as settled. **A changelog reading as a clean march of features would be its own small dishonesty**, on a project whose record is otherwise unusually frank.
+
+7. **Bump `package.json` to 0.2.0.** One line.
+
+8. **Test coverage** for Reqs 1 and 3 in `scripts/smoke_test.sh`: a writing command prints the notice; a read-only command does not; an amended sprint file is recorded at `cmd_liveqa` and the verdict still records.
 
 ### Acceptance Criteria
 
@@ -59,13 +67,15 @@ Two instances reported, both from one operator in one day across two projects; o
 - **Req 3 is the one most likely to be built as a refusal**, because a refusal feels stronger. **Confirm it records and never blocks.** A `cmd_liveqa` that can refuse on sprint-file drift is a FAIL, not a CONDITIONAL — the reasoning is in Context and must survive in the code.
 - Req 3: confirm the re-gating cost is documented, and check the claim about `_qa1_live_loop_audit` against the code rather than accepting it.
 - Req 4: confirm the outcome was **established by running**, and that if no server can be supplied, the message names what a project must configure.
-- Req 5: `package.json` is `0.1.30`, one-line diff.
-- Req 6: **run the suite.**
+- **Req 5: read the 0.2.0 statement cold, as a consumer who pins.** If it could be taken as announcing a breaking change, it fails — that misreading costs someone a day of contract re-verification they did not need.
+- Req 6: spot-check entries against the sprints they claim to describe. **Confirm the corrections are marked as corrections**, not presented as features.
+- Req 7: `package.json` is `0.2.0`, one-line diff.
+- Req 8: **run the suite.**
 - Run `scripts/verify-tarball.sh`.
 
 **LiveQA verifies live, after Pipeman publishes:**
 
-- **Confirm 0.1.30 is on the registry**, verifying published bytes against the audited commit per sprint 13's rule.
+- **Confirm 0.2.0 is on the registry**, verifying published bytes against the audited commit per sprint 13's rule.
 - **Run a transition and read what it prints.** `/sprint-start` in a scratch repo: confirm the notice names the files written and that they are in fact uncommitted afterwards.
 - **Amend a sprint file mid-`liveqa_live` and record a verdict.** Confirm the drift appears in the state history and the verdict is still accepted. **A refusal here is the finding.**
 - **The MCP outcome, whichever it is.** If a server is supplied, confirm a headless LiveQA reaches a browser tool. If not, confirm the message tells it what to configure — `TOOL NOT AVAILABLE` with no explanation is the state this sprint exists to end.
@@ -81,8 +91,8 @@ Two instances reported, both from one operator in one day across two projects; o
 ### Dependencies
 
 - **Blocks:** Nothing. All three are gaps in what the framework says, not in what it does.
-- **Blocked by:** Sprints 24 and 25 on the shared version line.
-- **External:** Findings A and B came from a downstream consumer, A from their Pipeman rather than their Master Controller. Finding C came from our own LiveQA on its first honest attempt at sprint 23's grant.
+- **Blocked by:** Sprints 24 and 25, both shipped. **This is the 0.2.0 release** — the last inward debt, with the version marker riding on it.
+- **External: a consumer must be told before this publishes that 0.2.0 is a milestone and not a breaking change**, since they pin and re-verify per published version. Findings A and B came from that same consumer, A from their Pipeman rather than their Master Controller. Finding C came from our own LiveQA on its first honest attempt at sprint 23's grant.
 
 ### Team Assignments
 

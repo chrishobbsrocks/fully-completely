@@ -160,8 +160,8 @@
     "27": {
       "title": "Make the sprint record durable at the moments people rely on it",
       "epic": "Honest reporting",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-27_make-the-sprint-record-durable-at-the-moments-people-rely-on-it.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-27_make-the-sprint-record-durable-at-the-moments-people-rely-on-it.md"
     }
   }
 }
