@@ -16,6 +16,25 @@ the code is ready, not that the user has decided to close it). Try to
 close early, or without that authorization, and it tells you exactly
 what's missing.
 
+## What 0.2.0 means
+
+**0.2.0 is a milestone release, not a breaking one.** Nothing about how
+you install, run, or configure this framework changes. Every change
+since 0.1.6 has been additive or corrective, and this release is no
+different — if you pin this package and re-verify your contract against
+every published version, there is nothing here that requires that work.
+
+The version number marks that the framework's own debts to itself are
+paid: [0.1.23](CHANGELOG.md) read what the package discloses about the
+people who build it and scrubbed what it found, [0.1.27](CHANGELOG.md)
+re-graded its own permission findings honestly rather than leaving
+fourteen of them cited as settled on evidence that didn't establish
+that, and this release makes the sprint record durable at the moments
+people actually rely on it — committed when a gate depends on it, and
+recorded rather than silently dropped when it changes underneath a gate
+mid-flight. See [CHANGELOG.md](CHANGELOG.md) for what every published
+version actually changed.
+
 ## What's here
 
 ```
