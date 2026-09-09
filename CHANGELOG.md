@@ -46,12 +46,19 @@ sprint be renamed.
 
 ## 0.1.28 — Sprint 24
 
-Close three gaps between shipping a commit and verifying what actually
-got served: a CI-status check wired into `/sprint-ship`, `/sprint-reship`,
-`/sprint-status`, and `/sprint-liveqa`; and the ship gate compares tree
-*content* rather than the raw commit SHA, so a legitimate Pipeman
-squash/rebase — which changes the SHA without changing a shipped byte —
-no longer false-fails.
+Give `cmd_liveqa` the same tree-content comparison `cmd_ship` gained in
+`0.1.14` — a bookkeeping-only difference between the commit Pipeman
+shipped and the commit actually deployed (its own state-file commit
+landing on top before a branch-tracking deploy) no longer refuses a valid
+LiveQA verdict, while a real product-code difference between them still
+does. `/sprint-ship` and `/sprint-reship` now also refuse over a red CI
+run for the exact commit being shipped, treating a run that finished
+without its steps executing the same as a failure; an undeterminable
+status (no CI configured, no run yet) does not gate, so a project with no
+CI at all doesn't become unshippable by accident. And an
+origin-ahead-of-record drift — the record trailing what's actually on
+`origin/main` — is now surfaced, never gated on, at `cmd_status` and
+everywhere `last_shipped_commit` is read.
 
 *Published as `0.1.28`, not the originally planned `0.1.25` — see the note
 at the top of this file.*
