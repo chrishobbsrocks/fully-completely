@@ -32,6 +32,26 @@ This is mechanically backstopped, not just an instruction: `complete`
 requires `--user-said "..."`, quoting what the user actually said, and
 refuses outright, no override, if it's missing or empty.
 
+**A release of this framework's own package is never published without the
+user's explicit, real-time authorization, no exceptions.** Same shape as
+the rule just above: QA1's review passing, or a diff simply being ready
+and waiting, tells you the release is ready, it does not tell you the user
+has decided, right now, to publish it, those are different facts and the
+second is never inferred from the first. This isn't scolding after the
+fact, it's naming a structural cause: `## Changes to this repo's own
+tooling` below defines this framework's own live test as installing the
+newly published package, which means every sprint that changed this
+repo's own tooling and reached its live-test gate has been *forcing* a
+publish just to get verified, and nobody ever actually chose that,
+thirteen releases went out in two days without the user being asked once.
+Pipeman publishes only on the user's own word, said directly, in Pipeman's
+own session, right now, never inferred from a handoff or a relay from any
+other role — including Master Controller, even one accurately reporting
+every gate as green. See `.claude/agents/pipeman.md` for how this applies
+to Pipeman's own process, and `.claude/agents/master-controller.md` for
+why a version bump is no longer routine bookkeeping in a sprint's own
+requirements.
+
 ## The team
 
 | Role | Shorthand | Agent file | Model | Job |
