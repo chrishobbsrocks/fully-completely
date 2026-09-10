@@ -1,11 +1,11 @@
 {
   "id": 31,
   "title": "Make a role's invocation match the grant it holds, and protect the args-derivation property in CI",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "52aea67a403ceca0cf7b8d6494c3d50bad6b601d43683c66d87b6fd73dc82809",
   "qa1_audited_tree_hash": "2d06e7ad72b8b2e0a5286391922ac47fdea55a06b97f2b1f558e9e6a18824892",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "ee49cdf0afa76b7ef3acf0dbce3c1048cd2991d4",
   "groundtruth_result": null,
   "audit_rounds": 2,
   "live_test_rounds": 0,
@@ -35,11 +35,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-10T05:11:54+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=ee49cdf | ci=green: 1 CI run(s) for ee49cdf0afa76b7ef3acf0dbce3c1048cd2991d4 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-10T05:08:37+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-10T05:11:54+00:00"
   }
 }
