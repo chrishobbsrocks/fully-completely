@@ -1,11 +1,11 @@
 {
   "id": 35,
   "title": "Make packaging fail-closed, and stop backups carrying what was scrubbed",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "72c6015ee188515921968cd733eaaac9ce2373cf235c85f9798d0879c8a0fe2d",
   "qa1_audited_tree_hash": "01c66fbe351fa8730991bc4dd76f8a4ccbe8fd7ff7bf613947d65624d7b1fa09",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "7d98cc9bef72d9ed19e0e7d929cc3cf213898519",
   "groundtruth_result": null,
   "audit_rounds": 1,
   "live_test_rounds": 0,
@@ -29,11 +29,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-10T17:27:36+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=7d98cc9 | ci=green: 1 CI run(s) for 7d98cc9bef72d9ed19e0e7d929cc3cf213898519 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-10T17:23:34+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-10T17:27:36+00:00"
   }
 }
