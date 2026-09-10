@@ -2276,7 +2276,57 @@ def cmd_complete(args) -> None:
 
 
 def cmd_abort(args) -> None:
+    """Sprint 33: the lifecycle's most destructive action -- moves the file
+    to 5-abandoned, marks the registry, burns the sprint id, makes
+    re-filing a human act -- used to have strictly less protection than
+    /sprint-complete, the least destructive one. Three defects, all fixed
+    here.
+
+    Req 1: the actor is no longer a hardcoded "human". Every other
+    command in this file logs a fixed string because each one is only
+    ever run by one specific role (cmd_ship -> "pipeman", cmd_complete ->
+    "dev-team"); abort has no such owner -- Out of Scope names exactly
+    why: every role's headless profile grants
+    Bash(python3 scripts/sprint_lifecycle.py *), so every role reaches
+    every subcommand, abort included. A fixed string here would just
+    replace one wrong assertion with another. CLAUDE_CODE_AGENT is this
+    file's own established way of asking "which role is actually running
+    right now" (see save_state()'s last_claim, sprint 25) -- reused here
+    for the identical question, on the identical footing as every other
+    command's actor: a truthful statement of who acted, not a guess.
+
+    Req 2: --user-said, same mechanical shape and same non-overridability
+    as cmd_complete's own gate -- checked before the lock and before any
+    state or file mutation, argument validation independent of sprint
+    state. No flag, environment variable, or code path bypasses it.
+
+    Req 5: the refusal names the Req 4 alternative by its actual command,
+    not "see the docs" -- a role that hit this gate because IT (not a
+    human) determined the sprint isn't buildable has somewhere to go
+    without reading anything else, which is what makes gating abort
+    admissible under this framework's own transition-precondition rule
+    (a precondition must be clearable by the role that hits it, or ship
+    with a documented cross-role recovery path -- this is the former).
+
+    Req 3: --reason is now required and non-empty, same ordering as
+    --user-said. "(none given)" can no longer be produced."""
+    user_said = resolve_text(args.user_said, args.user_said_file)
+    if not user_said.strip():
+        die("--user-said is required and must be non-empty. Quote what the user actually told "
+            "you, in this session, that authorizes abandoning this sprint right now -- this is "
+            "the lifecycle's most destructive action: it moves the file to 5-abandoned, marks "
+            "the registry, burns the sprint id, and makes re-filing a human act. No override "
+            "exists for this check. If a ROLE, not a human, has determined this sprint isn't "
+            "buildable, that determination is not grounds to abort it yourself -- run "
+            f"`/sprint-block {args.id} --reason \"...\"` instead, which returns the sprint to "
+            "the planner with your analysis intact, without destroying anything.")
+
     reason = resolve_text(args.reason, args.reason_file)
+    if not reason.strip():
+        die("--reason is required and must be non-empty. A sprint may not be abandoned without "
+            "a stated cause.")
+
+    actor = os.environ.get("CLAUDE_CODE_AGENT") or "unknown"
     with locked("registry"), locked(f"sprint-{args.id}"):
         reg = load_registry()
         entry = reg["sprints"].get(str(args.id))
@@ -2295,9 +2345,71 @@ def cmd_abort(args) -> None:
         if state_path(args.id).exists():
             state = load_state(args.id)
             state["phase"] = "aborted"
-            log_event(state, "human", "aborted", reason)
+            log_event(state, actor, "aborted", reason)
             save_state(args.id, state)
-    print(f"Sprint {args.id} aborted. Reason: {reason or '(none given)'}")
+    print(f"Sprint {args.id} aborted. Reason: {reason}")
+
+
+def cmd_block(args) -> None:
+    """Sprint 33, Req 4: the non-destructive alternative to abort, for a
+    role that correctly determines a sprint is not currently buildable
+    (real content doesn't exist, a required decision is unmade) without
+    that being grounds to abandon it. Returns the sprint to the planner:
+    the sprint id is preserved (never burned), the file is not moved to
+    5-abandoned, and the role's own stated analysis is recorded in
+    history where Master Controller can read it to repair the file --
+    "this sprint is not buildable and here is why" is exactly what
+    abandoning used to throw away.
+
+    Moves the file to 4-blocked/, mirroring every sibling transition's
+    own established pattern (new -> todo, start -> in_progress, complete
+    -> done, abort -> abandoned) -- STATUS_FOLDERS["blocked"] has existed
+    since this constant was defined and nothing had ever used it.
+    Re-filing is already free: cmd_start() has no phase guard and always
+    moves whatever the registry currently points at into 2-in-progress/,
+    so /sprint-start <id> on a blocked sprint works unchanged, once
+    Master Controller has read the analysis and fixed the file (Req 6).
+
+    Same actor derivation as cmd_abort, for the identical reason -- this
+    command has no single owning role either. No --user-said: blocking
+    is not destructive, so it does not carry cmd_complete/cmd_abort's
+    human-authorization gate, only a required, non-empty analysis of
+    why."""
+    reason = resolve_text(args.reason, args.reason_file)
+    if not reason.strip():
+        die("--reason is required and must be non-empty. State the analysis of why this sprint "
+            "isn't currently buildable -- this is what Master Controller reads to repair it, and "
+            "it is the whole point of blocking rather than abandoning.")
+
+    actor = os.environ.get("CLAUDE_CODE_AGENT") or "unknown"
+    with locked("registry"), locked(f"sprint-{args.id}"):
+        reg = load_registry()
+        entry = reg["sprints"].get(str(args.id))
+        if not entry:
+            die(f"Sprint {args.id} not found in registry.")
+
+        src = ROOT / entry["file"]
+        dest_dir = SPRINTS_DIR / STATUS_FOLDERS["blocked"]
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        if src.exists():
+            dest = dest_dir / src.name
+            if src != dest:
+                shutil.move(str(src), str(dest))
+                entry["file"] = str(dest.relative_to(ROOT))
+            update_frontmatter_status(dest, "blocked")
+        entry["status"] = "blocked"
+        save_registry(reg)
+
+        state = load_state(args.id)
+        state["phase"] = "blocked"
+        log_event(state, actor, "blocked", reason)
+        save_state(args.id, state)
+    print(f"Sprint {args.id} blocked, returned to the planner. Sprint id and analysis preserved, "
+          "nothing moved to 5-abandoned.")
+    print(f"Analysis: {reason}")
+    print("Master Controller: read the analysis above (or /sprint-status "
+          f"{args.id} --verbose), repair the sprint file, then Dev Team runs /sprint-start "
+          f"{args.id} again to resume building.")
 
 
 DONE_FILENAME_SUFFIX = "--done"  # matches cmd_complete's own src.stem + "--done" + src.suffix
@@ -2921,9 +3033,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("abort")
     s.add_argument("id", type=int)
-    s.add_argument("--reason", default="")
+    s.add_argument("--user-said", default="",
+                    help="Required. Quote what the user actually told you, in this session, "
+                    "that authorizes abandoning this sprint right now. Same non-overridable "
+                    "gate as /sprint-complete's own --user-said -- abort is this lifecycle's "
+                    "most destructive action.")
+    s.add_argument("--user-said-file", help="Read --user-said from this file instead of the command line.")
+    s.add_argument("--reason", default="", help="Required. Why this sprint is being abandoned.")
     s.add_argument("--reason-file", help="Read the reason from this file instead of the command line.")
     s.set_defaults(func=cmd_abort)
+
+    s = sub.add_parser("block",
+                        help="Sprint 33, Req 4: the non-destructive alternative to abort, for a "
+                        "sprint that isn't currently buildable. Returns it to the planner -- "
+                        "sprint id preserved, never moved to 5-abandoned, your analysis recorded "
+                        "for Master Controller to read and repair the file.")
+    s.add_argument("id", type=int)
+    s.add_argument("--reason", default="",
+                    help="Required. Your analysis of why this sprint isn't currently buildable "
+                    "-- what Master Controller needs to repair it.")
+    s.add_argument("--reason-file", help="Read the reason from this file instead of the command line.")
+    s.set_defaults(func=cmd_block)
 
     s = sub.add_parser("rename",
                         help="Sprint 25, Req 4: updates the registry entry, the sprint file's "

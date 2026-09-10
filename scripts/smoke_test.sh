@@ -1028,7 +1028,10 @@ MISSING_FILE_PATH="does-not-exist-$(date +%s).txt"
 
 SPRINT_MISSING_FILE=$(new_sprint "Missing file sprint")
 $SCRIPT start "$SPRINT_MISSING_FILE" > /dev/null
-$SCRIPT abort "$SPRINT_MISSING_FILE" --reason-file "$MISSING_FILE_PATH" > /tmp/out.txt 2>&1 && \
+# Sprint 33, Req 2: --user-said is now checked before --reason, so a
+# valid one must be supplied here to reach the --reason-file read this
+# case actually exercises.
+$SCRIPT abort "$SPRINT_MISSING_FILE" --user-said "yes, abandon it" --reason-file "$MISSING_FILE_PATH" > /tmp/out.txt 2>&1 && \
   fail "abort succeeded reading a --reason-file that doesn't exist (test setup broken)" || true
 grep -qF "Could not read '$MISSING_FILE_PATH'" /tmp/out.txt || fail "abort's missing-reason-file message doesn't name the path"
 grep -qi "traceback" /tmp/out.txt && fail "abort's missing-reason-file case raised a raw traceback instead of failing legibly"
@@ -1748,5 +1751,90 @@ echo "$LIVEQA_TIPMOVE_OUT" | grep -q "carries 1 commit beyond this sprint's own 
 echo "$LIVEQA_TIPMOVE_OUT" | grep -qF "${TIPMOVE_DOCS_COMMIT:0:7}" || \
   fail "liveqa's tip-move warning doesn't name the actual commit that landed (Req 3: 'say which commits landed since') -- output: $LIVEQA_TIPMOVE_OUT"
 rm -f "docs/sprints/1-todo/tipmove-placeholder-${SPRINT_TIPMOVE}.md"
+
+echo "== sprint 33, Req 2: abort refuses with no --user-said, before any state or file mutation, and names /sprint-block as the alternative =="
+SPRINT_ABORT=$(new_sprint "Abort gate sprint")
+$SCRIPT start "$SPRINT_ABORT" > /dev/null
+$SCRIPT abort "$SPRINT_ABORT" --reason "no real content exists" \
+  > /tmp/out.txt 2>&1 && fail "abort succeeded with no --user-said -- Req 2 must refuse, no override" || true
+grep -q "\-\-user-said is required and must be non-empty" /tmp/out.txt || fail "abort's missing-user-said refusal message is missing"
+grep -qF "/sprint-block ${SPRINT_ABORT} --reason" /tmp/out.txt || fail "abort's refusal doesn't name /sprint-block as the alternative (Req 5)"
+$SCRIPT status "$SPRINT_ABORT" 2>&1 | grep -q "Phase: dev_build" || fail "a refused abort must not have mutated state"
+ABORT_REFUSED_FILE=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_ABORT}']['file'])")
+echo "$ABORT_REFUSED_FILE" | grep -q "2-in-progress/" || fail "a refused abort must not have moved the sprint file -- got: $ABORT_REFUSED_FILE"
+[ -f "$ABORT_REFUSED_FILE" ] || fail "the registry's recorded file path doesn't exist on disk after a refused abort: $ABORT_REFUSED_FILE"
+rm -f /tmp/out.txt
+
+echo "== sprint 33, Req 3: abort refuses with --user-said but no --reason -- '(none given)' can no longer be produced =="
+$SCRIPT abort "$SPRINT_ABORT" --user-said "yes, abandon it" \
+  > /tmp/out.txt 2>&1 && fail "abort succeeded with no --reason -- Req 3 must refuse" || true
+grep -q "\-\-reason is required and must be non-empty" /tmp/out.txt || fail "abort's missing-reason refusal message is missing"
+rm -f /tmp/out.txt
+
+echo "== sprint 33, Req 1: a successful abort records the REAL actor, never the hardcoded 'human' =="
+CLAUDE_CODE_AGENT="dev-team-1" $SCRIPT abort "$SPRINT_ABORT" --user-said "yes, abandon it" --reason "no real content exists" \
+  > /tmp/out.txt 2>&1 || fail "abort with both arguments present should have succeeded -- output: $(cat /tmp/out.txt)"
+grep -q "none given" /tmp/out.txt && fail "'(none given)' must no longer be producible (Req 3)"
+python3 -c "
+import json
+state = json.load(open('docs/sprints/state/sprint-${SPRINT_ABORT}.json'))
+last = state['history'][-1]
+assert last['event'] == 'aborted', f'expected an aborted event, got {last}'
+assert last['actor'] == 'dev-team-1', f'actor must be the real CLAUDE_CODE_AGENT value, not \"human\": {last}'
+"
+$SCRIPT status "$SPRINT_ABORT" 2>&1 | grep -q "Phase: dev_build" && fail "abort should have moved the sprint out of dev_build"
+rm -f /tmp/out.txt
+
+echo "== sprint 33, Req 4: block refuses with no --reason, and requires no --user-said (non-destructive) =="
+SPRINT_BLOCK=$(new_sprint "Block sprint")
+$SCRIPT start "$SPRINT_BLOCK" > /dev/null
+$SCRIPT block "$SPRINT_BLOCK" \
+  > /tmp/out.txt 2>&1 && fail "block succeeded with no --reason -- must refuse" || true
+grep -q "\-\-reason is required and must be non-empty" /tmp/out.txt || fail "block's missing-reason refusal message is missing"
+rm -f /tmp/out.txt
+
+echo "== sprint 33, Req 4: block returns the sprint to the planner -- id preserved, never moved to 5-abandoned, analysis retrievable, real actor recorded =="
+CLAUDE_CODE_AGENT="qa1" $SCRIPT block "$SPRINT_BLOCK" --reason "cards.json content does not exist yet, cannot build without it" \
+  > /tmp/out.txt 2>&1 || fail "block with a real reason should have succeeded -- output: $(cat /tmp/out.txt)"
+grep -q "returned to the planner" /tmp/out.txt || fail "block's success message is missing"
+grep -q "cards.json content does not exist" /tmp/out.txt || fail "block's success output doesn't echo the analysis"
+
+BLOCK_FILE=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_BLOCK}']['file'])")
+echo "$BLOCK_FILE" | grep -q "4-blocked/" || fail "block did not move the file to docs/sprints/4-blocked/ -- got: $BLOCK_FILE"
+echo "$BLOCK_FILE" | grep -q "5-abandoned" && fail "block must never move anything to 5-abandoned"
+[ -f "$BLOCK_FILE" ] || fail "the registry's recorded file path doesn't actually exist on disk: $BLOCK_FILE"
+
+python3 -c "
+import json
+reg = json.load(open('docs/sprints/registry.json'))
+entry = reg['sprints']['${SPRINT_BLOCK}']
+assert entry['status'] == 'blocked', f'registry status must be blocked, not: {entry[\"status\"]}'
+assert entry['status'] != 'abandoned'
+state = json.load(open('docs/sprints/state/sprint-${SPRINT_BLOCK}.json'))
+assert state['phase'] == 'blocked', f'phase must be blocked: {state}'
+assert state['id'] == ${SPRINT_BLOCK}, 'sprint id must be preserved'
+last = state['history'][-1]
+assert last['event'] == 'blocked', f'expected a blocked event: {last}'
+assert last['actor'] == 'qa1', f'actor must be the real CLAUDE_CODE_AGENT value: {last}'
+assert 'cards.json content does not exist' in last['detail'], f'analysis must be recorded in history: {last}'
+"
+
+BLOCK_STATUS_OUT=$($SCRIPT status "$SPRINT_BLOCK" --verbose 2>&1)
+echo "$BLOCK_STATUS_OUT" | grep -q "cards.json content does not exist" || \
+  fail "the stated analysis must be retrievable from /sprint-status --verbose alone (Req 4's own LiveQA criterion) -- output: $BLOCK_STATUS_OUT"
+rm -f /tmp/out.txt
+
+echo "== sprint 33, Req 6: re-filing a blocked sprint is /sprint-start again, with no special handling =="
+$SCRIPT start "$SPRINT_BLOCK" > /tmp/out.txt 2>&1 || fail "re-starting a blocked sprint should succeed like any other start -- output: $(cat /tmp/out.txt)"
+python3 -c "
+import json
+reg = json.load(open('docs/sprints/registry.json'))
+entry = reg['sprints']['${SPRINT_BLOCK}']
+assert entry['status'] == 'in_progress', f'restarted sprint should be in_progress: {entry[\"status\"]}'
+assert '2-in-progress/' in entry['file'], f'restarted sprint file should be back in 2-in-progress/: {entry[\"file\"]}'
+state = json.load(open('docs/sprints/state/sprint-${SPRINT_BLOCK}.json'))
+assert state['phase'] == 'dev_build', f'restarted sprint should be back in dev_build: {state[\"phase\"]}'
+"
+rm -f /tmp/out.txt
 
 echo "ALL SMOKE TESTS PASSED"
