@@ -41,11 +41,17 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=283a944 | ci=green: 1 CI run(s) for 283a9443e95dc338e0d1df36ecd4c6462d33ab02 all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-10T15:13:22+00:00",
+      "actor": "verify-publish",
+      "event": "gitHead_check",
+      "detail": "MATCH: registry gitHead=283a9443e95dc338e0d1df36ecd4c6462d33ab02 == last_shipped_commit=283a9443e95dc338e0d1df36ecd4c6462d33ab02 for fully-completely@0.2.6."
     }
   ],
   "last_claim": {
     "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
     "claude_agent": "pipeman",
-    "ts": "2026-09-10T15:06:33+00:00"
+    "ts": "2026-09-10T15:13:22+00:00"
   }
 }
