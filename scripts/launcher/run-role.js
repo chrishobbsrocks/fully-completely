@@ -1415,7 +1415,22 @@ function headlessLaunchArgs(role, prompt, { bare, settings, root = ROOT } = {}) 
   const definition = { description: (meta && meta.description) || role.label, prompt: body };
   if (meta && meta.model) definition.model = meta.model;
   const agentsJson = JSON.stringify({ [role.id]: definition });
-  const base = ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json', ...headlessPermissionArgs(role)];
+  // Sprint 31, Req 4 (QA1 round 1 finding): `root` used to reach
+  // readDeclaredMcpConfig(root) four lines below but never here --
+  // pre-existing since sprint 12 (4372ad0), harmless in production
+  // (which always passes ROOT, so behaviour there is unchanged), but it
+  // silently defeated a scratch `root` from ever reaching
+  // readDeclaredTestCommand() inside headlessPermissionArgs(), which is
+  // exactly the gap that let the args-derivation property go
+  // unprotected: a declared test command is the only thing that makes
+  // the profile's own allowedTools and the args actually passed to the
+  // child diverge in this repo, and nothing could declare one anywhere
+  // headlessPermissionArgs() could see it. Verified no fallout: threading
+  // this through changes nothing for any existing call (production
+  // default root = ROOT unchanged; the previous test suite's own root
+  // overrides never exercised needsTestCommand, so nothing there
+  // depended on the old, unthreaded behaviour).
+  const base = ['--agent', role.id, '--agents', agentsJson, '-p', '--output-format', 'json', ...headlessPermissionArgs(role, root)];
   // Sprint 27, Req 4: LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS (sprint 23)
   // reaches nothing without a real MCP server behind it -- confirmed
   // directly, this sprint, the same way sprint 23 established the

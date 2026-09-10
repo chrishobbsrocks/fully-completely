@@ -1663,6 +1663,48 @@ test('run-role: emitPermissionRecord (Req 3) reports instructedCommandForms as a
   assert.deepStrictEqual(record.instructedCommandForms, []);
 });
 
+// Sprint 31, Req 4 (QA1 round 1 finding): in THIS repo's default config —
+// no fullyCompletely.testCommand declared, no ownedRepository grant — the
+// profile's own allowedTools (HEADLESS_PERMISSION_PROFILES[role].allowedTools
+// joined) and the args actually passed to the child are byte-identical
+// for every role, which means no comparison between a record and the
+// child's real argv, including the subprocess test above, can tell a
+// correctly args-derived record apart from one silently reassembled from
+// HEADLESS_PERMISSION_PROFILES — Req 4's own named defect ("reassembled
+// from a second source"). This test exists specifically to make the two
+// sources diverge (a declared test command adds a THIRD grant entry that
+// only the args-derived path can see) and assert the record still
+// matches the real args exactly, catching the second-source mutation the
+// other tests structurally cannot.
+test('run-role: headlessLaunchArgs (Sprint 31 Req 4) derives allowedTools from the REAL args passed to the child, not a rebuild from HEADLESS_PERMISSION_PROFILES -- the two sources are made to actually differ via a declared test command', () => {
+  withScratchSettings('{"fullyCompletely.testCommand": "node scripts/launcher_test.js"}', (dir) => {
+    let args;
+    const lines = captureStderr(() => {
+      args = headlessLaunchArgs(QA1_ROLE, 'p', { root: dir });
+    });
+    const i = args.indexOf('--allowedTools');
+    assert.notStrictEqual(i, -1, 'test setup: qa1 must receive an --allowedTools flag');
+    const argsAllowedTools = args[i + 1];
+
+    const profileOnly = HEADLESS_PERMISSION_PROFILES.qa1.allowedTools.join(' ');
+    assert.notStrictEqual(
+      argsAllowedTools,
+      profileOnly,
+      'test setup: a declared test command must make the real args differ from the bare profile -- ' +
+        'if this fails, `root` is not reaching headlessPermissionArgs() and this test cannot distinguish anything'
+    );
+    assert.ok(argsAllowedTools.includes('Bash(node scripts/launcher_test.js *)'), 'the real args must carry the dynamically-added test-command grant');
+
+    const record = JSON.parse(lines.find((l) => l.startsWith('PERMISSION_RECORD: ')).slice('PERMISSION_RECORD: '.length));
+    assert.strictEqual(record.allowedTools, argsAllowedTools, 'record.allowedTools must equal the REAL args value, including the dynamically-added grant');
+    assert.notStrictEqual(
+      record.allowedTools,
+      profileOnly,
+      "record must not have been reassembled from HEADLESS_PERMISSION_PROFILES alone -- Req 4's exact defect"
+    );
+  });
+});
+
 test('run-role: headlessLaunchArgs (Req 1) prepends the instruction for every real role holding a script-invocation grant, and it precedes the task prompt', () => {
   for (const role of RUN_ROLE_ROLES) {
     const args = headlessLaunchArgs(role, 'THE TASK PROMPT');
