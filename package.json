@@ -1,10 +1,33 @@
 {
   "name": "fully-completely",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Six-role Claude Code sprint workflow, with enforcement mechanics that actually block a sprint from closing until both QA gates pass.",
   "bin": {
     "fully-completely": "scripts/install.js"
   },
+  "files": [
+    ".claude/agents",
+    ".claude/commands",
+    "CLAUDE.md",
+    "CHANGELOG.md",
+    "docs/HUMAN_OVERRIDE.md",
+    "docs/sprints/0-backlog/.gitkeep",
+    "docs/sprints/1-todo/.gitkeep",
+    "docs/sprints/2-in-progress/.gitkeep",
+    "docs/sprints/3-done/.gitkeep",
+    "docs/sprints/4-blocked/.gitkeep",
+    "docs/sprints/5-abandoned/.gitkeep",
+    "docs/sprints/state/.gitkeep",
+    "scripts/baselines",
+    "scripts/dev2_worktree.sh",
+    "scripts/install.js",
+    "scripts/launcher",
+    "scripts/run-lifecycle.js",
+    "scripts/smoke_test.sh",
+    "scripts/sprint_lifecycle.py",
+    "scripts/worktree_test.sh",
+    "templates/sprint-template.md"
+  ],
   "scripts": {
     "baselines:generate": "node scripts/baselines/generate.js",
     "baselines:check": "node scripts/baselines/check-staleness.js"

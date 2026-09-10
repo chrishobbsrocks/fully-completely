@@ -1,48 +1,37 @@
-# IMPORTANT: once this file exists, npm uses it INSTEAD of .gitignore for
-# `npm pack`/`npm publish` — it does not merge the two. So this repeats
-# .gitignore's own exclusions below, rather than only adding new ones, to
-# avoid silently un-excluding docs/sprints/.locks/ and the usual OS/Python
-# cruft the moment this file was added (confirmed by hand: adding only the
-# new patterns below and re-running `npm pack --dry-run` brought
-# docs/sprints/.locks/*.lock back into the tarball).
-__pycache__/
-*.pyc
-.DS_Store
-docs/sprints/.locks/
-
-# Everything below is new for sprint 2. Without this file, `npm pack`
-# falls back to .gitignore, which deliberately does NOT exclude
-# docs/sprints/ (see CLAUDE.md's "Sprint data persistence" — that content
-# is meant to be tracked and committed for a downstream *project* using
-# this framework). But this repo IS the framework's own source, and its
-# own docs/sprints/ carries this repo's real, ongoing sprint history —
-# requirements, QA1 audit notes, LiveQA findings. Discovered via sprint
-# 2's Req 7 tarball verification: every `npm pack` was shipping that
-# history to every npm install, unnoticed since the very first publish,
-# because nothing had ever looked inside the tarball. install.js's own
-# docs/sprints handling only needs the empty skeleton (the phase folders'
-# .gitkeep placeholders) to seed a fresh target project — never this
-# repo's actual sprint content — so only the content is excluded here,
-# not the folders that hold it.
-docs/sprints/registry.json
-docs/sprints/state/*.json
-docs/sprints/*/*.md
-
-# Personal, repo-local Claude Code permission settings — not part of the
-# framework being installed, and install.js never reads this path either.
-.claude/settings.local.json
-
-# Sprint 25, Req 1: run-role.js's own best-effort per-machine role-launch
-# record (scripts/launcher/role-claims.js) — created at runtime, never
-# meant to ship, same category as settings.local.json above.
-.claude/role-claims.json
-
-# Sprint 22: this record names two real, already-published disclosure
-# findings by their exact content (a client/project identifier, the
-# author's own real local absolute path) so a decision can actually be
-# made about them. Shipping the record itself in every future release
-# would make it a second, ongoing vector for the same two strings on top
-# of the original leak — the opposite of "stopped from recurring." Unlike
-# docs/sprint-12-permission-scope-findings.md (pure mechanism findings,
-# nothing personally identifying), this one is deliberately excluded.
-docs/sprint-22-disclosure-sweep.md
+# Sprint 35, Req 1a: this file is now intentionally inert, kept only so
+# the reasoning is discoverable in the one place someone reasoning about
+# packaging would look. package.json's own "files" array is the sole
+# packaging mechanism as of this sprint — established by inspecting real
+# packed tarballs, not by reasoning about precedence:
+#
+#   - A `files` array is a complete allowlist on its own. A path NOT
+#     listed there does not ship, whether or not this file exists,
+#     whether or not it says anything about that path, and regardless of
+#     .gitignore (which `files`, unlike this file, never falls back to).
+#     Confirmed directly: docs/sprints/ content that was never in `files`
+#     did not ship in a real `npm pack`, with no .npmignore present at
+#     all.
+#   - This file does NOT filter inside a directory `files` already lists
+#     wholesale. Confirmed directly: a file excluded here, sitting inside
+#     a directory package.json's `files` array includes as a whole entry
+#     (e.g. scripts/launcher), still shipped in a real, non-dry-run
+#     tarball. This is exactly the "silently fight" scenario Req 1a
+#     named as the risk: had docs/sprints stayed a single directory entry
+#     in `files` with this file still relied on to exclude real sprint
+#     content inside it, that content would ship, silently, the moment
+#     any of it existed at publish time — the old fail-open defect,
+#     recreated one layer up. Fixed instead by never listing docs/sprints
+#     as a directory in `files` at all: it lists the seven phase-folder
+#     .gitkeep placeholders install.js actually reads, individually, and
+#     nothing else — SPRINT_SKELETON_FILES in scripts/install.js is the
+#     same list, which is what makes this repo's own real sprint content
+#     structurally unable to ship regardless of what this file says.
+#
+# Kept rather than deleted so a future "why is there no .npmignore"
+# question finds this instead of silence. The __pycache__/*.pyc/.DS_Store
+# patterns this file used to carry needed no replacement either:
+# __pycache__ and *.pyc were never listed in `files` and so were already
+# unreachable by the same allowlist logic, and .DS_Store is excluded by
+# npm's own built-in defaults independent of any ignore file — confirmed
+# by packing a real tarball with no .npmignore present and a planted
+# .DS_Store inside an included directory; it did not ship.

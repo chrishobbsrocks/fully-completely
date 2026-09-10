@@ -90,6 +90,34 @@
 // prints far more em dashes across nearly every command, which would
 // mojibake the same way on the same console — that's a real, separate,
 // much larger finding, out of scope for this Req and not fixed here.
+//
+// Sprint 35, Req 1: package.json's "files" array replaces a fail-open
+// denylist (.npmignore, kept only as an inert explanatory note — see
+// that file) with an allowlist derived from every SOURCE_ROOT path this
+// file actually reads — grep this file for "SOURCE_ROOT" to re-derive it
+// directly rather than trust the array matches this comment. Two
+// deliberate exceptions, both NOT read by this file at runtime, both
+// noted here since Req 1a asks for the reasoning to live where the next
+// person will find it:
+//   - CHANGELOG.md: a real, consumer-facing document (README.md's own
+//     "What 0.2.0 means" section points at it) that anyone downloading
+//     this package should be able to read, even though nothing in this
+//     installer ever opens it.
+//   - scripts/baselines/generate.js and check-staleness.js: this file
+//     only ever reads scripts/baselines/user-owned-content.json
+//     (BASELINES_PATH below), never the two scripts that produce and
+//     verify it — but scripts/verify-tarball.sh's own pre-publish check
+//     runs check-staleness.js FROM THE UNPACKED TARBALL specifically (to
+//     verify what actually ships, not this repo's live source), and that
+//     script requires generate.js in turn. Omitting either would not
+//     break an installed project; it would silently break Pipeman's own
+//     release-verification step the next time this ships, discovered
+//     directly by running this sprint's own tarball build before writing
+//     this comment, not assumed. Shipping the whole scripts/baselines
+//     directory rather than enumerating exactly these three files means
+//     a future file added there (a second generator, a second table)
+//     doesn't silently drop out of the package the way an exact list
+//     would.
 const fs = require('fs');
 const path = require('path');
 const { hasComments, parseJsonc } = require('./launcher/jsonc');
@@ -175,6 +203,55 @@ const BACKUP_MARKER = '.fc-bak-';
 
 function isBackupPath(relPath) {
   return path.basename(relPath).includes(BACKUP_MARKER);
+}
+
+// Sprint 35, Req 3/3b: a full walk of DEST_ROOT for any file whose name
+// carries BACKUP_MARKER, at the END of the run — not a tally of what
+// THIS run itself backed up (`replaced`/`removed` already cover that).
+// Req 3b's own reasoning: a project that upgraded months ago already
+// holds a `<file>.fc-bak-<old>` from that run and gets no NEW backup from
+// a clean upgrade today, so counting only this run's own writes would
+// silently miss exactly the population this report exists for — the
+// scan has to find what's already on disk, regardless of when it got
+// there. Skips `.git` and `node_modules`: a backup is only ever written
+// as a sibling of a framework-owned or tracked user-owned path (see
+// BACKUP_MARKER's own comment above), which never resolves inside
+// either, and both can be enormous in a real project — walking them
+// would be pure cost for a result that's always empty. Symlinks are not
+// followed, same reasoning as collectPaths() above: this only reports,
+// it never opens or deletes anything it finds, but a symlink under
+// either excluded directory could still point somewhere expensive or
+// unexpected to traverse.
+const BACKUP_SCAN_EXCLUDE_DIRS = new Set(['.git', 'node_modules']);
+
+function findSurvivingBackups(root) {
+  const found = [];
+  function walk(dir) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory() && BACKUP_SCAN_EXCLUDE_DIRS.has(entry.name)) continue;
+      const abs = path.join(dir, entry.name);
+      let st;
+      try {
+        st = fs.lstatSync(abs);
+      } catch {
+        continue;
+      }
+      if (st.isSymbolicLink()) continue;
+      if (st.isDirectory()) {
+        walk(abs);
+      } else if (entry.name.includes(BACKUP_MARKER)) {
+        found.push(path.relative(root, abs));
+      }
+    }
+  }
+  walk(root);
+  return found.sort();
 }
 
 const VERSION_MARKER_PATH = path.join(DEST_ROOT, '.claude', 'fully-completely-version');
@@ -875,7 +952,16 @@ function mergeGitignore() {
 
   const relPath = '.gitignore';
   const destPath = path.join(DEST_ROOT, relPath);
-  const block = ['docs/sprints/.locks/'];
+  // Sprint 35, Req 2: BACKUP_MARKER files are written as siblings of the
+  // original (see its own comment above) and were never covered by this
+  // block, so a target project running `git add -A` commits the PREVIOUS
+  // version's content of whatever just got upgraded -- sprint 4's own
+  // unclosed finding: LiveQA verified a client name was gone from
+  // session.js and then found it alive next door in exactly such a
+  // backup. Correct independently of that disclosure, since a backup
+  // should never be committable in any project, but that incident is the
+  // reason this line exists rather than something else.
+  const block = ['docs/sprints/.locks/', `*${BACKUP_MARKER}*`];
   let existingLines = [];
   let existed = fs.existsSync(destPath);
   if (existed) {
@@ -886,7 +972,21 @@ function mergeGitignore() {
     if (existed) skipped.push(`${relPath} (already has the lines this framework needs)`);
     return;
   }
-  const addition = ['', '# Fully Completely (added by scripts/install.js)', ...missing, ''].join('\n');
+  // Sprint 35 (found while adding the second block entry above -- a
+  // scratch fixture with only the ORIGINAL line present, needing the NEW
+  // one appended, is exactly what makes this branch run for the first
+  // time on a CRLF file): this always joined with a bare '\n', unlike
+  // removeDeadGitignoreLines() right above, which already detects and
+  // preserves the file's own line ending. A bare '\n' appended into a
+  // CRLF file doesn't corrupt anything git or a text editor can't
+  // handle, but it does silently mix line endings in a file this
+  // installer itself just wrote to -- the same class of thing Req 4
+  // (sprint 14) fixed for this exact file's dash characters. Same
+  // detection, same fix, applied here too rather than left as a second
+  // instance of a bug already found and fixed once in this file.
+  const rawExisting = existed ? fs.readFileSync(destPath, 'utf8') : '';
+  const eol = rawExisting.includes('\r\n') ? '\r\n' : '\n';
+  const addition = ['', '# Fully Completely (added by scripts/install.js)', ...missing, ''].join(eol);
   fs.appendFileSync(destPath, existed ? addition : addition.trimStart());
   copied.push(existed ? `${relPath} (appended ${missing.length} line(s))` : relPath);
 }
@@ -989,6 +1089,20 @@ section('Copied', copied);
 section('Already present, unchanged', skipped);
 section('Notes', notes);
 section('Conflicts - left untouched, review by hand', conflicts);
+// Sprint 35, Req 3: every *.fc-bak-* file present at DEST_ROOT right now,
+// not only ones this run just wrote -- see findSurvivingBackups()'s own
+// comment for why an older, pre-existing backup is exactly the case this
+// exists to surface. Req 3a: report only, nothing above this line (or
+// anywhere in this file) ever unlinks a backup path.
+const survivingBackups = findSurvivingBackups(DEST_ROOT);
+section('Backup files present, from any past upgrade (report only, nothing deleted)', survivingBackups);
+if (survivingBackups.length > 0) {
+  console.log(
+    '  Each holds the PREVIOUS version\'s content from when it was replaced or removed. Safe to ' +
+      'delete by hand once you are satisfied with the current version; nothing here removes them ' +
+      'for you.'
+  );
+}
 console.log(
   '\nBefore first running the launcher: log in to Claude once, in a normal ' +
     "terminal - run 'claude', complete login, then exit. The launcher's " +
