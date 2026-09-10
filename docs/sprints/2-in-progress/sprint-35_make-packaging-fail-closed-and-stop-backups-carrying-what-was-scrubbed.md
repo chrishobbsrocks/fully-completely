@@ -2,7 +2,7 @@
 id: 35
 title: "Make packaging fail-closed, and stop backups carrying what was scrubbed"
 epic: "Framework rules and distribution"
-status: todo
+status: in_progress
 created: 2026-09-10T16:35:33+00:00
 ---
 
