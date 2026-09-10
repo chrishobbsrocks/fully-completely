@@ -1,5 +1,5 @@
 {
-  "next_id": 35,
+  "next_id": 36,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -204,6 +204,12 @@
       "epic": "Sprint record durability",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-34_give-dev-team-2-s-worktree-a-documented-way-back-so-a-close-cannot-strand-on-a-branch-nobody-reads--done.md"
+    },
+    "35": {
+      "title": "Make packaging fail-closed, and stop backups carrying what was scrubbed",
+      "epic": "Framework rules and distribution",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-35_make-packaging-fail-closed-and-stop-backups-carrying-what-was-scrubbed.md"
     }
   }
 }
