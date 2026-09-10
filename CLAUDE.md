@@ -153,8 +153,11 @@ either stages what it just created — `git add <path>` for the new and
 changed paths — before committing. QA1's `/sprint-qa1` and LiveQA's
 `/sprint-liveqa` are different: each only ever modifies its sprint's own
 already-tracked `docs/sprints/state/sprint-<N>.json`, nothing new to add,
-so the commit is `git commit docs/sprints/state/sprint-<N>.json` with no
-`git add` step at all. That's deliberate, not a shortcut someone skipped:
+so the commit is `git commit -m "..." docs/sprints/state/sprint-<N>.json`
+with no `git add` step at all — `-m` is required here even though it's
+easy to drop from an otherwise-minimal example: with no tty (every Bash
+tool invocation), a message-less `git commit` aborts with "Aborting
+commit due to empty commit message" and leaves the file uncommitted. That's deliberate, not a shortcut someone skipped:
 a pathspec commit with no staging step can only ever capture the path
 named, so it's structurally incapable of sweeping up a concurrent
 session's unrelated uncommitted work the way a broader `git add -A` or
