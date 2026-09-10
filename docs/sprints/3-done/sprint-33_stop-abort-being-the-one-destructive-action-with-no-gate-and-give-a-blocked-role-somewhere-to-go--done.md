@@ -2,7 +2,7 @@
 id: 33
 title: "Stop abort being the one destructive action with no gate, and give a blocked role somewhere to go"
 epic: "Sprint record durability"
-status: in_progress
+status: done
 created: 2026-09-10T05:55:49+00:00
 ---
 
