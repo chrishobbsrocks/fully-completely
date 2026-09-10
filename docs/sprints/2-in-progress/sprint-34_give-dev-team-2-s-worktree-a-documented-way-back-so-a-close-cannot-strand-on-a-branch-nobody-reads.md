@@ -2,7 +2,7 @@
 id: 34
 title: "Give Dev Team 2's worktree a documented way back, so a close cannot strand on a branch nobody reads"
 epic: "Sprint record durability"
-status: todo
+status: in_progress
 created: 2026-09-10T15:34:33+00:00
 ---
 
