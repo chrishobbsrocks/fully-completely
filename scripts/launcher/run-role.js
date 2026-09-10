@@ -1366,6 +1366,49 @@ function headlessPermissionArgs(role, root = ROOT) {
 // nothing ever reclaims any. Comfortable now; worth a maintainer's
 // attention once a single role's
 // JSON gets meaningfully closer to the limit, not before.
+// Sprint 31, Req 1/2: the single source both a launched role's own
+// instruction (below, prepended to its prompt) AND emitPermissionRecord()'s
+// instructedCommandForms field are derived from -- parses the exact
+// command forms a --allowedTools value actually grants, out of that value
+// itself, never a separately maintained literal that could drift from it.
+// Matches this file's own established grant shape, `Bash(<cmd> *)` (e.g.
+// 'Bash(node scripts/run-lifecycle.js *)'), and extracts <cmd> verbatim,
+// whatever it is -- a dynamically added test-command or owned-repository
+// grant is swept in exactly the same way as a static profile entry,
+// because this reads the already-assembled string, not the profile that
+// built it. Reported incident this sprint fixes: a downstream install
+// observed a role denied for constructing an absolute path to a script
+// its grant covers only by relative path -- the grant and the invocation
+// had never been connected to each other by anything.
+function extractGrantedCommandForms(allowedToolsValue) {
+  if (!allowedToolsValue) return [];
+  const forms = [];
+  const re = /Bash\(([^)]+?)\s+\*\)/g;
+  let m;
+  while ((m = re.exec(allowedToolsValue))) {
+    forms.push(m[1]);
+  }
+  return forms;
+}
+
+// Sprint 31, Req 1: text a role reads BEFORE acting (prepended to its own
+// launch prompt below -- "a place the role reads before acting", never a
+// separate file an install may have diverged, per this Req's own
+// acceptance criterion and Risks & Mitigations' named risk). States the
+// exact forms, not a paraphrase, so a role has no interpretive gap to
+// fill with a reasonable-looking absolute path instead.
+function grantedFormsInstruction(forms) {
+  return (
+    'PERMISSION GRANT -- EXACT COMMAND FORMS REQUIRED: your Bash permission grant for this ' +
+      'session matches these forms exactly, character for character (matching has not been ' +
+      'demonstrated to tolerate an absolute-path or other equivalent variant that does the same ' +
+      "thing -- a real denial of exactly that shape is why this instruction exists). Invoke them " +
+      'exactly as written below; do not construct an absolute path or any other equivalent form ' +
+      'for these commands:\n' +
+      forms.map((f) => `  ${f} ...`).join('\n')
+  );
+}
+
 function headlessLaunchArgs(role, prompt, { bare, settings, root = ROOT } = {}) {
   const meta = readAgentMeta(role.id);
   const body = agentBody(role.id);
@@ -1422,9 +1465,24 @@ function headlessLaunchArgs(role, prompt, { bare, settings, root = ROOT } = {}) 
       );
     }
   }
+  // Sprint 31, Req 1: derived from `base`'s own --allowedTools value --
+  // the identical string emitPermissionRecord() (below) parses again from
+  // finalArgs, which carries the same --allowedTools entry forward
+  // unchanged. Prepended to the prompt, not appended to or replacing it,
+  // so it's the first thing the role reads, before the sprint-specific
+  // task -- "before acting" is the acceptance criterion's own phrase.
+  const allowedToolsValue = (() => {
+    const i = base.indexOf('--allowedTools');
+    return i === -1 ? null : base[i + 1];
+  })();
+  const grantedForms = extractGrantedCommandForms(allowedToolsValue);
+  const promptWithInstruction = grantedForms.length
+    ? `${grantedFormsInstruction(grantedForms)}\n\n${prompt}`
+    : prompt;
+
   const finalArgs = bare
-    ? [...base, '--bare', ...(settings ? ['--settings', settings] : []), prompt]
-    : [...base, '--no-session-persistence', prompt];
+    ? [...base, '--bare', ...(settings ? ['--settings', settings] : []), promptWithInstruction]
+    : [...base, '--no-session-persistence', promptWithInstruction];
 
   emitPermissionRecord(role, finalArgs, root);
 
@@ -1485,6 +1543,15 @@ function emitPermissionRecord(role, finalArgs, root) {
     // permission denial — this field is what lets a reader attribute a
     // denial-shaped observation to the right cause instead of the other.
     mcpConfigSupplied: finalArgs.includes('--mcp-config'),
+    // Sprint 31, Req 3: parsed from THIS record's own allowedTools value,
+    // two lines up -- not from a separately stored variable -- so an
+    // operator holding only this stderr capture sees the grant AND the
+    // form the role was actually told to use in one place, and can
+    // confirm they correspond without ever seeing the prompt or the
+    // source. They correspond by construction (both come from the same
+    // parse of the same string); this field is what makes that visible
+    // from the record alone rather than something that has to be trusted.
+    instructedCommandForms: extractGrantedCommandForms(valueAfter('--allowedTools')),
   };
   // Req 5: unconditional — no verbosity flag, no env var, no debug mode.
   // Printed once, at the moment it is true, following this repo's own
@@ -1792,4 +1859,6 @@ module.exports = {
   getClaudeVersionString,
   warnIfPermissionFindingsStale,
   emitPermissionRecord,
+  extractGrantedCommandForms,
+  grantedFormsInstruction,
 };

@@ -1568,6 +1568,8 @@ const {
   LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS,
   LIVEQA_API_ALLOWED_TOOLS,
   emitPermissionRecord,
+  extractGrantedCommandForms,
+  grantedFormsInstruction,
 } = require('./launcher/run-role');
 
 const QA1_ROLE = RUN_ROLE_ROLES.find((r) => r.id === 'qa1');
@@ -1611,6 +1613,72 @@ test('run-role: resumeLaunchArgs appends the worktree-check prompt only for dev-
 // readAgentMeta()/agentBody() split the interactive path never touches, so
 // this test would fail the moment headlessLaunchArgs and agents.js drift
 // about where the frontmatter ends, rather than only on a real invocation.
+// Sprint 31, Req 1: headlessLaunchArgs() now prepends a derived
+// instruction to the prompt for any role holding a script-invocation
+// grant. Computed from the REAL exported functions (extractGrantedCommandForms
+// + grantedFormsInstruction), rather than a hardcoded literal duplicating
+// their output, so these pre-existing tests can never silently drift from
+// what headlessLaunchArgs() itself actually does — the exact same
+// discipline this file's own comment above already applies to
+// headlessPermissionArgs().
+function expectedPromptFor(role, prompt) {
+  const permArgs = headlessPermissionArgs(role);
+  const i = permArgs.indexOf('--allowedTools');
+  const allowedToolsValue = i === -1 ? null : permArgs[i + 1];
+  const forms = extractGrantedCommandForms(allowedToolsValue);
+  return forms.length ? `${grantedFormsInstruction(forms)}\n\n${prompt}` : prompt;
+}
+
+test('run-role: extractGrantedCommandForms parses exact command forms out of a real --allowedTools value, extras and edge cases included', () => {
+  assert.deepStrictEqual(
+    extractGrantedCommandForms('Bash(node scripts/run-lifecycle.js *) Bash(python3 scripts/sprint_lifecycle.py *)'),
+    ['node scripts/run-lifecycle.js', 'python3 scripts/sprint_lifecycle.py']
+  );
+  assert.deepStrictEqual(extractGrantedCommandForms('Bash(git log *)'), ['git log']);
+  assert.deepStrictEqual(extractGrantedCommandForms(null), []);
+  assert.deepStrictEqual(extractGrantedCommandForms(''), []);
+  assert.deepStrictEqual(extractGrantedCommandForms('Edit,Write'), [], 'a disallowedTools-shaped value has no Bash(...) entries to find');
+});
+
+test('run-role: grantedFormsInstruction states the exact forms, not a paraphrase', () => {
+  const text = grantedFormsInstruction(['node scripts/run-lifecycle.js', 'python3 scripts/sprint_lifecycle.py']);
+  assert.match(text, /EXACT COMMAND FORMS REQUIRED/);
+  assert.match(text, /^ {2}node scripts\/run-lifecycle\.js \.\.\.$/m);
+  assert.match(text, /^ {2}python3 scripts\/sprint_lifecycle\.py \.\.\.$/m);
+});
+
+test('run-role: emitPermissionRecord (Req 3) reports instructedCommandForms parsed from its OWN allowedTools field, not a second source', () => {
+  const args = ['--agent', 'x', '--allowedTools', 'Bash(git log *) Bash(git diff *)', 'p'];
+  const lines = captureStderr(() => emitPermissionRecord({ id: 'x' }, args, '/root'));
+  const record = JSON.parse(lines[0].slice('PERMISSION_RECORD: '.length));
+  assert.deepStrictEqual(record.instructedCommandForms, ['git log', 'git diff']);
+  assert.deepStrictEqual(record.instructedCommandForms, extractGrantedCommandForms(record.allowedTools));
+});
+
+test('run-role: emitPermissionRecord (Req 3) reports instructedCommandForms as an empty array, not omitted, when there is no allowedTools value at all', () => {
+  const args = ['--agent', 'x', 'p'];
+  const lines = captureStderr(() => emitPermissionRecord({ id: 'x' }, args, '/root'));
+  const record = JSON.parse(lines[0].slice('PERMISSION_RECORD: '.length));
+  assert.ok('instructedCommandForms' in record);
+  assert.deepStrictEqual(record.instructedCommandForms, []);
+});
+
+test('run-role: headlessLaunchArgs (Req 1) prepends the instruction for every real role holding a script-invocation grant, and it precedes the task prompt', () => {
+  for (const role of RUN_ROLE_ROLES) {
+    const args = headlessLaunchArgs(role, 'THE TASK PROMPT');
+    const finalPrompt = args.slice(-1)[0];
+    const permArgs = headlessPermissionArgs(role);
+    const i = permArgs.indexOf('--allowedTools');
+    const forms = extractGrantedCommandForms(i === -1 ? null : permArgs[i + 1]);
+    assert.ok(forms.length > 0, `${role.id}: test assumption failed -- every real role is expected to hold a script-invocation grant`);
+    assert.ok(finalPrompt.startsWith('PERMISSION GRANT'), `${role.id}: instruction must come first, before the task`);
+    assert.ok(finalPrompt.endsWith('THE TASK PROMPT'), `${role.id}: the original task prompt must still be present, untouched, at the end`);
+    for (const form of forms) {
+      assert.ok(finalPrompt.includes(form), `${role.id}: instructed prompt is missing granted form "${form}"`);
+    }
+  }
+});
+
 test('run-role: headlessLaunchArgs supplies the persona via --agents JSON (--bare cannot read .claude/agents/*.md)', () => {
   const args = headlessLaunchArgs(QA1_ROLE, 'do the audit');
   const meta = readAgentMeta('qa1');
@@ -1644,7 +1712,7 @@ test('run-role: headlessLaunchArgs default (no bare) omits --bare, adds --no-ses
     'json',
     ...headlessPermissionArgs(QA1_ROLE),
     '--no-session-persistence',
-    'do the audit',
+    expectedPromptFor(QA1_ROLE, 'do the audit'),
   ]);
   assert.ok(!args.includes('--bare'));
   assert.ok(!args.includes('--settings'));
@@ -1662,13 +1730,15 @@ test('run-role: headlessLaunchArgs default (no bare) also omits --bare/--setting
     'json',
     ...headlessPermissionArgs(QA1_ROLE),
     '--no-session-persistence',
-    'do the audit',
+    expectedPromptFor(QA1_ROLE, 'do the audit'),
   ]);
 });
 
 test('run-role: headlessLaunchArgs bare:true adds --bare, omits --no-session-persistence, omits --settings when none given', () => {
   const args = headlessLaunchArgs(QA1_ROLE, 'do the audit', { bare: true });
-  assert.deepStrictEqual(args.slice(4), ['-p', '--output-format', 'json', ...headlessPermissionArgs(QA1_ROLE), '--bare', 'do the audit']);
+  assert.deepStrictEqual(args.slice(4), [
+    '-p', '--output-format', 'json', ...headlessPermissionArgs(QA1_ROLE), '--bare', expectedPromptFor(QA1_ROLE, 'do the audit'),
+  ]);
   assert.ok(!args.includes('--no-session-persistence'));
   assert.ok(!args.includes('--settings'));
 });
@@ -1687,7 +1757,7 @@ test('run-role: headlessLaunchArgs bare:true forwards --settings ahead of the tr
     '--bare',
     '--settings',
     '{"apiKeyHelper":"/path/to/helper.sh"}',
-    'do the audit',
+    expectedPromptFor(QA1_ROLE, 'do the audit'),
   ]);
 });
 
@@ -2187,10 +2257,12 @@ test('run-role: headlessLaunchArgs (Req 1, end to end) emits a record whose fiel
   }
 });
 
-test('run-role: headlessLaunchArgs prompt stays the final positional argument in every mode', () => {
-  assert.strictEqual(headlessLaunchArgs(QA1_ROLE, 'X').slice(-1)[0], 'X');
-  assert.strictEqual(headlessLaunchArgs(QA1_ROLE, 'X', { bare: true }).slice(-1)[0], 'X');
-  assert.strictEqual(headlessLaunchArgs(QA1_ROLE, 'X', { bare: true, settings: 'S' }).slice(-1)[0], 'X');
+test('run-role: headlessLaunchArgs prompt (with sprint 31\'s instruction prepended, for a role holding a script-invocation grant) stays the final positional argument in every mode', () => {
+  const expected = expectedPromptFor(QA1_ROLE, 'X');
+  assert.ok(expected.endsWith('X'), 'test setup: qa1 must still hold a script-invocation grant for this to be a meaningful check');
+  assert.strictEqual(headlessLaunchArgs(QA1_ROLE, 'X').slice(-1)[0], expected);
+  assert.strictEqual(headlessLaunchArgs(QA1_ROLE, 'X', { bare: true }).slice(-1)[0], expected);
+  assert.strictEqual(headlessLaunchArgs(QA1_ROLE, 'X', { bare: true, settings: 'S' }).slice(-1)[0], expected);
 });
 
 test('run-role: headlessLaunchArgs omits "model" from the JSON when the persona file has none', () => {
@@ -2423,6 +2495,43 @@ test('run-role CLI: default headless path succeeds when the operator session is 
     assert.strictEqual(stripPermissionRecordLine(result.stderr), '');
     assert.deepStrictEqual(readArgv(), headlessLaunchArgs(QA1_ROLE, headlessPrompt(QA1_ROLE, '4')));
     assert.ok(!readArgv().includes('--bare'), 'the default path must never pass --bare');
+  });
+});
+
+test('run-role CLI (real subprocess, Sprint 31 Req 4): PERMISSION_RECORD matches the REAL argv the child process actually received -- runs under the project\'s normal CI test command, no stub binary or manual setup beyond the existing fake-claude fixture', () => {
+  withFakeClaude(true, ({ dir, readArgv }) => {
+    const result = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], { PATH: dir });
+    assert.strictEqual(result.status, 0, 'launch must succeed');
+    const recordLine = result.stderr.split('\n').find((l) => l.startsWith('PERMISSION_RECORD: '));
+    assert.ok(recordLine, 'no PERMISSION_RECORD found on stderr');
+    const record = JSON.parse(recordLine.slice('PERMISSION_RECORD: '.length));
+    // The REAL argv the fake claude binary actually received and logged to
+    // disk -- not headlessLaunchArgs()'s own in-process return value, which
+    // could stay self-consistent while the real child received something
+    // else (a spawn/quoting bug, for instance). This is the stronger check
+    // Req 4 asks for: assert against what reached the child process, across
+    // a real subprocess boundary.
+    const realArgv = readArgv();
+    const at = (flag) => {
+      const i = realArgv.indexOf(flag);
+      return i === -1 ? null : realArgv[i + 1];
+    };
+    assert.strictEqual(record.allowedTools, at('--allowedTools'), 'allowedTools must match the REAL child argv');
+    assert.strictEqual(record.disallowedTools, at('--disallowedTools'), 'disallowedTools must match the REAL child argv');
+    assert.strictEqual(record.permissionMode, at('--permission-mode'), 'permissionMode must match the REAL child argv');
+    assert.strictEqual(record.mcpConfigSupplied, realArgv.includes('--mcp-config'), 'mcpConfigSupplied must match the REAL child argv');
+    assert.deepStrictEqual(
+      record.instructedCommandForms,
+      extractGrantedCommandForms(at('--allowedTools')),
+      'instructedCommandForms must match what the REAL child argv actually grants'
+    );
+    // And the prompt the child actually received (the final argv element)
+    // really does carry the instruction -- not just the in-process return
+    // value of headlessLaunchArgs().
+    const realPrompt = realArgv.slice(-1)[0];
+    for (const form of record.instructedCommandForms) {
+      assert.ok(realPrompt.includes(form), `the REAL prompt the child received is missing granted form "${form}"`);
+    }
   });
 });
 
