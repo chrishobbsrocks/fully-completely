@@ -144,6 +144,36 @@ failed this exact way once (sprint 9's publish ordering, fixed in prose
 and drifted on the very next release). Commit what the notice names
 before telling the next role to act on it.
 
+**The commit shape differs by what the command actually wrote** (sprint 32,
+extending Req 2 above to QA1 and LiveQA, the two gate roles it hadn't yet
+reached). A command that creates a new record has something untracked to
+add before it can be committed: `/sprint-new` writes a brand-new sprint
+file, `/sprint-start` writes a brand-new state file, so the role running
+either stages what it just created — `git add <path>` for the new and
+changed paths — before committing. QA1's `/sprint-qa1` and LiveQA's
+`/sprint-liveqa` are different: each only ever modifies its sprint's own
+already-tracked `docs/sprints/state/sprint-<N>.json`, nothing new to add,
+so the commit is `git commit docs/sprints/state/sprint-<N>.json` with no
+`git add` step at all. That's deliberate, not a shortcut someone skipped:
+a pathspec commit with no staging step can only ever capture the path
+named, so it's structurally incapable of sweeping up a concurrent
+session's unrelated uncommitted work the way a broader `git add -A` or
+`git commit -a` could — a downstream install's Pipeman hit exactly that
+with an unfiltered `git stash -u` swallowing another session's
+in-progress file, which is why the no-staging shape is the correct one
+for a role that must never touch anything but its own verdict. Both gate
+roles are explicitly permitted to make this commit at all:
+`SHIP_HASH_EXCLUDE_PATTERNS` in `scripts/sprint_lifecycle.py` excludes
+`docs/sprints/.locks/*`, `docs/sprints/registry.json`,
+`docs/sprints/state/*.json`, and `docs/sprints/*/*.md` from the
+tree-hash comparison `/sprint-ship` and `/sprint-liveqa` themselves run —
+exactly the paths a lifecycle command writes — so a gate role committing
+its own bookkeeping cannot invalidate the audit or live test it just
+recorded. And "Only Pipeman ever runs `git push`, no exceptions, ever"
+(above) is narrower than it can read out of context: it reserves the
+push, not the commit, and a local commit is explicitly sanctioned for
+whichever role produced it, gate roles included.
+
 **QA1 audits code, not just the sprint file**: the same PASS that records
 the sprint-file hash also records the audited commit's tree hash, the
 content of the files at that commit, not its SHA. `/sprint-ship` resolves
