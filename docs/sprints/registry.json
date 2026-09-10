@@ -208,8 +208,8 @@
     "35": {
       "title": "Make packaging fail-closed, and stop backups carrying what was scrubbed",
       "epic": "Framework rules and distribution",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-35_make-packaging-fail-closed-and-stop-backups-carrying-what-was-scrubbed.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-35_make-packaging-fail-closed-and-stop-backups-carrying-what-was-scrubbed--done.md"
     }
   }
 }
