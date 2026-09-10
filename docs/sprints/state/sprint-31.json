@@ -1,0 +1,27 @@
+{
+  "id": 31,
+  "title": "Make a role's invocation match the grant it holds, and protect the args-derivation property in CI",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-09-10T04:33:39+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-09-10T04:33:39+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ],
+  "last_claim": {
+    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-10T04:33:39+00:00"
+  }
+}
