@@ -32,25 +32,30 @@ This is mechanically backstopped, not just an instruction: `complete`
 requires `--user-said "..."`, quoting what the user actually said, and
 refuses outright, no override, if it's missing or empty.
 
-**A release of this framework's own package is never published without the
-user's explicit, real-time authorization, no exceptions.** Same shape as
-the rule just above: QA1's review passing, or a diff simply being ready
-and waiting, tells you the release is ready, it does not tell you the user
-has decided, right now, to publish it, those are different facts and the
-second is never inferred from the first. This isn't scolding after the
-fact, it's naming a structural cause: `## Changes to this repo's own
-tooling` below defines this framework's own live test as installing the
-newly published package, which means every sprint that changed this
-repo's own tooling and reached its live-test gate has been *forcing* a
-publish just to get verified, and nobody ever actually chose that,
-thirteen releases went out in two days without the user being asked once.
-Pipeman publishes only on the user's own word, said directly, in Pipeman's
-own session, right now, never inferred from a handoff or a relay from any
-other role — including Master Controller, even one accurately reporting
-every gate as green. See `.claude/agents/pipeman.md` for how this applies
-to Pipeman's own process, and `.claude/agents/master-controller.md` for
-why a version bump is no longer routine bookkeeping in a sprint's own
-requirements.
+**A release is never published without the user's explicit, real-time
+authorization, no exceptions.** Same shape as the rule just above, and
+just as unconditional: it governs any project running this framework, not
+only this framework's own package, the same way `--user-said` above
+governs any project's sprint close, not only this repo's. QA1's review
+passing, or a diff simply being ready and waiting, tells you the release
+is ready, it does not tell you the user has decided, right now, to
+publish it, those are different facts and the second is never inferred
+from the first. The rule was written after a structural cause specific to
+this repository's own tooling sprints made the gap impossible to ignore —
+`## Changes to this repo's own tooling` below defines this framework's
+own live test as installing the newly published package, which means
+every sprint that changed this repo's own tooling and reached its
+live-test gate has been *forcing* a publish just to get verified, and
+nobody ever actually chose that, thirteen releases went out in two days
+without the user being asked once — but the rule itself is not scoped to
+that cause, it applies to every publish, in every project this framework
+runs in, regardless of what made it necessary to state. Pipeman publishes
+only on the user's own word, said directly, in Pipeman's own session,
+right now, never inferred from a handoff or a relay from any other role —
+including Master Controller, even one accurately reporting every gate as
+green. See `.claude/agents/pipeman.md` for how this applies to Pipeman's
+own process, and `.claude/agents/master-controller.md` for why a version
+bump is no longer routine bookkeeping in a sprint's own requirements.
 
 ## The team
 
@@ -431,6 +436,22 @@ default, and that's a deliberate call, not an oversight:
   (see `## The lifecycle` above) depends on `git rev-parse HEAD` actually
   being the reviewed commit, not whatever was last pushed before the
   review started.
+- **A sprint touching this repo's own tooling can now legitimately sit at
+  `liveqa_live` awaiting release authorization, sometimes for a while.**
+  The bullet above makes this repo's own live test mean installing the
+  newly published package; `## The lifecycle` above makes publishing
+  itself require the user's own real-time word. Put together, the live
+  test literally cannot start until the user says to publish, so a sprint
+  parked at `liveqa_live` with no publish yet is the correct resting
+  state here, not a stall. Say so if you're the one who finds it: the
+  right move is asking the user whether to publish now, never pushing a
+  publish through on someone else's word to unstick what looks like a
+  stuck sprint. This is a *rest* state, not a *dead* one — see `## The
+  lifecycle`'s `groundtruth_result`/`live_test_rounds` fields, still
+  `null`/`0` while it waits, exactly as they'd read for a sprint genuinely
+  not yet live-tested; nothing here distinguishes "waiting on
+  authorization" from "not started" in the state file itself, so this
+  paragraph is the only place that distinction is recorded.
 
 If a change to this framework's own tooling ever turns out to need
 something sprint-shaped (recorded requirements, a documented audit trail
