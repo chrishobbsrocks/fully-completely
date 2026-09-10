@@ -202,8 +202,8 @@
     "34": {
       "title": "Give Dev Team 2's worktree a documented way back, so a close cannot strand on a branch nobody reads",
       "epic": "Sprint record durability",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-34_give-dev-team-2-s-worktree-a-documented-way-back-so-a-close-cannot-strand-on-a-branch-nobody-reads.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-34_give-dev-team-2-s-worktree-a-documented-way-back-so-a-close-cannot-strand-on-a-branch-nobody-reads--done.md"
     }
   }
 }
