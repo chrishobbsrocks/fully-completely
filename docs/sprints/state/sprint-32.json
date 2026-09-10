@@ -1,11 +1,11 @@
 {
   "id": 32,
   "title": "Extend the bookkeeping-commit rule to the two gate roles, in the two shapes it actually needs",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "c7b2530f01baa640bbac96b1465aff67e8aed8c21cd7b6865e1fc4acc8d9a118",
   "qa1_audited_tree_hash": "e23d16066caba8e8346c8ec23d442e61b12b4ba1a016356f94a7b81fd915dfdd",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "6d21af3fc5f9dfc16725c2d4ab119df4f5b57986",
   "groundtruth_result": null,
   "audit_rounds": 3,
   "live_test_rounds": 0,
@@ -47,11 +47,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-10T14:00:14+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=6d21af3 | ci=green: 1 CI run(s) for 6d21af3fc5f9dfc16725c2d4ab119df4f5b57986 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "c62dc581-9371-5e20-8925-d3eb79475ad8",
-    "claude_agent": "dev-team-2",
-    "ts": "2026-09-10T13:56:59+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-10T14:00:14+00:00"
   }
 }
