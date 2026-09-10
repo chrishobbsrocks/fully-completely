@@ -1853,4 +1853,59 @@ assert state['phase'] == 'dev_build', f'restarted sprint should be back in dev_b
 "
 rm -f /tmp/out.txt
 
+echo "== sprint 34, Req 1/2/4: closing a sprint from inside a Dev Team 2 worktree prints an unmissable statement that it hasn't reached main, naming the branch and Pipeman by name -- and main's own view stays stranded (the sprint 32 incident, reproduced directly) =="
+SPRINT_WT_CLOSE=$(new_sprint "Worktree close sprint")
+$SCRIPT start "$SPRINT_WT_CLOSE" > /dev/null
+git add -A
+git commit -q -m "commit sprint $SPRINT_WT_CLOSE's state so a worktree can see it"
+
+WT_CLOSE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fully-completely-smoke-wt-close.XXXXXX")"
+git worktree add -q -b "smoke-wt-close-branch-${SPRINT_WT_CLOSE}" "$WT_CLOSE_DIR" > /dev/null
+WT_CLOSE_SCRIPT="python3 $WT_CLOSE_DIR/scripts/sprint_lifecycle.py"
+
+# The entire rest of the lifecycle, driven from inside the worktree --
+# exactly the sprint 32 shape (real gates, real authorization, closed
+# from inside the worktree).
+(cd "$WT_CLOSE_DIR" && git commit -q --allow-empty -m "sprint $SPRINT_WT_CLOSE work")
+$WT_CLOSE_SCRIPT qa1 "$SPRINT_WT_CLOSE" --verdict PASS --notes ok > /dev/null
+$WT_CLOSE_SCRIPT dev-done "$SPRINT_WT_CLOSE" > /dev/null
+WT_CLOSE_COMMIT=$(cd "$WT_CLOSE_DIR" && git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $WT_CLOSE_SCRIPT ship "$SPRINT_WT_CLOSE" --commit "$WT_CLOSE_COMMIT" > /dev/null
+$WT_CLOSE_SCRIPT liveqa "$SPRINT_WT_CLOSE" --deployed-commit "$WT_CLOSE_COMMIT" --verdict PASS --notes ok > /dev/null
+printf 'yes, close it\n' > /tmp/wt_close_user_said.txt
+WT_CLOSE_OUT=$($WT_CLOSE_SCRIPT complete "$SPRINT_WT_CLOSE" --user-said-file /tmp/wt_close_user_said.txt 2>&1)
+echo "$WT_CLOSE_OUT" | grep -q "Sprint ${SPRINT_WT_CLOSE} closed" || \
+  fail "the close itself should have succeeded (a strand warning is a statement, not a gate) -- output: $WT_CLOSE_OUT"
+echo "$WT_CLOSE_OUT" | grep -q "HAS NOT REACHED main" || \
+  fail "closing from inside a worktree must print the unmissable strand statement (Req 1/4) -- output: $WT_CLOSE_OUT"
+echo "$WT_CLOSE_OUT" | grep -qF "smoke-wt-close-branch-${SPRINT_WT_CLOSE}" || \
+  fail "the strand statement doesn't name the actual branch"
+echo "$WT_CLOSE_OUT" | grep -q "PIPEMAN" || \
+  fail "the strand statement doesn't name Pipeman explicitly (Req 2)"
+echo "$WT_CLOSE_OUT" | grep -q "must NOT push or merge it yourself" || \
+  fail "the strand statement doesn't say Dev Team 2 must not push/merge it itself (Req 2)"
+
+# Main's own view: this sprint must still read as NOT complete -- the
+# whole point being reproduced.
+$SCRIPT status "$SPRINT_WT_CLOSE" 2>&1 | grep -q "Phase: complete$" && \
+  fail "main's own view should NOT show this sprint as complete -- it was closed only in the worktree"
+
+git worktree remove --force "$WT_CLOSE_DIR" > /dev/null 2>&1 || rm -rf "$WT_CLOSE_DIR"
+rm -f /tmp/wt_close_user_said.txt
+
+echo "== sprint 34, Req 1: closing from the primary checkout (no worktrees, or none diverging) prints no strand statement =="
+SPRINT_MAIN_CLOSE=$(new_sprint "Main close sprint")
+$SCRIPT start "$SPRINT_MAIN_CLOSE" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_MAIN_CLOSE work"
+$SCRIPT qa1 "$SPRINT_MAIN_CLOSE" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_MAIN_CLOSE" > /dev/null
+MAIN_CLOSE_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_MAIN_CLOSE" --commit "$MAIN_CLOSE_COMMIT" > /dev/null
+$SCRIPT liveqa "$SPRINT_MAIN_CLOSE" --deployed-commit "$MAIN_CLOSE_COMMIT" --verdict PASS --notes ok > /dev/null
+printf 'yes, close it\n' > /tmp/main_close_user_said.txt
+MAIN_CLOSE_OUT=$($SCRIPT complete "$SPRINT_MAIN_CLOSE" --user-said-file /tmp/main_close_user_said.txt 2>&1)
+echo "$MAIN_CLOSE_OUT" | grep -q "HAS NOT REACHED main" && \
+  fail "closing from the primary checkout must never print the strand statement (false positive) -- output: $MAIN_CLOSE_OUT"
+rm -f /tmp/main_close_user_said.txt
+
 echo "ALL SMOKE TESTS PASSED"

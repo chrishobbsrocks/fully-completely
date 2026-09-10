@@ -274,6 +274,50 @@ any files, and stay there for the whole sprint. This is what actually
 prevents the uncommitted-work collisions that "check for overlap first"
 alone did not.
 
+**The worktree's life does not end at close** (sprint 34). Sprint 32 was
+closed correctly from inside its own worktree — both gates verified, real
+authorization obtained, `/sprint-complete` run — and came to rest on
+`devteam2/sprint-32`, a branch no other checkout reads. Main, origin, and
+every other worktree kept reporting it as still open; recovering it took a
+real merge, by hand, after main had independently diverged with a
+different sprint's own close in the meantime. The instruction above
+described a one-way door: create the worktree, work in it, and said
+nothing about the branch once the sprint is done. That gap is fixed here,
+not by having Dev Team 2 push (it still never does, no exception), but by
+naming the return path explicitly:
+
+1. **Close, from inside the worktree, exactly as documented above** —
+   `/sprint-complete <N> --user-said "..."`, same as any other sprint.
+   `sprint_lifecycle.py` itself now checks whether the process it's
+   running in is the primary checkout or a linked worktree, and if it's
+   the latter, prints an unmissable statement, in the close's own output,
+   that the record has not reached main — naming the branch and
+   instructing the handoff below. This is a statement, not a gate: the
+   close still succeeds, because a hard refusal here would leave Dev Team
+   2 with no legal action at all (it cannot push its own way past it).
+2. **Commit the bookkeeping** the close just wrote, same as every other
+   lifecycle transition (see the commit-rule paragraph above) — this
+   happens on `devteam2/sprint-<N>`, in the worktree, same as it always
+   has.
+3. **Hand off to Pipeman by name**, naming the branch (`devteam2/sprint-<N>`)
+   and the commit just made (`git rev-parse HEAD`, run from the worktree,
+   after committing). Pipeman merges that branch into main from the
+   primary checkout — the only step here that touches git beyond a local
+   commit, and it is Pipeman's, not Dev Team 2's, same as every push.
+4. **Remove the worktree directory only after its branch has actually
+   been merged into main**, and only once nothing is still using it as a
+   working directory. `git worktree remove <path>` (run from the primary
+   checkout) refuses on its own if the directory has uncommitted changes,
+   but that is not the same guarantee as "merged" — an unmerged branch
+   with a clean directory removes without complaint and takes its commits
+   nowhere. Check the branch is actually reachable from main first
+   (`git branch --merged main | grep devteam2/sprint-<N>`), and never
+   remove a directory a session (this one or another) might still be
+   `cd`'d into — Pipeman has correctly declined to act on exactly that
+   shape of request before. An unmerged worktree, or one still in active
+   use, is left in place; there is no time limit on when step 4 has to
+   happen once steps 1–3 are done.
+
 ## Quick reference
 
 ```bash

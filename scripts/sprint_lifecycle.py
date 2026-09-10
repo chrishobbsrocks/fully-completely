@@ -917,6 +917,88 @@ def state_divergence_warning(
     )
 
 
+def _primary_worktree_root(root: Path) -> Optional[Path]:
+    """Sprint 34: the PRIMARY worktree's path (the one at the repository's
+    top-level .git directory, not a `.git/worktrees/<name>` link) --
+    `git worktree list` always lists it first, which is the one ordering
+    guarantee this relies on. Used to tell "this process is running from
+    the main checkout" apart from "this process is running from a linked
+    worktree" (Dev Team 2's, created by /sprint-worktree), which
+    `_other_worktree_roots()` above doesn't answer -- that function only
+    ever asks about OTHER roots relative to whichever one is current, not
+    whether the current one is itself primary or secondary.
+
+    Returns None on anything this can't determine (not a git repo, git
+    missing, no worktree lines in the output at all) -- collapsing every
+    subprocess failure the same way every other git-touching function in
+    this file does."""
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=root, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            return Path(line[len("worktree "):]).resolve()
+    return None
+
+
+def secondary_worktree_close_warning() -> Optional[str]:
+    """Sprint 34, Req 1/2/4 (Finding: sprint 32's own close): a sprint
+    closed from inside a linked git worktree (Dev Team 2's, created by
+    /sprint-worktree) commits its bookkeeping to that worktree's own
+    branch -- reachable from nowhere else until someone merges it. Sprint
+    32 was closed correctly this way (both gates verified, real
+    authorization obtained) and read as `complete_ready`, never closed,
+    from main, from origin, and from every other checkout. Recovering it
+    took a real merge, by hand, by Pipeman, against a main that had
+    independently diverged in the meantime with a different sprint's own
+    close. CLAUDE.md described how to create and work in the worktree
+    and said nothing about the branch at close -- a one-way door,
+    documented by omission -- which is why this is a specification
+    defect, not an execution one, and why the fix here is a statement
+    emitted at the moment of closing, not a rule someone has to already
+    know to look up.
+
+    Req 2's own boundary, held exactly: this function does not push,
+    merge, commit, or otherwise write to git in any way -- it reads
+    `git worktree list` and the current branch name, nothing else. Dev
+    Team 2 never pushes, no exception, and this sprint does not become
+    one; the resolution is a named handoff (Pipeman, by name, plus the
+    branch) rather than this framework attempting the merge itself.
+
+    Returns None (no warning, the ordinary case) when this process's own
+    ROOT already IS the primary worktree -- true for Dev Team 1 always,
+    and for any project not using worktrees at all -- or when worktree
+    status can't be determined, matching every other divergence check's
+    own "can't tell is not the same as diverged" discipline. Callers
+    still need to check the boolean truthiness of the return value
+    themselves; this never raises."""
+    primary = _primary_worktree_root(ROOT)
+    if primary is None or primary == ROOT.resolve():
+        return None
+    branch = subprocess.run(  # nosec B603 B607
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    branch_name = branch.stdout.strip() if branch.returncode == 0 and branch.stdout.strip() else "(unknown branch)"
+    return (
+        "THIS CLOSE HAS NOT REACHED main. "
+        f"You are on branch '{branch_name}', in a linked worktree ({ROOT}), not the primary "
+        f"checkout ({primary}). Committing the bookkeeping this just wrote records it HERE, on "
+        "this branch, and nowhere else -- main, origin, and every other checkout will keep "
+        "reading this sprint as still open until someone merges this branch in. You must NOT "
+        "push or merge it yourself -- only Pipeman ever pushes, no exception, and that holds "
+        "here too. Commit this bookkeeping now (CLAUDE.md's own commit rule), then hand off to "
+        f"PIPEMAN by name: branch '{branch_name}', and the commit you just made (`git rev-parse "
+        "HEAD` after committing). See CLAUDE.md's \"Running two sprints at once\" section for "
+        "the full close -> return -> remove sequence, including when the worktree directory "
+        "itself is safe to remove."
+    )
+
+
 def origin_ahead_of_record_warning(last_shipped: Optional[str]) -> Optional[str]:
     """Sprint 24, Req 3 (Finding C): `cmd_ship` never runs when Claude
     Code's own permission classifier denies the push step before
@@ -2273,6 +2355,13 @@ def cmd_complete(args) -> None:
         log_event(state, "dev-team", "sprint_closed", f"user_said={user_said}")
         save_state(args.id, state)
     print(f"Sprint {args.id} closed. Confirmed: QA1 audit, LiveQA live test, user authorization.")
+    # Sprint 34, Req 1/2/4: printed AFTER the success line, at the exact
+    # moment a reader would otherwise walk away believing the close
+    # landed -- see secondary_worktree_close_warning()'s own docstring
+    # for the incident this exists to stop recurring.
+    strand_warning = secondary_worktree_close_warning()
+    if strand_warning:
+        print(strand_warning)
 
 
 def cmd_abort(args) -> None:
