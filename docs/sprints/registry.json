@@ -1,5 +1,5 @@
 {
-  "next_id": 33,
+  "next_id": 34,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -192,6 +192,12 @@
       "epic": "Sprint record durability",
       "status": "todo",
       "file": "docs/sprints/1-todo/sprint-32_extend-the-bookkeeping-commit-rule-to-the-two-gate-roles-in-the-two-shapes-it-actually-needs.md"
+    },
+    "33": {
+      "title": "Stop abort being the one destructive action with no gate, and give a blocked role somewhere to go",
+      "epic": "Sprint record durability",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-33_stop-abort-being-the-one-destructive-action-with-no-gate-and-give-a-blocked-role-somewhere-to-go.md"
     }
   }
 }
