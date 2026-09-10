@@ -1,5 +1,5 @@
 {
-  "next_id": 34,
+  "next_id": 35,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -198,6 +198,12 @@
       "epic": "Sprint record durability",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-33_stop-abort-being-the-one-destructive-action-with-no-gate-and-give-a-blocked-role-somewhere-to-go--done.md"
+    },
+    "34": {
+      "title": "Give Dev Team 2's worktree a documented way back, so a close cannot strand on a branch nobody reads",
+      "epic": "Sprint record durability",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-34_give-dev-team-2-s-worktree-a-documented-way-back-so-a-close-cannot-strand-on-a-branch-nobody-reads.md"
     }
   }
 }
