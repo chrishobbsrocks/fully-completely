@@ -2,7 +2,7 @@
 id: 31
 title: "Make a role's invocation match the grant it holds, and protect the args-derivation property in CI"
 epic: "Headless permission model"
-status: in_progress
+status: done
 created: 2026-09-09T23:39:39+00:00
 ---
 

@@ -184,8 +184,8 @@
     "31": {
       "title": "Make a role's invocation match the grant it holds, and protect the args-derivation property in CI",
       "epic": "Headless permission model",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-31_make-a-role-s-invocation-match-the-grant-it-holds-and-protect-the-args-derivation-property-in-ci.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-31_make-a-role-s-invocation-match-the-grant-it-holds-and-protect-the-args-derivation-property-in-ci--done.md"
     },
     "32": {
       "title": "Extend the bookkeeping-commit rule to the two gate roles, in the two shapes it actually needs",

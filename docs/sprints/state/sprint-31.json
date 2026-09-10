@@ -1,16 +1,16 @@
 {
   "id": 31,
   "title": "Make a role's invocation match the grant it holds, and protect the args-derivation property in CI",
-  "phase": "liveqa_live",
+  "phase": "complete",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "52aea67a403ceca0cf7b8d6494c3d50bad6b601d43683c66d87b6fd73dc82809",
   "qa1_audited_tree_hash": "2d06e7ad72b8b2e0a5286391922ac47fdea55a06b97f2b1f558e9e6a18824892",
   "last_shipped_commit": "ee49cdf0afa76b7ef3acf0dbce3c1048cd2991d4",
-  "groundtruth_result": null,
+  "groundtruth_result": "PASS",
   "audit_rounds": 2,
-  "live_test_rounds": 0,
+  "live_test_rounds": 1,
   "started": "2026-09-10T04:33:39+00:00",
-  "completed": null,
+  "completed": "2026-09-10T05:57:42+00:00",
   "history": [
     {
       "ts": "2026-09-10T04:33:39+00:00",
@@ -47,11 +47,23 @@
       "actor": "verify-publish",
       "event": "gitHead_check",
       "detail": "MATCH: registry gitHead=ee49cdf0afa76b7ef3acf0dbce3c1048cd2991d4 == last_shipped_commit=ee49cdf0afa76b7ef3acf0dbce3c1048cd2991d4 for fully-completely@0.2.4."
+    },
+    {
+      "ts": "2026-09-10T05:21:49+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: PASS \u2014 round 1. Live-tested published npm 0.2.4 with real headless launches. Environment: macOS Darwin arm64, claude 2.1.267. 2026-09-10. ~$0.85 in billed runs.\n\nPROVENANCE\n0.2.4 on the registry; dist-tags.latest 0.2.4; gitHead ee49cdf0afa76b7ef3acf0dbce3c1048cd2991d4 == last_shipped_commit; zero `reshipped` events. Content check per sprint 13's rule: all 62 published files byte-identical to `git show ee49cdf:<path>`, MISMATCHED 0, tarball sha1 matches the registry's dist.shasum.\n\n================================================================\nREQ 3 \u2014 ANSWERED FROM THE STDERR CAPTURE ALONE: PASS\n================================================================\nQA1's framing is the criterion's real test: \"if you find yourself opening run-role.js to answer it, that's the criterion failing, not you.\" I did not open it for this, and did not need to.\n\nA single line of captured stderr, in full:\n  PERMISSION_RECORD: {\"role\":\"qa1\",\"cliVersion\":\"2.1.267\",\"workingDirectory\":\"/private/tmp/fc31\",\n  \"permissionMode\":\"acceptEdits\",\"allowedTools\":\"Bash(node scripts/run-lifecycle.js *) Bash(python3\n  scripts/sprint_lifecycle.py *)\",\"disallowedTools\":\"Edit,Write\",\"mcpConfigSupplied\":false,\n  \"instructedCommandForms\":[\"node scripts/run-lifecycle.js\",\"python3 scripts/sprint_lifecycle.py\"]}\n\nThe new `instructedCommandForms` field sits beside `allowedTools` in the same record, so the correspondence is checkable in place. Derived mechanically from the capture, stripping `Bash(` and ` *)` from each grant:\n  granted    -> Bash(node scripts/run-lifecycle.js *)   Bash(python3 scripts/sprint_lifecycle.py *)\n  derived    -> node scripts/run-lifecycle.js           python3 scripts/sprint_lifecycle.py\n  instructed -> node scripts/run-lifecycle.js           python3 scripts/sprint_lifecycle.py\n  derived == instructed, exactly: True\n  every instructed form is covered by a grant: True\n\nAn operator holding only this line can confirm that what the role was told to type is what the role was permitted to run. That is the property, and it is visible without source access, which is what the criterion actually asks.\n\nWorth naming why putting both in one record matters more than it looks. Sprint 30 made a denial attributable to a grant. This makes a denial attributable to a *mismatch between the grant and the instruction* \u2014 the case where the profile is correct, the role is obedient, and it still gets denied because it was told a form the grant does not cover. That failure is invisible from either field alone and obvious from the two together.\n\n================================================================\nREQ 1 (LiveQA half) \u2014 A REAL LAUNCHED ROLE RECEIVES IT: PASS, TWO WAYS\n================================================================\nQA1 asked specifically for the first line of the prompt itself, not just the record. So I captured the child's actual argv with a stub whose only job was to write out what it received, and read the prompt from it.\n\nThe child's argv is 15 elements; the composed prompt is the last, 1717 characters. Its FIRST LINE:\n  \"PERMISSION GRANT -- EXACT COMMAND FORMS REQUIRED: your Bash permission grant for this session\n   matches these forms exactly, character for character...\"\nfollowed immediately by the two forms, then the role's actual task. The instruction arrives through the launch itself, as argv, and it is the first thing in the prompt rather than buried after the task \u2014 a role that reads only the opening still gets it.\n\nTHEN THE STRONGER TEST, because receiving text is not the same as acting on it. I launched the same role for real, against a real sprint:\n  exit 0, 17 turns, 1 permission denial\n  the sprint's own state afterwards: \"QA1 audit result: FAIL (rounds: 1)\",\n  \"Last touched by: qa1, session 59425fb3-...\"\n\nRecording that verdict requires successfully invoking `node scripts/run-lifecycle.js qa1 ...` \u2014 one of the two instructed forms. The state file changed and is attributed to the role's own session, so the form was not merely delivered, it was used, and it worked.\n\nAnd its single denial was:\n  diff <(tail -n +8 .../templates/sprint-template.md) <(tail -n +8 .../sprint-1_invocation-probe.md)\na process-substitution compound, which starts with neither instructed form. So in the same run: instructed forms succeeded, a non-instructed form was refused. That is the instruction and the grant agreeing in practice, observed from behaviour rather than from text.\n\nONE THING I AM NOT CLAIMING. I noticed this run produced 1 denial in 17 turns where earlier gates of mine produced 2 in 3 and 2 in 17, and it is tempting to read that as the instruction reducing denials. I am not recording it as evidence: different tasks, different repositories, different sprint contents, no control. It is an impression, not a measurement, and this project has spent several sprints establishing why that distinction matters.\n\n================================================================\nWHAT I OBSERVED VS ACCEPTED\n================================================================\nEvery result here I produced directly against published 0.2.4. The prompt's first line came from the child's own received argv, captured by a stub, rather than from reading the launcher's composition code. The Req 3 correspondence was derived from the stderr capture only \u2014 I have not opened run-role.js in this gate, which was the point. The real-role half was confirmed against the sprint's state file and its session attribution, not against the role's own prose summary of what it did.\n\nPipeman's note that an unrelated local `.vscode/settings.json` edit sat uncommitted in their tree throughout is acknowledged: it is not in the published tarball (my content check covers all 62 shipped files against the commit) and it is not a sprint artifact, so it has no bearing on this verdict.\n\nNo corrections to my own method this round.\n\n================================================================\nRECOMMENDATION\n================================================================\nShip-ready. The instruction reaches the role through the launch as the first line of its prompt, the role demonstrably uses the forms it was given, and the grant and the instruction now appear together in one stderr line so their correspondence can be checked by someone holding nothing else. Req 3's own test \u2014 that the correspondence is visible without source access \u2014 is met in the strict sense QA1 framed it.\n\nNothing carries forward from this sprint. Three items remain open from earlier gates, unchanged: the hollow-green CI case is still unobserved, no role is designated to commit its own verdict, and the permission anchor is now six CLI versions behind this machine.\n\nThis PASS means the code is ready, not that anyone is authorized to close sprint 31."
+    },
+    {
+      "ts": "2026-09-10T05:57:42+00:00",
+      "actor": "dev-team",
+      "event": "sprint_closed",
+      "detail": "user_said=User invoked /sprint-complete 31 directly in this session, with no further text -- explicit real-time authorization to close sprint 31 right now."
     }
   ],
   "last_claim": {
-    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-10T05:15:40+00:00"
+    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-10T05:57:42+00:00"
   }
 }
