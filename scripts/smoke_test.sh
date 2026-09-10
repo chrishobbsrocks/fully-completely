@@ -1785,6 +1785,22 @@ assert last['actor'] == 'dev-team-1', f'actor must be the real CLAUDE_CODE_AGENT
 $SCRIPT status "$SPRINT_ABORT" 2>&1 | grep -q "Phase: dev_build" && fail "abort should have moved the sprint out of dev_build"
 rm -f /tmp/out.txt
 
+echo "== sprint 33, Req 4 (QA1 round 1 finding): block on a sprint that was NEVER /sprint-start'ed refuses cleanly, with nothing moved and no analysis discarded =="
+SPRINT_NEVER_STARTED=$(new_sprint "Never started sprint")
+$SCRIPT block "$SPRINT_NEVER_STARTED" --reason "the content this sprint needs does not exist yet" \
+  > /tmp/out.txt 2>&1 && fail "block succeeded on a sprint with no state file -- QA1 round 1 must stay fixed" || true
+grep -q "has no state file" /tmp/out.txt || fail "block's never-started refusal message is missing"
+grep -q "Nothing has been moved" /tmp/out.txt || fail "block's never-started refusal doesn't say nothing moved"
+NEVER_STARTED_FILE=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_NEVER_STARTED}']['file'])")
+echo "$NEVER_STARTED_FILE" | grep -q "1-todo/" || fail "a refused block on a never-started sprint must leave the file in 1-todo/ -- got: $NEVER_STARTED_FILE"
+python3 -c "
+import json
+r = json.load(open('docs/sprints/registry.json'))
+assert r['sprints']['${SPRINT_NEVER_STARTED}']['status'] == 'todo', 'registry status must be untouched (todo)'
+"
+[ -f "docs/sprints/state/sprint-${SPRINT_NEVER_STARTED}.json" ] && fail "a refused block must not have created a state file"
+rm -f /tmp/out.txt
+
 echo "== sprint 33, Req 4: block refuses with no --reason, and requires no --user-said (non-destructive) =="
 SPRINT_BLOCK=$(new_sprint "Block sprint")
 $SCRIPT start "$SPRINT_BLOCK" > /dev/null

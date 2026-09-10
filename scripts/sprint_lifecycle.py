@@ -2309,7 +2309,15 @@ def cmd_abort(args) -> None:
     with a documented cross-role recovery path -- this is the former).
 
     Req 3: --reason is now required and non-empty, same ordering as
-    --user-said. "(none given)" can no longer be produced."""
+    --user-said. "(none given)" can no longer be produced.
+
+    QA1 round 1 (on cmd_block, applies equally here): this command has
+    never gated on phase, so it can act on an already-complete sprint --
+    pre-existing, not introduced by this sprint, and left deliberately
+    unaddressed here for the same reason cmd_block's own docstring
+    records: it is a real design question, not this sprint's narrowest
+    fix, and belongs in its own sprint if an unauthorized un-complete of
+    a closed sprint is judged worth closing."""
     user_said = resolve_text(args.user_said, args.user_said_file)
     if not user_said.strip():
         die("--user-said is required and must be non-empty. Quote what the user actually told "
@@ -2374,12 +2382,57 @@ def cmd_block(args) -> None:
     command has no single owning role either. No --user-said: blocking
     is not destructive, so it does not carry cmd_complete/cmd_abort's
     human-authorization gate, only a required, non-empty analysis of
-    why."""
+    why.
+
+    QA1 round 1 FINDING, FIXED HERE: this used to load_state() INSIDE the
+    locked block, AFTER the file had already moved to 4-blocked/ and the
+    registry had already flipped to "blocked" -- so blocking a sprint
+    that was never /sprint-start'ed (no state file yet, which is exactly
+    when "this needs real content that doesn't exist" is normally
+    discovered, per this sprint's own Context) half-mutated the record,
+    reported failure, and discarded the analysis in the same breath.
+    That is precisely what this command exists to prevent -- worse than
+    the abandon-with-a-reason it replaces, since the result was a sprint
+    sitting in 4-blocked marked blocked with no recorded why. Fixed by
+    applying Req 2's own ordering here too: validate everything before
+    any mutation, so a refusal never leaves anything moved. The state
+    file's existence is checked before the lock, alongside --reason,
+    same as cmd_complete's own "argument validation independent of
+    sprint state, checked before touching anything" precedent -- state
+    files are only ever created (cmd_start) and never deleted by any
+    command in this file, so there is nothing to race against here.
+
+    QA1 round 1, SECOND FINDING -- A DELIBERATE, RECORDED DECISION, NOT
+    AN OVERSIGHT: neither this command nor cmd_abort gates on phase, so
+    both can act on an already-complete sprint (cmd_abort has always
+    been able to; this command inherits it). Left unaddressed in this
+    sprint deliberately, not by omission: the Risks section's own
+    instruction is "the narrowest thing that preserves id, location and
+    analysis," and a phase guard is a real design question (which
+    phases legitimately allow blocking? does it interact with the
+    liveqa fix loop?) that deserves its own consideration, not a rushed
+    addition riding on a round-2 fix for something else. Recorded here
+    so a future reader sees this was decided, not overlooked -- worth
+    raising with Master Controller as a candidate for its own sprint if
+    an unauthorized un-complete of a closed sprint is judged worth
+    closing."""
     reason = resolve_text(args.reason, args.reason_file)
     if not reason.strip():
         die("--reason is required and must be non-empty. State the analysis of why this sprint "
             "isn't currently buildable -- this is what Master Controller reads to repair it, and "
             "it is the whole point of blocking rather than abandoning.")
+
+    # Checked before the lock and before any mutation -- see the QA1
+    # round 1 finding in this function's own docstring. A sprint that was
+    # never /sprint-start'ed has no state file to attach the analysis to;
+    # refuse cleanly here rather than moving the file and flipping the
+    # registry first and discovering that after the fact.
+    if not state_path(args.id).exists():
+        die(f"Sprint {args.id} has no state file -- it was never /sprint-start'ed, so there is "
+            "no record here to attach this analysis to. Report the analysis to Master Controller "
+            f"directly so the sprint file can be repaired before it's ever started, or run "
+            f"/sprint-start {args.id} first if it should begin building before being blocked. "
+            "Nothing has been moved.")
 
     actor = os.environ.get("CLAUDE_CODE_AGENT") or "unknown"
     with locked("registry"), locked(f"sprint-{args.id}"):
