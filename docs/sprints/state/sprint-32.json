@@ -1,0 +1,27 @@
+{
+  "id": 32,
+  "title": "Extend the bookkeeping-commit rule to the two gate roles, in the two shapes it actually needs",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-09-10T06:00:43+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-09-10T06:00:43+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ],
+  "last_claim": {
+    "claude_session_id": "c62dc581-9371-5e20-8925-d3eb79475ad8",
+    "claude_agent": "dev-team-2",
+    "ts": "2026-09-10T06:00:43+00:00"
+  }
+}

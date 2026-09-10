@@ -190,8 +190,8 @@
     "32": {
       "title": "Extend the bookkeeping-commit rule to the two gate roles, in the two shapes it actually needs",
       "epic": "Sprint record durability",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-32_extend-the-bookkeeping-commit-rule-to-the-two-gate-roles-in-the-two-shapes-it-actually-needs.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-32_extend-the-bookkeeping-commit-rule-to-the-two-gate-roles-in-the-two-shapes-it-actually-needs.md"
     },
     "33": {
       "title": "Stop abort being the one destructive action with no gate, and give a blocked role somewhere to go",
