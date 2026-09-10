@@ -437,21 +437,25 @@ default, and that's a deliberate call, not an oversight:
   being the reviewed commit, not whatever was last pushed before the
   review started.
 - **A sprint touching this repo's own tooling can now legitimately sit at
-  `liveqa_live` awaiting release authorization, sometimes for a while.**
-  The bullet above makes this repo's own live test mean installing the
-  newly published package; `## The lifecycle` above makes publishing
-  itself require the user's own real-time word. Put together, the live
-  test literally cannot start until the user says to publish, so a sprint
-  parked at `liveqa_live` with no publish yet is the correct resting
-  state here, not a stall. Say so if you're the one who finds it: the
-  right move is asking the user whether to publish now, never pushing a
-  publish through on someone else's word to unstick what looks like a
-  stuck sprint. This is a *rest* state, not a *dead* one — see `## The
-  lifecycle`'s `groundtruth_result`/`live_test_rounds` fields, still
-  `null`/`0` while it waits, exactly as they'd read for a sprint genuinely
-  not yet live-tested; nothing here distinguishes "waiting on
-  authorization" from "not started" in the state file itself, so this
-  paragraph is the only place that distinction is recorded.
+  `dev_agreed_done` awaiting release authorization, sometimes for a
+  while, with its code already pushed to git but not yet published.** The
+  bullet above makes this repo's own live test mean installing the newly
+  published package; `## The lifecycle` above makes publishing itself
+  require the user's own real-time word. Pipeman's own process
+  (`pipeman.md`, step 8) asks for that authorization *before* recording
+  `/sprint-ship`, deliberately, so nothing sits half-written while it
+  waits — which means a sprint awaiting authorization is not parked at
+  `liveqa_live` with a partial record, it simply hasn't reached
+  `/sprint-ship` yet, and the phase stays exactly where `/sprint-dev-done`
+  left it. Put together, the live test literally cannot start until the
+  user says to publish, so a sprint sitting at `dev_agreed_done` with its
+  commit already on the remote is the correct resting state here, not a
+  stall. Say so if you're the one who finds it: the right move is asking
+  the user whether to publish now, never pushing a publish through on
+  someone else's word to unstick what looks like a stuck sprint, and
+  never reading "already pushed, still at `dev_agreed_done`" as evidence
+  that `/sprint-ship` was forgotten — check whether it's this wait before
+  assuming that.
 
 If a change to this framework's own tooling ever turns out to need
 something sprint-shaped (recorded requirements, a documented audit trail
