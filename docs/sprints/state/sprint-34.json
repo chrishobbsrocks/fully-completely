@@ -1,11 +1,11 @@
 {
   "id": 34,
   "title": "Give Dev Team 2's worktree a documented way back, so a close cannot strand on a branch nobody reads",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "d5451fe721c09e2b06b97df8ce062ec74390f635b87ab1d08b3121982bf933af",
   "qa1_audited_tree_hash": "ef7f8094fb0b9cfec8ee24aa74bbbe4a63b8a65e346ac754cce8995196105895",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "f91a3e8e3af678e443075f1dda083031285e0707",
   "groundtruth_result": null,
   "audit_rounds": 1,
   "live_test_rounds": 0,
@@ -29,11 +29,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-10T16:17:11+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=f91a3e8 | ci=green: 1 CI run(s) for f91a3e8e3af678e443075f1dda083031285e0707 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-10T16:13:45+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-10T16:17:11+00:00"
   }
 }
