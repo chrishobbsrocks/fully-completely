@@ -2,7 +2,7 @@
 id: 32
 title: "Extend the bookkeeping-commit rule to the two gate roles, in the two shapes it actually needs"
 epic: "Sprint record durability"
-status: in_progress
+status: done
 created: 2026-09-09T23:39:39+00:00
 ---
 
