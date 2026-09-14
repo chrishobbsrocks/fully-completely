@@ -1,5 +1,5 @@
 {
-  "next_id": 36,
+  "next_id": 38,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -210,6 +210,19 @@
       "epic": "Framework rules and distribution",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-35_make-packaging-fail-closed-and-stop-backups-carrying-what-was-scrubbed--done.md"
+    },
+    "36": {
+      "title": "Stop a mis-issued command erasing a sprint's record, audit live-loop fixes, and close three smaller downstream gaps",
+      "epic": "Downstream findings: FMC ShowOffTest run",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-36_stop-a-mis-issued-command-erasing-a-sprint-s-record-audit-live-loop-fixes-and-close-three-smaller-downstream-gaps.md",
+      "original_title": "Stop start erasing a live sprint's record, and put a live-loop fix through the audit it skips"
+    },
+    "37": {
+      "title": "Let headless Master Controller commit its own amendments, and give consumers the role-claims ignore entry",
+      "epic": "Downstream findings: FMC ShowOffTest run",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-37_let-headless-master-controller-commit-its-own-amendments-and-give-consumers-the-role-claims-ignore-entry.md"
     }
   }
 }
