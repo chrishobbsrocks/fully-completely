@@ -1,0 +1,27 @@
+{
+  "id": 36,
+  "title": "Stop a mis-issued command erasing a sprint's record, audit live-loop fixes, and close three smaller downstream gaps",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-09-14T23:22:29+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-09-14T23:22:29+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ],
+  "last_claim": {
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-14T23:22:29+00:00"
+  }
+}

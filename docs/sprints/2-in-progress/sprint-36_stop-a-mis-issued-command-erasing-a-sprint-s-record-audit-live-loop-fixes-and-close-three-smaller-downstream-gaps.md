@@ -3,7 +3,7 @@ id: 36
 title: "Stop a mis-issued command erasing a sprint's record, audit live-loop fixes, and close three smaller downstream gaps"
 original_title: "Stop start erasing a live sprint's record, and put a live-loop fix through the audit it skips"
 epic: "Downstream findings: FMC ShowOffTest run"
-status: todo
+status: in_progress
 created: 2026-09-14T23:17:34+00:00
 ---
 
