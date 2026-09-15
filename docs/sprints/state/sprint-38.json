@@ -1,7 +1,7 @@
 {
   "id": 38,
   "title": "Stop a clean relaunch warning about a session that isn't running, and name the branch on a fresh repository",
-  "phase": "qa1_audit",
+  "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "716a9616f882c13e396a0d4abbdc054b625d1d1c115e4c77db737763d57bed7d",
   "qa1_audited_tree_hash": "1aa3be632029b0bd4336fbece82b168233c371b79efba94cf3bd5f778fce265c",
@@ -30,11 +30,17 @@
       "actor": "qa1",
       "event": "audit",
       "detail": "PASS: QA1 gate-1 audit, sprint 38, round 2. Audited commit a21fcbd (HEAD). The sprint file was re-read and is byte-identical to e573e96, so the requirements have not moved. This round reviews b49fbcf..a21fcbd against the two round-1 findings, on top of the round-1 review of everything else. Verdict: PASS.\n\n1. isPidAlive and an unusable ps (HIGH): FIXED, and demonstrated fixed.\n - Every ps failure path (a throw, ps.error, or a non-zero exit or empty STAT) now goes through reprobeAfterUnusablePs(). That re-runs process.kill(pid, 0) and returns false only on a fresh ESRCH, null otherwise. A genuine exit in the window between the two probes still reads as gone; a ps that cannot answer never does.\n - The zombie path (STAT starting with Z means false) is unchanged.\n - QA1's own repro, re-run at a21fcbd with the same BusyBox-shaped PATH shim ps (usage on stderr, exit 1). QA1 confirmed real BusyBox behaves this way in an alpine container last round.\n   - Live sleep process: isPidAlive gives null, and roleClaimWarning PRINTS the NOTE.\n   - The same process SIGKILLed and reaped: isPidAlive gives false, and the NOTE is suppressed. So the fix did not break the positive-gone case.\n - Falsification: QA1 swapped b49fbcf's role-claims.js into a clone at a21fcbd and ran launcher_test.js. The new test \"a ps that cannot answer (BusyBox's own shape) must NOT be read as process gone for a genuinely running process\" FAILS on the old code and passes on the fix.\n\n2. branch_state and a real repository git refuses (MEDIUM): FIXED, and demonstrated fixed.\n - \"no-repo\" is now returned only when git exits 0 printing something other than \"true\", or exits non-zero with stderr containing \"not a git repository\". Every other failure is (\"unknown\", None).\n - QA1's repro, re-run at a21fcbd: GIT_TEST_ASSUME_DIFFERENT_OWNER=1 in a real clone gives ('unknown', None) and \"(branch unknown)\". It no longer claims \"not a git repository\".\n - A genuinely empty non-repo directory still gives ('no-repo', None).\n - Falsification: with b49fbcf's sprint_lifecycle.py swapped in, smoke_test.sh FAILS on the new assertion. It printed \"No sprints yet in ... (not a git repository)\" for the dubious-ownership repo, and passes on the fix.\n - Advisory, not a finding: the stderr match is English-only. Under a non-English git locale, a genuine non-repo would degrade to \"(branch unknown)\". That is the permitted wording for undeterminable cases and never a false specific claim, so Req 2 still holds. Setting LC_ALL=C (or LANG=C) in that subprocess's env would make the positive case locale-independent, which is worth doing in a later sprint if Windows attendees run localized git.\n\nEVERYTHING FROM ROUND 1 STILL HOLDS AT a21fcbd.\n - Req 1/1a/1c:\n   - The launcher records its own pid, which stays alive for the whole awaited session.\n   - Suppression happens only on an exact === false; a missing, invalid or old-format pid gives null, so the NOTE fires.\n   - There is no \"nobody else is working here\" wording anywhere.\n - 1b: the measurements (macOS kill/ESRCH, the zombie visible only via ps STAT, pty-close taking down launcher and child) are recorded next to the code, naming platform and shutdown path. Windows is explicitly named as unmeasured, and LiveQA's criteria re-confirm it live.\n - Req 2/2a:\n   - An unborn branch is named via symbolic-ref; a detached HEAD gives unknown.\n   - Every tree_description() call site gets the text; nothing is special-cased.\n   - The stderr banner is untouched.\n   - Printed text is asserted for no-repo, unborn (a real git init), named, detached and dubious-ownership.\n - Req 3: package.json is 0.2.12 against published 0.2.11 (npm view), and the CHANGELOG entry is present.\n - Diff confinement: role-claims.js, sprint_lifecycle.py, launcher_test.js, smoke_test.sh, package.json, CHANGELOG.md, plus docs/sprints bookkeeping. All on the allowed list.\n\nREQ 4. QA1 ran both suites at a21fcbd in a clean clone. node scripts/launcher_test.js: ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh: ALL SMOKE TESTS PASSED, exit 0. pyflakes is clean.\n\nFOR LIVEQA, carried from round 1. On Windows, after the trash can or Terminate All, confirm claude itself is gone via Get-Process, not only the launcher. run-role.js's orphan guard is POSIX-only; if claude ever outlives the node launcher there, the recorded pid reads as gone and the NOTE would be wrongly suppressed while a session is live."
+    },
+    {
+      "ts": "2026-09-15T16:58:47+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-15T16:27:23+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-15T16:58:47+00:00"
   }
 }
