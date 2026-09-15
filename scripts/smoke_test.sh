@@ -155,11 +155,12 @@ echo "$SHIP_OUT_1" | grep -qF "shipped (commit HEAD)" && \
   fail "ship --commit HEAD printed the raw ref 'HEAD' instead of resolving it -- Req 4 regression"
 
 LIVEQA_FAIL_OUT_1=$($SCRIPT liveqa "$SPRINT_1" --deployed-commit "$AUDITED_COMMIT_1" --verdict FAIL --notes "expected fail" 2>&1)
-# Sprint 36, Req 4 (second finding from QA1's own live-loop audit of
-# 711c5fc): a LiveQA FAIL/CONDITIONAL used to tell the reader "Dev Team:
-# fix, then Pipeman: /sprint-reship" with no QA1 audit step in between,
-# even though cmd_reship itself has refused an unaudited commit since
-# this same sprint. Must name the audit step now.
+# Sprint 36, Req 4: a LiveQA FAIL/CONDITIONAL used to tell the reader
+# "Dev Team: fix, then Pipeman: /sprint-reship" with no QA1 audit step in
+# between, even though cmd_reship itself has refused an unaudited commit
+# since this same sprint. Must name the audit step now. Found by the
+# user, reported directly to Dev Team 1 -- NOT a QA1 catch: QA1 missed it
+# across all three gate-1 rounds and its own live-loop audit of 711c5fc.
 echo "$LIVEQA_FAIL_OUT_1" | grep -q "QA1 audits the fix on that exact commit" || \
   fail "a LiveQA FAIL's printed next-step message doesn't mention QA1 auditing the fix -- got: $LIVEQA_FAIL_OUT_1"
 echo "$LIVEQA_FAIL_OUT_1" | grep -qF "/sprint-qa1 ${SPRINT_1} --verdict" || \

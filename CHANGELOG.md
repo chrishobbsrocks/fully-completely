@@ -31,9 +31,11 @@ text only — neither changes any gate's actual behavior.
 - **Corrects:** a LiveQA FAIL/CONDITIONAL still told the reader "Dev
   Team: fix, then Pipeman: /sprint-reship," describing the pre-0.2.10
   loop with no QA1 audit step in between, even though `/sprint-reship`
-  itself has refused an unaudited commit since 0.2.10. Found by QA1's own
-  live-loop audit of the first fix above. Now names the QA1 audit step
-  explicitly.
+  itself has refused an unaudited commit since 0.2.10. Found by the user,
+  not by QA1 — QA1 missed it across all three of sprint 36's gate-1
+  rounds and its own live-loop audit of the first fix above, and said so
+  plainly on the next round rather than let a QA1 miss stand recorded as
+  a QA1 catch. Now names the QA1 audit step explicitly.
 
 ## 0.2.10 — Sprint 36
 

@@ -2591,18 +2591,22 @@ def cmd_liveqa(args) -> None:
                   "/sprint-complete requires the user's explicit, real-time "
                   "go-ahead (--user-said) - both gates passing is not that.")
         else:
-            # Sprint 36, Req 4/3 (second finding from QA1's own live-loop
-            # audit of 711c5fc, not caught in round 1): this message
-            # still described the pre-Req-3 loop -- "fix, then reship" --
-            # with no QA1 audit step in between, even though cmd_reship
-            # itself has refused an unaudited commit since this same
-            # sprint. Printed at the exact moment a reader is deciding
-            # what to do next, so it is exactly the kind of place Req 4's
-            # own instruction ("every document that describes the
-            # live-loop fix path says an audit is required") was meant to
-            # reach, and it was missed because it's a print statement
-            # inside this file, not a doc file Req 4's own grep pass
-            # searched.
+            # Sprint 36, Req 4/3: this message still described the
+            # pre-Req-3 loop -- "fix, then reship" -- with no QA1 audit
+            # step in between, even though cmd_reship itself has refused
+            # an unaudited commit since this same sprint. Printed at the
+            # exact moment a reader is deciding what to do next, so it is
+            # exactly the kind of place Req 4's own instruction ("every
+            # document that describes the live-loop fix path says an
+            # audit is required") was meant to reach. Found by the user,
+            # reported directly to Dev Team 1 -- NOT a QA1 catch: QA1
+            # missed it across all three gate-1 rounds and its own
+            # live-loop audit of 711c5fc, and confirmed as much on its own
+            # initiative on the following round, correcting an earlier
+            # commit's wrong attribution rather than letting a QA1 miss
+            # get recorded as a QA1 catch. Recorded accurately here
+            # because that record is what gets used to judge whether the
+            # audit gate is actually catching things.
             print(f"LiveQA live test {verdict} (round {state['live_test_rounds']}). "
                   "Dev Team: fix, then QA1 audits the fix on that exact commit "
                   f"(/sprint-qa1 {args.id} --verdict ... --commit <hash>) -- /sprint-reship "
