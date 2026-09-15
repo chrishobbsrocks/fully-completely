@@ -1,14 +1,14 @@
 {
   "id": 36,
   "title": "Stop a mis-issued command erasing a sprint's record, audit live-loop fixes, and close three smaller downstream gaps",
-  "phase": "liveqa_live",
+  "phase": "complete_ready",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "1d949cd59cee0aa2a3e1a77acfa92fcd065fb3dd501e25e428c493b414beec52",
   "qa1_audited_tree_hash": "94f83984914219ff37d04ff3918cdc427d97f2acf7fba0c2c9016704a9be5e0d",
   "last_shipped_commit": "c79f476e1cdda7f1106bd3f6938392e6d953b1c1",
-  "groundtruth_result": "CONDITIONAL",
+  "groundtruth_result": "PASS",
   "audit_rounds": 3,
-  "live_test_rounds": 1,
+  "live_test_rounds": 2,
   "started": "2026-09-14T23:22:29+00:00",
   "completed": null,
   "history": [
@@ -83,12 +83,24 @@
       "actor": "pipeman",
       "event": "reshipped",
       "detail": "commit=c79f476e1cdda7f1106bd3f6938392e6d953b1c1 | ci=green: 1 CI run(s) for c79f476e1cdda7f1106bd3f6938392e6d953b1c1 all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-15T15:08:47+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: LiveQA live test, sprint 36, round 2. Verdict: PASS.\nScope: the narrow retest of the round-1 CONDITIONAL, plus one extra finding. Both are verified fixed in the published 0.2.11. Every check below was run against real installs of the published package; nothing was tested from a git checkout.\n\nENVIRONMENT\nmacOS Darwin arm64, node v24.21.0, npm 11.19.0, claude 2.1.272, 2026-09-15. Scratch projects were under this session's scratchpad (s36r2/fresh, s36r2/upg-0.2.10, s36r2/upg-0.2.9). Tools: npx, the installed scripts/run-lifecycle.js, git, bash. No billed agent runs.\n\nWHY THERE WAS NO RETEST AT 711c5fc\nPipeman's first reship (711c5fc) did not publish; npm latest stayed at 0.2.10 (gitHead 6283d8b). No verdict was recorded then, because no installable artifact contained the fix. This round tests the 0.2.11 publish.\n\nPROVENANCE (from the registry, not from the handoff)\n- npm dist-tags: latest 0.2.11. npm view fully-completely@0.2.11 gives gitHead c79f476e1cdda7f1106bd3f6938392e6d953b1c1, equal to last_shipped_commit.\n- dist.shasum e7a4bca58d964022fe0e88833e70887e9f74dbf1 equals the shasum of the npm pack download.\n- All 57 published files were byte-compared to git show c79f476:<path>: MISMATCHED 0, NOT-IN-COMMIT 0.\n- Non-sprint files changed 6283d8b..c79f476: CHANGELOG.md, package.json, scripts/baselines/user-owned-content.json, scripts/smoke_test.sh, scripts/sprint_lifecycle.py. Nothing else in the package changed since round 1.\n\nROUND-1 FINDING 1 (reship refusal text): FIXED, verified live\nFresh npx -y fully-completely@0.2.11 into a clean git repo (install exit 0, version file 0.2.11), with sprint 1 driven to liveqa_live on real commits.\n- Case (a): gate-1 PASS on C1, then a live-loop FAIL --commit C1, then reship C1. Refused, exit 1. Verbatim: \"has no QA1 PASS currently on record for it \u2014 the latest QA1 verdict on record for it is FAIL, not PASS -- a PASS was recorded earlier for this exact tree and has since been superseded. Hand this commit to QA1 for /sprint-qa1 1 --verdict ... --commit 0c7328a... on it, then reship again. No override.\" The false claim \"has never been through QA1's audit successfully\" is gone, and so is the \"Gate 1's currently PASSed tree is X, which does not match\" clause (X was the same tree in round 1).\n- Case (b): live-loop PASS then FAIL on C2, then reship C2. Refused, exit 1: \"...latest QA1 verdict on record for it is FAIL, not PASS -- a PASS was recorded earlier for this exact tree and has since been superseded. Gate 1's currently PASSed tree is 9773f80c..., a different tree.\" Accurate, because C2's tree daa5bea3... does differ from the gate-1 tree.\n\nROUND-1 EXTRA FINDING (liveqa handoff text, reported in the round-1 handoff, not in the notes): FIXED, verified live\n- /sprint-liveqa FAIL now prints: \"LiveQA live test FAIL (round 1). Dev Team: fix, then QA1 audits the fix on that exact commit (/sprint-qa1 1 --verdict ... --commit <hash>) -- /sprint-reship refuses without a PASS on record for its tree -- then Pipeman: /sprint-reship.\"\n- CONDITIONAL prints the same text (round 2).\n\nREST OF THE RESHIP GATE (regression): all behave as in round 1, with the new wording where applicable\n- Unaudited C2: refused, \"no QA1 verdict is on record for it at all ... a different tree\".\n- Live-loop FAIL only: refused.\n- Live-loop PASS on C2: reship exit 0.\n- CONDITIONAL only on C3: refused, \"latest ... is CONDITIONAL, not PASS\".\n- Gate-1 tree C1 with no later verdict: accepted.\n- PASS on C3 with a FAIL recorded on another tree (C1): C3 accepted.\n- Empty bookkeeping commit on top of audited C3: accepted.\n- deadbeef: refused, \"does not resolve to a real commit\".\n\nOTHER LIFECYCLE CHECKS (regression, same install)\n- start on liveqa_live: refused, exit 1. The docs/sprints shasum was identical before and after.\n- block then re-file sprint 2: history kept (\"liveqa: blocked LQ-R2-ANALYSIS-4410\", then \"system: sprint_restarted re-filed from blocked; history preserved, gate results reset\"), phase dev_build.\n- complete sprint 3, then block: refused (\"Sprint 3 is 'complete' and cannot be blocked ... No override.\"). start 3 was also refused.\n- start on an aborted never-started sprint: refused (\"registry status is 'abandoned', not 'todo'\").\n\nUPGRADE PATH (the baseline table changed in this release)\n- 0.2.10 to 0.2.11: exit 0, version 0.2.11.\n  - scripts/sprint_lifecycle.py and smoke_test.sh upgraded, with .fc-bak-0.2.10 backups reported.\n  - A user-edited .claude/agents/qa1.md was kept, not overwritten.\n  - A planted .gitignore line was kept, and the role-claims entry is present.\n  - Untouched CLAUDE.md and pipeman.md are byte-equal to c79f476.\n- 0.2.9 to 0.2.11: exit 0.\n  - Untouched CLAUDE.md, pipeman.md and the sprint command files upgraded to 0.2.11 (byte-equal to c79f476), with backups reported.\n  - The user-edited qa1.md was kept.\n  - The planted .gitignore line was kept and the role-claims entry added.\n- Both upgraded projects run python3 scripts/sprint_lifecycle.py list without error.\n\nNOT RE-RUN, AND WHY\n- Headless Master Controller commit and denial probes (round 1, check C).\n  - scripts/mc-commit.js, scripts/launcher/run-role.js and scripts/install.js are byte-identical between 6283d8b (live-tested in round 1) and c79f476. The 57-file compare above plus the changed-file list confirms this.\n  - Those probes are billed and model-mediated (grade UNESTABLISHED), and their subject did not change.\n\nISSUES FOUND: none."
+    },
+    {
+      "ts": "2026-09-15T15:08:47+00:00",
+      "actor": "liveqa",
+      "event": "sprint_file_drift_since_audit",
+      "detail": "NOTE: sprint 36's file has changed since QA1's PASS (audited hash 1d949cd59cee..., current 90fd4aae4dcf...). Recorded, not refused \u2014 see this function's own comment for why. If this sprint's own acceptance criteria changed for a real reason, that's worth a fresh /sprint-qa1 look once the live-test loop settles; if it was a cosmetic edit, this note is the whole record of it."
     }
   ],
   "last_claim": {
-    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-15T14:52:41+00:00"
+    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
+    "claude_agent": "liveqa",
+    "ts": "2026-09-15T15:08:47+00:00"
   },
   "live_loop_audit_trees": [
     {
