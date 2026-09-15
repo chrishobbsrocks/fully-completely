@@ -13,6 +13,50 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.10 — Sprint 36
+
+Stop a mis-issued command erasing a sprint's record, require a QA1 audit
+before a live-loop fix ships, and close three smaller downstream gaps —
+all found by FMC driving a real 0.2.9 install headlessly.
+
+- `/sprint-start` refuses on any sprint that has already started and
+  isn't sitting at `blocked` — it used to have no phase guard at all, and
+  a mis-issued `/sprint-start` on a sprint already in `liveqa_live`
+  silently rebuilt its state file from scratch, nulling every verdict,
+  both audit hashes, `last_shipped_commit`, and its entire history.
+  Re-filing from `blocked` still works, unchanged, and now explicitly
+  preserves history (appending a restart event, never replacing it),
+  `audit_rounds`/`live_test_rounds`/the original `started` timestamp,
+  while resetting every gate-result field.
+- `/sprint-block` refuses on a `complete` or `aborted` sprint. Combined
+  with the fix above, this closes a two-command path (block a closed
+  sprint, then start it) that could erase a closed record in ordinary-
+  looking steps.
+- `/sprint-reship` now refuses, no override, unless the exact commit
+  being reshipped has a QA1 PASS on record for its tree — either gate
+  1's own still-standing PASS, or a live-loop audit PASS QA1 records
+  mid-loop (`/sprint-qa1 <N> --verdict ... --commit <hash>`). Previously
+  a reshipped fix went out with no audit at all, by design; two
+  independent downstream incidents of unaudited content going live
+  changed that. The live-loop audit's own append-only safety property
+  (it can never touch anything gate 1 reads) is preserved via a new,
+  separate `live_loop_audit_trees` state field.
+- LiveQA now runs every runnable check before recording a FAIL or
+  CONDITIONAL, instead of stopping at the first confirmed defect — a
+  determined verdict still never waits on a check that's genuinely
+  blocked (missing hardware, for instance), but every check that CAN run
+  in the same round now does, with every defect found reported together.
+- Headless Master Controller can now commit its own sprint-bookkeeping —
+  a narrow, measured grant (`git add`/pathspec `git commit -m` scoped to
+  `docs/sprints/`; `git push`, `git commit -a`/`-am`, and `git add -A`/`.`
+  explicitly denied) rather than the broad access other roles receive.
+  Previously it had no git access at all, so amendments it made after a
+  sprint started could sit uncommitted through no fault of the process.
+- The installer's managed `.gitignore` block now includes
+  `.claude/role-claims.json` (already excluded in this repo's own
+  `.gitignore` since sprint 25, but never reached a consumer project
+  through the installer until now).
+
 ## 0.2.0 — Sprint 27
 
 Make the sprint record durable at the moments people rely on it.

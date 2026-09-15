@@ -961,7 +961,16 @@ function mergeGitignore() {
   // backup. Correct independently of that disclosure, since a backup
   // should never be committable in any project, but that incident is the
   // reason this line exists rather than something else.
-  const block = ['docs/sprints/.locks/', `*${BACKUP_MARKER}*`];
+  //
+  // Sprint 36, Req 7: `.claude/role-claims.json` was already in THIS
+  // repo's own .gitignore (sprint 25) but never reached a consumer
+  // project through this installer -- ShowOffTest committed the file
+  // before later untracking it (`ad1fb84`). Added here as a fourth
+  // managed line, same merge logic as the two above: an install that
+  // already has it is a no-op (`missing` below already excludes it), and
+  // an upgrade of an install that lacks it gets it appended, exactly like
+  // any other entry in this block.
+  const block = ['docs/sprints/.locks/', `*${BACKUP_MARKER}*`, '.claude/role-claims.json'];
   let existingLines = [];
   let existed = fs.existsSync(destPath);
   if (existed) {

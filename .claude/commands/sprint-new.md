@@ -32,3 +32,5 @@ After running this, open the created file and fill in:
 - Risks & Mitigations
 
 Do not run `/sprint-start` until those sections are filled in, Dev Team should never receive a sprint with placeholder requirements.
+
+**Headless note (sprint 36, Req 6):** headless Master Controller can now commit its own sprint-file writes, narrowly — `git add docs/sprints/<path>` and a pathspec `git commit -m "..." docs/sprints/<path>`, nothing broader (`git push`, `git commit -a`/`-am`, `git add -A`/`.` are all explicitly denied; see `docs/sprint-36-mc-commit-permission-findings.md` and `HEADLESS_PERMISSION_PROFILES['master-controller']` in `scripts/launcher/run-role.js`). Before this sprint it had no git access at all, so a sprint file created here (or amended later, per master-controller.md's own Rule 6) could sit uncommitted through no fault of the process — this closes that gap. Stage and commit exactly the paths this command just wrote (the new sprint file, `docs/sprints/registry.json`), never a broader form.

@@ -155,19 +155,50 @@ echo "$SHIP_OUT_1" | grep -qF "shipped (commit HEAD)" && \
   fail "ship --commit HEAD printed the raw ref 'HEAD' instead of resolving it -- Req 4 regression"
 
 $SCRIPT liveqa "$SPRINT_1" --deployed-commit "$AUDITED_COMMIT_1" --verdict FAIL --notes "expected fail" > /dev/null
-git commit -q --allow-empty -m "fix for sprint $SPRINT_1"
+# Real content, not --allow-empty: an empty commit's tree is identical to
+# its parent's, which would coincidentally already match gate 1's own
+# audited tree (self-correcting per Req 3) and defeat the refusal test
+# just below.
+echo "fix for sprint $SPRINT_1" > "sprint${SPRINT_1}-fix.txt"
+git add "sprint${SPRINT_1}-fix.txt"
+git commit -q -m "fix for sprint $SPRINT_1"
 FIX_COMMIT_1=$(git rev-parse HEAD)
 
-echo "== sprint 15, Req 2: reship states plainly that the commit is unaudited and the live-loop audit is available, without implying LiveQA substitutes for QA1 =="
-RESHIP_OUT_1=$($SCRIPT reship "$SPRINT_1" --commit "$FIX_COMMIT_1" 2>&1)
+echo "== sprint 36, Req 3: reship refuses when no QA1 verdict is on record for the reshipped commit's exact tree =="
+RESHIP_REFUSE_1=$($SCRIPT reship "$SPRINT_1" --commit "$FIX_COMMIT_1" 2>&1) && \
+  fail "reship succeeded on a commit with no QA1 audit recorded for its tree -- Req 3 regression"
+echo "$RESHIP_REFUSE_1" | grep -q "has never been through QA1's audit successfully" || \
+  fail "reship's unaudited-tree refusal message is missing -- got: $RESHIP_REFUSE_1"
+echo "$RESHIP_REFUSE_1" | grep -qF "$FIX_COMMIT_1" || fail "reship's refusal doesn't name the commit being reshipped"
+echo "$RESHIP_REFUSE_1" | grep -qF "/sprint-qa1 ${SPRINT_1} --verdict" || fail "reship's refusal doesn't name the QA1 recovery command"
+python3 -c "
+import json
+s = json.load(open('docs/sprints/state/sprint-${SPRINT_1}.json'))
+assert s['last_shipped_commit'] == '$AUDITED_COMMIT_1', 'a refused reship must not have changed last_shipped_commit'
+"
+
+echo "== sprint 36, Req 3: a live-loop QA1 PASS on this exact commit unblocks reship, without ever touching gate 1's own fields =="
+GATE1_TREE_1=$(python3 -c "import json; print(json.load(open('docs/sprints/state/sprint-${SPRINT_1}.json'))['qa1_audited_tree_hash'])")
+$SCRIPT qa1 "$SPRINT_1" --verdict PASS --notes "live-loop audit of the fix" --commit "$FIX_COMMIT_1" > /dev/null || \
+  fail "a live-loop audit PASS with --commit should have succeeded"
+
+RESHIP_OUT_1=$($SCRIPT reship "$SPRINT_1" --commit "$FIX_COMMIT_1" 2>&1) || \
+  fail "reship should have succeeded once a live-loop PASS was recorded for this exact tree -- output: $RESHIP_OUT_1"
 echo "$RESHIP_OUT_1" | grep -qF "fix reshipped (commit ${FIX_COMMIT_1})" || \
   fail "reship should also print the resolved SHA, same fix as ship -- got: $RESHIP_OUT_1"
-echo "$RESHIP_OUT_1" | grep -q "has NOT been through QA1's static audit" || \
-  fail "reship's output should say plainly this commit hasn't been through QA1's audit"
-echo "$RESHIP_OUT_1" | grep -q "/sprint-qa1 will record a live-loop audit" || \
-  fail "reship's output should name that the live-loop audit is available for this commit"
-echo "$RESHIP_OUT_1" | grep -q "not a substitute for one" || \
-  fail "reship's output should foreclose the LiveQA-substitutes-for-QA1 conflation, not just avoid repeating it"
+echo "$RESHIP_OUT_1" | grep -q "QA1 PASS is on record for this exact tree" || \
+  fail "reship's output should say a QA1 PASS is on record for this exact tree"
+echo "$RESHIP_OUT_1" | grep -q "not a substitute for LiveQA" || \
+  fail "reship's output should still foreclose the LiveQA-substitutes-for-QA1 conflation"
+python3 -c "
+import json
+s = json.load(open('docs/sprints/state/sprint-${SPRINT_1}.json'))
+assert s['qa1_audited_tree_hash'] == '$GATE1_TREE_1', 'a live-loop audit must never touch gate 1\'s own audited tree hash'
+entries = s.get('live_loop_audit_trees', [])
+assert len(entries) == 1, f'expected exactly one live-loop-audit-tree entry: {entries}'
+assert entries[0]['commit'] == '$FIX_COMMIT_1', f'wrong commit recorded: {entries[0]}'
+assert entries[0]['verdict'] == 'PASS', f'wrong verdict recorded: {entries[0]}'
+"
 $SCRIPT liveqa "$SPRINT_1" --deployed-commit "$FIX_COMMIT_1" --verdict PASS --notes "ok" > /dev/null
 
 echo "== complete refuses (no override) without a non-empty --user-said, even with both gates PASS =="
@@ -415,10 +446,17 @@ $SCRIPT ship "$SPRINT_UNAUDITED" --commit "$UNAUDITED_COMMIT" > /dev/null
 $SCRIPT liveqa "$SPRINT_UNAUDITED" --deployed-commit "$UNAUDITED_COMMIT" --verdict FAIL --notes "first fail, audited miss" > /dev/null
 git commit -q --allow-empty -m "fix1 for sprint $SPRINT_UNAUDITED"
 FIX1_COMMIT=$(git rev-parse HEAD)
+# Sprint 36, Req 3: reship now requires a QA1 verdict on record for the
+# exact tree being reshipped -- a live-loop PASS unblocks it (this is
+# still, per cmd_gates' own unchanged classification below, an
+# unaudited-fix miss: a live-loop record is not a fresh gate-1 audit,
+# see cmd_reship's own docstring).
+$SCRIPT qa1 "$SPRINT_UNAUDITED" --verdict PASS --notes "live-loop audit" --commit "$FIX1_COMMIT" > /dev/null
 $SCRIPT reship "$SPRINT_UNAUDITED" --commit "$FIX1_COMMIT" > /dev/null
 $SCRIPT liveqa "$SPRINT_UNAUDITED" --deployed-commit "$FIX1_COMMIT" --verdict FAIL --notes "second fail, unaudited miss" > /dev/null
 git commit -q --allow-empty -m "fix2 for sprint $SPRINT_UNAUDITED"
 FIX2_COMMIT=$(git rev-parse HEAD)
+$SCRIPT qa1 "$SPRINT_UNAUDITED" --verdict PASS --notes "live-loop audit" --commit "$FIX2_COMMIT" > /dev/null
 $SCRIPT reship "$SPRINT_UNAUDITED" --commit "$FIX2_COMMIT" > /dev/null
 $SCRIPT liveqa "$SPRINT_UNAUDITED" --deployed-commit "$FIX2_COMMIT" --verdict PASS --notes ok > /dev/null
 $SCRIPT complete "$SPRINT_UNAUDITED" --user-said "close it, both misses are understood" > /dev/null
@@ -453,6 +491,7 @@ $SCRIPT ship "$SPRINT_SHIP_OVR_MISS" --commit "$DRIFT_COMMIT" > /dev/null
 $SCRIPT liveqa "$SPRINT_SHIP_OVR_MISS" --deployed-commit "$DRIFT_COMMIT" --verdict FAIL --notes "GT caught what QA1 never actually saw" > /dev/null
 git commit -q --allow-empty -m "fix for sprint $SPRINT_SHIP_OVR_MISS"
 SHIP_OVR_MISS_FIX_COMMIT=$(git rev-parse HEAD)
+$SCRIPT qa1 "$SPRINT_SHIP_OVR_MISS" --verdict PASS --notes "live-loop audit" --commit "$SHIP_OVR_MISS_FIX_COMMIT" > /dev/null
 $SCRIPT reship "$SPRINT_SHIP_OVR_MISS" --commit "$SHIP_OVR_MISS_FIX_COMMIT" > /dev/null
 $SCRIPT liveqa "$SPRINT_SHIP_OVR_MISS" --deployed-commit "$SHIP_OVR_MISS_FIX_COMMIT" --verdict PASS --notes ok > /dev/null
 $SCRIPT complete "$SPRINT_SHIP_OVR_MISS" --user-said "close it" > /dev/null
@@ -588,6 +627,7 @@ $SCRIPT status "$SPRINT_GT_CHECK" 2>/dev/null | grep -q "not yet re-tested" && \
 echo "== status: stale-test line appears once a reship lands after the last recorded verdict =="
 git commit -q --allow-empty -m "fix for sprint $SPRINT_GT_CHECK"
 GT_FIX_COMMIT=$(git rev-parse HEAD)
+$SCRIPT qa1 "$SPRINT_GT_CHECK" --verdict PASS --notes "live-loop audit" --commit "$GT_FIX_COMMIT" > /dev/null
 $SCRIPT reship "$SPRINT_GT_CHECK" --commit "$GT_FIX_COMMIT" > /dev/null
 $SCRIPT status "$SPRINT_GT_CHECK" 2>/dev/null | grep -q "Code has changed since the last recorded LiveQA verdict - not yet re-tested." || \
   fail "status did not show the stale-test line after a reship with no fresh verdict yet"
@@ -732,7 +772,12 @@ for field in protected:
 # that the mechanism actually stamps a fresh value is proven separately,
 # with an explicit before/after env override, in this file's own
 # dedicated sprint-25 Req 2 tests below.
-ignored_fields = ('history', 'last_claim')
+# Sprint 36, Req 3: live_loop_audit_trees legitimately changes too, on
+# purpose, exactly like history -- this call passes --commit, so a new
+# entry is appended (see _qa1_live_loop_audit's own docstring). Excluded
+# from the blanket equality check the same way, with its own explicit
+# assertion below instead.
+ignored_fields = ('history', 'last_claim', 'live_loop_audit_trees')
 before_no_history = {k: v for k, v in before.items() if k not in ignored_fields}
 after_no_history = {k: v for k, v in after.items() if k not in ignored_fields}
 if before_no_history != after_no_history:
@@ -744,6 +789,17 @@ if new_event['event'] == 'audit':
     raise SystemExit('live-loop audit must use a name distinct from gate 1\'s \"audit\", or cmd_gates would count it')
 if '$LL_COMMIT' not in new_event['detail']:
     raise SystemExit('the resolved --commit should appear in the live-loop audit event detail')
+before_trees = before.get('live_loop_audit_trees', [])
+after_trees = after.get('live_loop_audit_trees', [])
+if len(after_trees) != len(before_trees) + 1:
+    raise SystemExit(f'expected exactly one new live_loop_audit_trees entry: before={before_trees} after={after_trees}')
+new_tree_entry = after_trees[-1]
+if new_tree_entry['commit'] != '$LL_COMMIT':
+    raise SystemExit(f'live_loop_audit_trees entry recorded the wrong commit: {new_tree_entry}')
+if new_tree_entry['verdict'] != 'PASS':
+    raise SystemExit(f'live_loop_audit_trees entry recorded the wrong verdict: {new_tree_entry}')
+if not new_tree_entry['tree_hash']:
+    raise SystemExit(f'live_loop_audit_trees entry has no tree_hash: {new_tree_entry}')
 " || fail "live-loop audit state diff check failed — see message above"
 rm -f /tmp/ll_before.json
 
@@ -780,6 +836,10 @@ echo "== gates: a live-loop audit is never counted as a gate catch, even on a co
 GATES_BEFORE_LL=$($SCRIPT gates)
 git commit -q --allow-empty -m "fix for sprint $SPRINT_LL after the live loop"
 LL_FIX_COMMIT=$(git rev-parse HEAD)
+# Sprint 36, Req 3: reship needs a QA1 verdict on record for this exact
+# tree -- a fresh live-loop PASS on this specific commit, not relying on
+# any of the live-loop verdicts already recorded above for LL_COMMIT.
+$SCRIPT qa1 "$SPRINT_LL" --verdict PASS --notes "live-loop audit of the after-live-loop fix" --commit "$LL_FIX_COMMIT" > /dev/null
 $SCRIPT reship "$SPRINT_LL" --commit "$LL_FIX_COMMIT" > /dev/null
 $SCRIPT liveqa "$SPRINT_LL" --deployed-commit "$LL_FIX_COMMIT" --verdict PASS --notes ok > /dev/null
 
@@ -1131,13 +1191,25 @@ PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_RESHIP_CI" --
 $SCRIPT liveqa "$SPRINT_RESHIP_CI" --deployed-commit "$RESHIP_CI_SHIPPED" --verdict FAIL --notes "found a bug" > /dev/null
 git commit -q --allow-empty -m "fix for sprint $SPRINT_RESHIP_CI"
 RESHIP_CI_FIX=$(git rev-parse HEAD)
+# Sprint 36, Req 3: reship's new audit-tree gate runs BEFORE the CI check
+# below -- give this commit a live-loop PASS first so these tests still
+# reach and exercise the CI-status behavior they're actually testing.
+$SCRIPT qa1 "$SPRINT_RESHIP_CI" --verdict PASS --notes "live-loop audit" --commit "$RESHIP_CI_FIX" > /dev/null
 PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=red $SCRIPT reship "$SPRINT_RESHIP_CI" --commit "$RESHIP_CI_FIX" \
   > /tmp/out.txt 2>&1 && fail "reship succeeded despite a red CI run for the exact commit being reshipped (Req 4 regression)" || true
 grep -q "CI is red for the exact commit being reshipped" /tmp/out.txt || fail "reship's CI-red refusal message is missing"
 grep -qF "$RESHIP_CI_FIX" /tmp/out.txt || fail "reship's CI-red refusal doesn't name the commit"
-STATUS_AFTER_RED_RESHIP=$($SCRIPT status "$SPRINT_RESHIP_CI" --verbose 2>&1)
-echo "$STATUS_AFTER_RED_RESHIP" | grep -qF "$RESHIP_CI_FIX" && \
-  fail "a CI-red reship attempt must not have recorded the fix commit as last_shipped_commit"
+# Checked against the actual last_shipped_commit field, not a blanket
+# grep of --verbose output: sprint 36, Req 3's own live-loop audit above
+# legitimately mentions $RESHIP_CI_FIX in its own history event detail
+# (it's the commit that audit covers), so a plain substring search across
+# the whole verbose output would false-positive on that, unrelated to
+# whether the red-CI reship itself recorded anything.
+python3 -c "
+import json
+s = json.load(open('docs/sprints/state/sprint-${SPRINT_RESHIP_CI}.json'))
+assert s['last_shipped_commit'] != '$RESHIP_CI_FIX', 'a CI-red reship attempt must not have recorded the fix commit as last_shipped_commit'
+"
 rm -f /tmp/out.txt
 
 echo "== sprint 24, Req 4: reship refuses when CI 'succeeded' but no real step executed, same specificity as ship =="
@@ -1471,6 +1543,7 @@ PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_RESHIP_SPLIT"
 $SCRIPT liveqa "$SPRINT_RESHIP_SPLIT" --deployed-commit "$RESHIP_SPLIT_SHIPPED" --verdict FAIL --notes "found a bug" > /dev/null
 git commit -q --allow-empty -m "fix for sprint $SPRINT_RESHIP_SPLIT, workflows are already configured by now"
 RESHIP_SPLIT_FIX=$(git rev-parse HEAD)
+$SCRIPT qa1 "$SPRINT_RESHIP_SPLIT" --verdict PASS --notes "live-loop audit" --commit "$RESHIP_SPLIT_FIX" > /dev/null
 PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=none $SCRIPT reship "$SPRINT_RESHIP_SPLIT" --commit "$RESHIP_SPLIT_FIX" \
   > /tmp/out.txt 2>&1 && fail "reship succeeded when workflows are configured but no CI run was found for the commit (Req 1 regression)" || true
 grep -q "workflows are configured" /tmp/out.txt || fail "reship's workflows-configured-no-run refusal doesn't name the case"
@@ -1841,6 +1914,7 @@ echo "$BLOCK_STATUS_OUT" | grep -q "cards.json content does not exist" || \
 rm -f /tmp/out.txt
 
 echo "== sprint 33, Req 6: re-filing a blocked sprint is /sprint-start again, with no special handling =="
+BLOCK_STARTED_BEFORE=$(cat "docs/sprints/state/sprint-${SPRINT_BLOCK}.json")
 $SCRIPT start "$SPRINT_BLOCK" > /tmp/out.txt 2>&1 || fail "re-starting a blocked sprint should succeed like any other start -- output: $(cat /tmp/out.txt)"
 python3 -c "
 import json
@@ -1851,6 +1925,152 @@ assert '2-in-progress/' in entry['file'], f'restarted sprint file should be back
 state = json.load(open('docs/sprints/state/sprint-${SPRINT_BLOCK}.json'))
 assert state['phase'] == 'dev_build', f'restarted sprint should be back in dev_build: {state[\"phase\"]}'
 "
+rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 1a: re-filing a blocked sprint preserves history (with a new restart event appended, not a replacement), audit_rounds/live_test_rounds/started, and resets every gate-result field =="
+python3 -c "
+import json
+before = json.loads('''$BLOCK_STARTED_BEFORE''')
+after = json.load(open('docs/sprints/state/sprint-${SPRINT_BLOCK}.json'))
+assert len(after['history']) == len(before['history']) + 1, f'expected history to be preserved plus exactly one new event: before={len(before[\"history\"])} after={len(after[\"history\"])}'
+assert after['history'][:-1] == before['history'], 'the restart must APPEND to history, never replace or reorder the prior events (the blocked analysis must survive)'
+assert after['history'][-1]['event'] == 'sprint_restarted', f'expected a sprint_restarted event, got {after[\"history\"][-1]}'
+assert after['audit_rounds'] == before['audit_rounds'], 'audit_rounds must be kept across a re-file from blocked'
+assert after['live_test_rounds'] == before['live_test_rounds'], 'live_test_rounds must be kept across a re-file from blocked'
+assert after['started'] == before['started'], 'the ORIGINAL started timestamp must be kept, not reset to the restart time'
+for field in ('qa1_audit_result', 'qa1_audit_file_hash', 'qa1_audited_tree_hash', 'last_shipped_commit', 'groundtruth_result'):
+    assert after[field] is None, f'{field} must be reset to None on a re-file from blocked, got {after[field]!r}'
+assert after.get('live_loop_audit_trees') == [], f'live_loop_audit_trees must be reset to empty on a re-file from blocked, got {after.get(\"live_loop_audit_trees\")}'
+assert after['phase'] == 'dev_build'
+"
+
+echo "== sprint 36, Req 1: /sprint-start refuses a sprint already in dev_build (not never-started, not blocked), with nothing changed =="
+BLOCK_FILE_BEFORE_REFUSAL=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_BLOCK}']['file'])")
+BLOCK_STATE_BEFORE_REFUSAL=$(cat "docs/sprints/state/sprint-${SPRINT_BLOCK}.json")
+$SCRIPT start "$SPRINT_BLOCK" > /tmp/out.txt 2>&1 && fail "start succeeded a second time on a sprint already in dev_build -- Req 1 regression" || true
+grep -q "has already started and is at phase 'dev_build'" /tmp/out.txt || fail "start's already-started refusal doesn't name the current phase -- got: $(cat /tmp/out.txt)"
+grep -q "Nothing has been changed" /tmp/out.txt || fail "start's already-started refusal doesn't say nothing changed"
+grep -q -- "--override" /tmp/out.txt && fail "start's already-started refusal must not offer an override"
+BLOCK_FILE_AFTER_REFUSAL=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_BLOCK}']['file'])")
+[ "$BLOCK_FILE_BEFORE_REFUSAL" = "$BLOCK_FILE_AFTER_REFUSAL" ] || fail "a refused start moved the sprint's registered file"
+[ "$(cat "docs/sprints/state/sprint-${SPRINT_BLOCK}.json")" = "$BLOCK_STATE_BEFORE_REFUSAL" ] || fail "a refused start modified the state file"
+rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 1: /sprint-start refuses an already-COMPLETE sprint -- the exact ShowOffTest incident (a mis-issued start erasing a closed sprint's record), reproduced and confirmed fixed =="
+COMPLETE_STATE_BEFORE=$(cat "docs/sprints/state/sprint-${SPRINT_1}.json")
+COMPLETE_FILE_BEFORE=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_1}']['file'])")
+$SCRIPT start "$SPRINT_1" > /tmp/out.txt 2>&1 && fail "start succeeded on an already-complete sprint -- the exact record-erasure incident this Req exists to fix" || true
+grep -q "has already started and is at phase 'complete'" /tmp/out.txt || fail "start's refusal on a complete sprint doesn't name the phase -- got: $(cat /tmp/out.txt)"
+[ "$(cat "docs/sprints/state/sprint-${SPRINT_1}.json")" = "$COMPLETE_STATE_BEFORE" ] || fail "a refused start erased or altered sprint 1's closed state -- regression"
+COMPLETE_FILE_AFTER=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_1}']['file'])")
+[ "$COMPLETE_FILE_BEFORE" = "$COMPLETE_FILE_AFTER" ] || fail "a refused start moved sprint 1's file out of 3-done/"
+echo "$COMPLETE_FILE_AFTER" | grep -q "3-done/" || fail "sprint 1's file should still be sitting in docs/sprints/3-done/"
+rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 1: /sprint-start refuses a sprint mid-LiveQA-loop (liveqa_live), a third distinct in-flight phase =="
+SPRINT_START_GUARD=$(new_sprint "Start guard sprint")
+$SCRIPT start "$SPRINT_START_GUARD" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_START_GUARD work"
+$SCRIPT qa1 "$SPRINT_START_GUARD" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_START_GUARD" > /dev/null
+START_GUARD_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_START_GUARD" --commit "$START_GUARD_COMMIT" > /dev/null
+$SCRIPT start "$SPRINT_START_GUARD" > /tmp/out.txt 2>&1 && fail "start succeeded on a sprint mid the LiveQA fix loop -- Req 1 regression" || true
+grep -q "has already started and is at phase 'liveqa_live'" /tmp/out.txt || fail "start's refusal on a liveqa_live sprint doesn't name the phase -- got: $(cat /tmp/out.txt)"
+$SCRIPT status "$SPRINT_START_GUARD" | grep -q "Phase: liveqa_live" || fail "a refused start should not have moved sprint $SPRINT_START_GUARD off liveqa_live"
+rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 1b: a genuinely never-started sprint's fresh state is unaffected by the phase guard -- diffed against the known schema, not just 'it worked' =="
+SPRINT_NEVER_STARTED_2=$(new_sprint "Fresh start shape sprint")
+$SCRIPT start "$SPRINT_NEVER_STARTED_2" > /dev/null
+python3 -c "
+import json
+state = json.load(open('docs/sprints/state/sprint-${SPRINT_NEVER_STARTED_2}.json'))
+expected_keys = {'id', 'title', 'phase', 'qa1_audit_result', 'qa1_audit_file_hash',
+                  'qa1_audited_tree_hash', 'last_shipped_commit', 'groundtruth_result',
+                  'live_loop_audit_trees', 'audit_rounds', 'live_test_rounds', 'started',
+                  'completed', 'history', 'last_claim'}
+assert set(state.keys()) == expected_keys, f'fresh-start schema drifted: {sorted(state.keys())}'
+assert state['phase'] == 'dev_build'
+assert state['qa1_audit_result'] is None
+assert state['live_loop_audit_trees'] == []
+assert state['audit_rounds'] == 0
+assert state['live_test_rounds'] == 0
+assert state['completed'] is None
+assert len(state['history']) == 1 and state['history'][0]['event'] == 'sprint_started'
+"
+
+echo "== sprint 36, Req 2: /sprint-block refuses a COMPLETE sprint, with nothing changed -- the other half of the two-command record-erasure path =="
+COMPLETE_STATE_BEFORE_BLOCK=$(cat "docs/sprints/state/sprint-${SPRINT_1}.json")
+$SCRIPT block "$SPRINT_1" --reason "trying to block an already-closed sprint" > /tmp/out.txt 2>&1 && \
+  fail "block succeeded on an already-complete sprint -- Req 2 regression" || true
+grep -q "is 'complete' and cannot be blocked" /tmp/out.txt || fail "block's refusal on a complete sprint is missing -- got: $(cat /tmp/out.txt)"
+grep -q "Nothing has been changed" /tmp/out.txt || fail "block's complete-sprint refusal doesn't say nothing changed"
+[ "$(cat "docs/sprints/state/sprint-${SPRINT_1}.json")" = "$COMPLETE_STATE_BEFORE_BLOCK" ] || fail "a refused block modified sprint 1's closed state"
+$SCRIPT status "$SPRINT_1" | grep -q "Phase: complete" || fail "sprint $SPRINT_1 should still read as complete after the refused block"
+rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 2: /sprint-block refuses an ABORTED sprint too, with nothing changed =="
+ABORTED_STATE_BEFORE_BLOCK=$(cat "docs/sprints/state/sprint-${SPRINT_ABORT}.json")
+$SCRIPT block "$SPRINT_ABORT" --reason "trying to block an already-aborted sprint" > /tmp/out.txt 2>&1 && \
+  fail "block succeeded on an already-aborted sprint -- Req 2 regression" || true
+grep -q "is 'aborted' and cannot be blocked" /tmp/out.txt || fail "block's refusal on an aborted sprint is missing -- got: $(cat /tmp/out.txt)"
+[ "$(cat "docs/sprints/state/sprint-${SPRINT_ABORT}.json")" = "$ABORTED_STATE_BEFORE_BLOCK" ] || fail "a refused block modified sprint $SPRINT_ABORT's aborted state"
+rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 2: /sprint-block still works normally on every other phase (dev_build), unaffected by the new guard =="
+SPRINT_BLOCK_STILL_WORKS=$(new_sprint "Block still works sprint")
+$SCRIPT start "$SPRINT_BLOCK_STILL_WORKS" > /dev/null
+$SCRIPT block "$SPRINT_BLOCK_STILL_WORKS" --reason "still buildable-checking that dev_build is unaffected" > /tmp/out.txt 2>&1 || \
+  fail "block on a dev_build sprint should still succeed -- output: $(cat /tmp/out.txt)"
+grep -q "returned to the planner" /tmp/out.txt || fail "block on dev_build should still succeed as before Req 2"
+rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 3a: a live-loop FAIL recorded on the SAME tree AFTER its own PASS revokes it -- latest verdict for that tree wins, refuse =="
+SPRINT_TREE_ORDER=$(new_sprint "Tree order sprint")
+$SCRIPT start "$SPRINT_TREE_ORDER" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_TREE_ORDER work"
+$SCRIPT qa1 "$SPRINT_TREE_ORDER" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_TREE_ORDER" > /dev/null
+TREE_ORDER_SHIPPED=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_TREE_ORDER" --commit "$TREE_ORDER_SHIPPED" > /dev/null
+$SCRIPT liveqa "$SPRINT_TREE_ORDER" --deployed-commit "$TREE_ORDER_SHIPPED" --verdict FAIL --notes "found a bug" > /dev/null
+echo "tree order fix" > "sprint${SPRINT_TREE_ORDER}-fix.txt"
+git add "sprint${SPRINT_TREE_ORDER}-fix.txt"
+git commit -q -m "fix for sprint $SPRINT_TREE_ORDER"
+TREE_ORDER_FIX=$(git rev-parse HEAD)
+# A PASS, then a LATER FAIL, both against this exact tree.
+$SCRIPT qa1 "$SPRINT_TREE_ORDER" --verdict PASS --notes "first look, looked fine" --commit "$TREE_ORDER_FIX" > /dev/null
+$SCRIPT qa1 "$SPRINT_TREE_ORDER" --verdict FAIL --notes "second look, found a real problem" --commit "$TREE_ORDER_FIX" > /dev/null
+$SCRIPT reship "$SPRINT_TREE_ORDER" --commit "$TREE_ORDER_FIX" > /tmp/out.txt 2>&1 && \
+  fail "reship succeeded even though the LATEST QA1 verdict for this exact tree is FAIL, not PASS -- Req 3a regression" || true
+grep -q "the latest QA1 verdict on record for it is FAIL, not PASS" /tmp/out.txt || \
+  fail "reship's refusal doesn't explain that the latest verdict for this tree is FAIL -- got: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 3a: a live-loop FAIL on a DIFFERENT tree never revokes a PASS already on record for the tree actually being reshipped =="
+SPRINT_TREE_ORDER_2=$(new_sprint "Tree order sprint 2")
+$SCRIPT start "$SPRINT_TREE_ORDER_2" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_TREE_ORDER_2 work"
+$SCRIPT qa1 "$SPRINT_TREE_ORDER_2" --verdict PASS --notes ok > /dev/null
+$SCRIPT dev-done "$SPRINT_TREE_ORDER_2" > /dev/null
+TREE_ORDER_2_SHIPPED=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_TREE_ORDER_2" --commit "$TREE_ORDER_2_SHIPPED" > /dev/null
+$SCRIPT liveqa "$SPRINT_TREE_ORDER_2" --deployed-commit "$TREE_ORDER_2_SHIPPED" --verdict FAIL --notes "found a bug" > /dev/null
+echo "good fix" > "sprint${SPRINT_TREE_ORDER_2}-good.txt"
+git add "sprint${SPRINT_TREE_ORDER_2}-good.txt"
+git commit -q -m "good fix for sprint $SPRINT_TREE_ORDER_2"
+TREE_ORDER_2_GOOD_FIX=$(git rev-parse HEAD)
+$SCRIPT qa1 "$SPRINT_TREE_ORDER_2" --verdict PASS --notes "this one's fine" --commit "$TREE_ORDER_2_GOOD_FIX" > /dev/null
+# A DIFFERENT tree, audited FAIL afterward -- must not touch the good fix's own standing PASS.
+echo "bad fix, different tree, never reshipped" > "sprint${SPRINT_TREE_ORDER_2}-bad.txt"
+git add "sprint${SPRINT_TREE_ORDER_2}-bad.txt"
+git commit -q -m "a different, bad fix for sprint $SPRINT_TREE_ORDER_2"
+TREE_ORDER_2_BAD_FIX=$(git rev-parse HEAD)
+$SCRIPT qa1 "$SPRINT_TREE_ORDER_2" --verdict FAIL --notes "this one has a real problem" --commit "$TREE_ORDER_2_BAD_FIX" > /dev/null
+$SCRIPT reship "$SPRINT_TREE_ORDER_2" --commit "$TREE_ORDER_2_GOOD_FIX" > /tmp/out.txt 2>&1 || \
+  fail "reship refused the good fix's own tree just because a DIFFERENT tree was later FAILed -- Req 3a regression -- output: $(cat /tmp/out.txt)"
+grep -q "fix reshipped" /tmp/out.txt || fail "reship of the good fix should have succeeded"
 rm -f /tmp/out.txt
 
 echo "== sprint 34, Req 1/2/4: closing a sprint from inside a Dev Team 2 worktree prints an unmissable statement that it hasn't reached main, naming the branch and Pipeman by name -- and main's own view stays stranded (the sprint 32 incident, reproduced directly) =="

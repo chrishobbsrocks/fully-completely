@@ -901,6 +901,44 @@ test('install.js: a .claude-launcher/ reference folded into a non-standalone lin
   });
 });
 
+test('install.js: a fresh install\'s managed .gitignore block includes .claude/role-claims.json (sprint 36, Req 7)', () => {
+  withFixture((dir) => {
+    runInstall(dir);
+    const finalGitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
+    assert.ok(finalGitignore.split(/\r?\n/).includes('.claude/role-claims.json'),
+      'a fresh install must gain the .claude/role-claims.json ignore entry');
+  });
+});
+
+test('install.js: an upgrade of an install that predates the role-claims entry adds it, and preserves an unrelated pre-existing line exactly (sprint 36, Req 7)', () => {
+  withFixture((dir) => {
+    const oldGitignore =
+      'node_modules/\n*.log\n\n# Fully Completely (added by scripts/install.js)\ndocs/sprints/.locks/\n*.fc-bak-*\n';
+    fs.writeFileSync(path.join(dir, '.gitignore'), oldGitignore);
+
+    const output = runInstall(dir);
+
+    const finalGitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
+    const lines = finalGitignore.split(/\r?\n/);
+    assert.ok(lines.includes('.claude/role-claims.json'), 'the upgrade must add the missing role-claims entry');
+    assert.ok(lines.includes('node_modules/'), 'an unrelated pre-existing line must survive exactly');
+    assert.ok(lines.includes('*.log'), 'an unrelated pre-existing line must survive exactly');
+    assert.ok(lines.includes('docs/sprints/.locks/'), 'the pre-existing managed line must survive unchanged');
+    assert.match(output, /gitignore \(appended 1 line\(s\)\)/);
+  });
+});
+
+test('install.js: re-running against an install that already has the role-claims entry is a no-op for .gitignore', () => {
+  withFixture((dir) => {
+    runInstall(dir);
+    const firstGitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
+    const output = runInstall(dir);
+    const secondGitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
+    assert.strictEqual(firstGitignore, secondGitignore, 're-running install.js must not change an already-up-to-date .gitignore');
+    assert.match(output, /already has the lines this framework needs/);
+  });
+});
+
 // -------------------------------------------------------------------------
 // install.js: QA1 round 2's four findings — backup compounding on a
 // second run, docs/sprints leaking this repo's own real sprint data,
@@ -1835,10 +1873,39 @@ test('run-role: headlessPermissionArgs hard-disables Edit/Write for qa1 and live
 });
 
 test('run-role: headlessPermissionArgs does not disallow Edit/Write for roles that write source or sprint files', () => {
-  for (const roleId of ['dev-team-1', 'dev-team-2', 'master-controller', 'pipeman']) {
+  for (const roleId of ['dev-team-1', 'dev-team-2', 'pipeman']) {
     const role = RUN_ROLE_ROLES.find((r) => r.id === roleId);
     assert.ok(!headlessPermissionArgs(role).includes('--disallowedTools'), `${roleId}: must not disallow Edit/Write`);
   }
+});
+
+test('run-role: headlessPermissionArgs still never disallows Edit/Write for master-controller, only specific git forms (sprint 36, Req 6)', () => {
+  const role = RUN_ROLE_ROLES.find((r) => r.id === 'master-controller');
+  const args = headlessPermissionArgs(role);
+  const idx = args.indexOf('--disallowedTools');
+  assert.ok(idx !== -1, 'master-controller must now pass --disallowedTools (the new git-scoping entries)');
+  const disallowed = args[idx + 1];
+  assert.ok(!disallowed.split(',').includes('Edit'), 'master-controller must still be able to Edit sprint files');
+  assert.ok(!disallowed.split(',').includes('Write'), 'master-controller must still be able to Write sprint files');
+  for (const form of ['Bash(git push *)', 'Bash(git add -A*)', 'Bash(git add .*)', 'Bash(git commit -a*)', 'Bash(git commit -am*)']) {
+    assert.ok(disallowed.includes(form), `master-controller must disallow ${form}`);
+  }
+});
+
+test('run-role: headlessPermissionArgs grants master-controller a narrow git add/commit scoped to docs/sprints/, nothing broader (sprint 36, Req 6)', () => {
+  const role = RUN_ROLE_ROLES.find((r) => r.id === 'master-controller');
+  const args = headlessPermissionArgs(role);
+  const allowedIdx = args.indexOf('--allowedTools');
+  assert.ok(allowedIdx !== -1, 'master-controller must pass --allowedTools');
+  const allowed = args[allowedIdx + 1];
+  assert.ok(allowed.includes('Bash(git add docs/sprints/*)'), 'master-controller must be allowed to stage under docs/sprints/');
+  assert.ok(allowed.includes('Bash(git commit -m *)'), 'master-controller must be allowed a pathspec/-m commit');
+  assert.ok(!allowed.includes('Bash(git *)'), 'master-controller must not receive the blanket git grant -- only the two scoped forms above');
+  // master-controller is deliberately NOT eligible for the broader
+  // owned-repository grant (npm/node/python/curl/etc.) -- its only
+  // legitimate git need is committing its own sprint-file edits.
+  assert.ok(!HEADLESS_PERMISSION_PROFILES['master-controller'].eligibleForOwnedRepositoryGrant,
+    'master-controller must not be eligible for the broad owned-repository grant');
 });
 
 test('run-role: headlessPermissionArgs grants pipeman its narrow npm subcommands and nothing about npm to qa1', () => {
@@ -1990,9 +2057,32 @@ test('run-role: sprint 23 touched only the liveqa profile -- every other role\'s
   // "git diff shows no other profile changed," and a snapshot comparison
   // here is the same claim, just runnable. Sourced from each role's own
   // profile as committed before this sprint's changes.
+  //
+  // Sprint 36, Req 6: master-controller's OWN profile legitimately
+  // changed here (a narrow, measured git add/commit grant scoped to
+  // docs/sprints/ -- see docs/sprint-36-mc-commit-permission-findings.md
+  // and the profile's own comment in run-role.js) -- the assertion below
+  // is updated to match, not left asserting the pre-sprint-36 shape. This
+  // is the one deliberate exception to "byte-identical since sprint 23"
+  // this test's own name claims; every other role below is unaffected.
   assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES['master-controller'], {
-    disallowedTools: [],
-    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    disallowedTools: [
+      'Bash(git push *)',
+      'Bash(git add -A*)',
+      'Bash(git add .*)',
+      'Bash(git add --all*)',
+      'Bash(git commit -a*)',
+      'Bash(git commit --all*)',
+      'Bash(git commit -am*)',
+      'Bash(git commit -m *-a*)',
+      'Bash(git commit -m *--all*)',
+    ],
+    allowedTools: [
+      'Bash(node scripts/run-lifecycle.js *)',
+      'Bash(python3 scripts/sprint_lifecycle.py *)',
+      'Bash(git add docs/sprints/*)',
+      'Bash(git commit -m *)',
+    ],
   });
   assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES['dev-team-1'], {
     disallowedTools: [],

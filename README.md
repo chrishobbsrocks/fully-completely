@@ -287,8 +287,12 @@ LiveQA's live test (does the deployed product actually work). A clean
 diff and a working live product are different claims, `/sprint-complete`
 won't let either one stand in for the other, and refuses to close a sprint
 missing either. If LiveQA's live test fails, the fix loop is Dev Team
-fixes → Pipeman `/sprint-reship` → LiveQA retests, without needing to
-redo the whole sprint.
+fixes → QA1 audits the fix (`/sprint-qa1 <N> --verdict ... --commit
+<hash>`, required before the next step, no override) → Pipeman
+`/sprint-reship` → LiveQA retests, without needing to redo the whole
+sprint. `/sprint-reship` used to ship a fix with no audit at all, by
+design; two independent downstream incidents of unaudited content going
+live changed that.
 
 Passing both gates is still not enough on its own: `/sprint-complete` also
 requires `--user-said "..."`, quoting what the user actually said, in that

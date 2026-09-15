@@ -1175,12 +1175,56 @@ def cmd_new(args) -> None:
 
 
 def cmd_start(args) -> None:
+    """Sprint 36, Req 1: this function used to have NO phase check at all
+    -- a headless Dev Team 1 ran `/sprint-start 1` on a sprint already
+    sitting in `liveqa_live`, and this rebuilt its state file from
+    scratch, silently nulling every verdict, both audit hashes,
+    `last_shipped_commit`, and the sprint's entire history (ShowOffTest
+    `268a066`, reverted by hand in `55557bc`). Worse than first reported:
+    `cmd_block` had no phase guard either, so a *completed* sprint could
+    be blocked and then started -- a two-command path to erasing a closed
+    record that a guard on start alone would leave open (see Req 2 for
+    the other half of that fix).
+
+    Exactly two outcomes now proceed, checked before ANY mutation below
+    (the file move, the registry write, the state write):
+      (a) no state file exists yet -- never started, proceeds exactly as
+          before this sprint (Req 1b: the fresh-state dict's own shape is
+          unchanged by this Req; Req 3 separately adds one new schema key
+          to it, see that Req's own field).
+      (b) a state file exists and its phase is exactly "blocked" --
+          re-filing after Master Controller has read `/sprint-block`'s
+          recorded analysis and repaired the sprint file (Req 1a): history
+          is KEPT and a new event is appended (log_event never replaces),
+          `audit_rounds`/`live_test_rounds`/the original `started`
+          timestamp are all kept, and every gate-result field is reset,
+          because a repaired file must clear both gates again from
+          scratch.
+    Every other phase refuses outright -- no override. The one legitimate
+    re-entry is (b); anything else already has a documented path (block,
+    then start)."""
     sprint_id = args.id
     with locked("registry"), locked(f"sprint-{sprint_id}"):
         reg = load_registry()
         entry = reg["sprints"].get(str(sprint_id))
         if not entry:
             die(f"Sprint {sprint_id} not found in registry.")
+
+        # The one real check this Req adds. Read and validated before the
+        # file move / registry write / state write just below, so a
+        # refusal here is guaranteed to leave nothing on disk changed.
+        existing_state = None
+        if state_path(sprint_id).exists():
+            existing_state = load_state(sprint_id)
+            if existing_state["phase"] != "blocked":
+                die(f"Sprint {sprint_id} has already started and is at phase "
+                    f"'{existing_state['phase']}', not 'blocked'. /sprint-start only proceeds "
+                    "on a sprint with no state file yet (never started) or one sitting at "
+                    "'blocked' (re-filing after Master Controller repairs it). Nothing has "
+                    "been changed. No override -- if this sprint genuinely needs to restart, "
+                    "the documented path is /sprint-block (with a real --reason) followed by "
+                    "/sprint-start again, not this command acting directly on an in-flight or "
+                    "closed sprint.")
 
         src = ROOT / entry["file"]
         dest_dir = SPRINTS_DIR / STATUS_FOLDERS["in_progress"]
@@ -1194,23 +1238,48 @@ def cmd_start(args) -> None:
         entry["status"] = "in_progress"
         save_registry(reg)
 
-        state = {
-            "id": sprint_id,
-            "title": entry["title"],
-            "phase": "dev_build",
-            "qa1_audit_result": None,
-            "qa1_audit_file_hash": None,
-            "qa1_audited_tree_hash": None,
-            "last_shipped_commit": None,
-            "groundtruth_result": None,
-            "audit_rounds": 0,
-            "live_test_rounds": 0,
-            "started": now(),
-            "completed": None,
-            "history": [],
-        }
-        log_event(state, "system", "sprint_started")
-        save_state(sprint_id, state)
+        if existing_state is not None:
+            # Req 1a: re-filing a blocked sprint. `state` IS
+            # `existing_state` -- mutated in place so every field this
+            # Req doesn't name (id, title refreshed below, audit_rounds,
+            # live_test_rounds, started, history, last_claim) survives by
+            # construction, not by being individually copied over.
+            state = existing_state
+            state["title"] = entry["title"]  # in case the repair included a rename
+            state["phase"] = "dev_build"
+            state["qa1_audit_result"] = None
+            state["qa1_audit_file_hash"] = None
+            state["qa1_audited_tree_hash"] = None
+            state["last_shipped_commit"] = None
+            state["groundtruth_result"] = None
+            # Req 3's own new field: a live-loop audit's PASS against the
+            # sprint file being replaced means nothing once that file is
+            # repaired and must clear both gates again -- reset alongside
+            # every other gate-result field named above, per Req 1a's own
+            # "whatever field Req 3 adds."
+            state["live_loop_audit_trees"] = []
+            log_event(state, "system", "sprint_restarted",
+                      "re-filed from blocked; history preserved, gate results reset")
+            save_state(sprint_id, state)
+        else:
+            state = {
+                "id": sprint_id,
+                "title": entry["title"],
+                "phase": "dev_build",
+                "qa1_audit_result": None,
+                "qa1_audit_file_hash": None,
+                "qa1_audited_tree_hash": None,
+                "last_shipped_commit": None,
+                "groundtruth_result": None,
+                "live_loop_audit_trees": [],
+                "audit_rounds": 0,
+                "live_test_rounds": 0,
+                "started": now(),
+                "completed": None,
+                "history": [],
+            }
+            log_event(state, "system", "sprint_started")
+            save_state(sprint_id, state)
     print(f"Sprint {sprint_id} started. Phase: dev_build.")
     print("Dev Team: build the sprint, then run /sprint-qa1 when ready for audit.")
 
@@ -1336,10 +1405,13 @@ def _qa1_live_loop_audit(args, state) -> None:
     actually audited would let a mismatched commit ship, which is worse
     than the recording gap this closes. The append-only property is not a
     convention this function happens to follow, it IS the safety
-    argument: log_event() below is the only mutation of `state` anywhere
-    in this function. There is no line here that could ever launder an
-    inconvenient gate-1 verdict, by construction, not by rule — there is
-    simply nothing else in this function that writes to `state` at all.
+    argument: every mutation of `state` anywhere in this function is an
+    APPEND to a list (log_event() below, and — sprint 36, Req 3 — a second,
+    independent append to state["live_loop_audit_trees"], see below).
+    There is no line here that could ever launder an inconvenient gate-1
+    verdict, by construction, not by rule — there is simply nothing else
+    in this function that writes to `state` at all, and nothing it does
+    append to is ever read by anything gate 1 itself checks.
 
     Called with the sprint's lock already held (cmd_qa1 acquires it
     before dispatching here) and saves state itself, exactly like the
@@ -1356,6 +1428,7 @@ def _qa1_live_loop_audit(args, state) -> None:
     # it entirely is unchanged from how this argument didn't exist before
     # this sprint: this is purely additive.
     detail = f"{verdict}: {notes}"
+    resolved = None
     if args.commit:
         resolved = git_commit_sha(args.commit)
         if resolved is None:
@@ -1365,6 +1438,26 @@ def _qa1_live_loop_audit(args, state) -> None:
         detail += f" | commit={resolved}"
 
     log_event(state, "qa1", LIVE_LOOP_AUDIT_EVENT, detail)
+
+    # Sprint 36, Req 3: cmd_reship's own new gate needs to know, for an
+    # EXACT tree, whether the latest QA1 verdict on record for it was a
+    # PASS — see _latest_qa1_verdict_for_tree()'s own docstring for the
+    # full "latest verdict for this tree wins" comparison this list feeds.
+    # Only appended when a real --commit was given: a live-loop audit with
+    # no commit isn't tied to any specific artifact, so there is no tree
+    # here for a later reship to ever compare against, and that's
+    # unchanged from how this argument was already optional before this
+    # sprint. This is a second, independent append, never an assignment —
+    # see this function's own opening docstring for why that distinction
+    # is the whole safety argument.
+    if resolved is not None:
+        state.setdefault("live_loop_audit_trees", []).append({
+            "ts": now(),
+            "commit": resolved,
+            "tree_hash": git_tree_hash_excluding(resolved, SHIP_HASH_EXCLUDE_PATTERNS),
+            "verdict": verdict,
+        })
+
     save_state(args.id, state)
     # Req 3: printed plainly as a record, not a verdict — a reader must
     # not be able to mistake this for gate 1 passing or failing. Neither
@@ -1823,20 +1916,79 @@ def cmd_ship(args) -> None:
     print("LiveQA: run /sprint-liveqa once you've live-tested the deploy.")
 
 
+def _latest_qa1_verdict_for_tree(state: dict, tree_hash: Optional[str]) -> Optional[str]:
+    """Sprint 36, Req 3a: the latest QA1 verdict on record for an EXACT
+    tree, across both mechanisms that can ever produce one for a sprint
+    still in the LiveQA fix loop:
+      - gate 1's own single current tree, state.get("qa1_audited_tree_hash")
+        — present only when gate 1's last verdict was a PASS, since a
+        subsequent gate-1 FAIL/CONDITIONAL always clears it (cmd_qa1's own
+        else-branch). Self-correcting by construction: this can never
+        represent a stale, overridden gate-1 verdict.
+      - every live-loop audit recorded against this tree,
+        state.get("live_loop_audit_trees", []) (Req 3's own new field,
+        appended in _qa1_live_loop_audit — post-hoc, .get() throughout,
+        per CLAUDE.md's state-field convention: it postdates every sprint
+        that predates this one).
+
+    Returns None when nothing at all is on record for this tree — a
+    caller must not confuse that with an explicit FAIL/CONDITIONAL, which
+    this also returns verbatim when it's the latest thing on record.
+
+    Ordering matters and is why this exists as its own function rather
+    than two separate "does a PASS exist" checks: a FAIL recorded for the
+    SAME tree after an earlier PASS must win (refuse) — sorted by
+    timestamp so it does — while a FAIL recorded for a *different* tree
+    must never even enter this comparison, which falls out for free from
+    filtering both sources down to `tree_hash` before comparing anything.
+    Gate 1's own timestamp is read back from the most recent "audit"/PASS
+    history event (the one whose recording is what set the current
+    qa1_audited_tree_hash — cmd_qa1 always logs that event before setting
+    the field), not stored redundantly a second time."""
+    if tree_hash is None:
+        return None
+    candidates = []
+    if state.get("qa1_audited_tree_hash") == tree_hash:
+        gate1_ts = ""
+        for h in reversed(state.get("history", [])):
+            if h.get("event") == "audit" and h.get("detail", "").startswith("PASS:"):
+                gate1_ts = h.get("ts") or ""
+                break
+        candidates.append((gate1_ts, "PASS"))
+    for entry in state.get("live_loop_audit_trees", []):
+        if entry.get("tree_hash") == tree_hash:
+            candidates.append((entry.get("ts") or "", entry.get("verdict")))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c[0])
+    return candidates[-1][1]
+
+
 def cmd_reship(args) -> None:
-    # No tree-hash check here, unlike cmd_ship: a reship's whole purpose is
-    # pushing a fix for something LiveQA's live test found, and there is
-    # normally no time to route back through gate 1 first, so this commit
-    # ships without ever having been through QA1's static audit. That is
-    # NOT "LiveQA's retest instead of a fresh QA1 pass" — the two gates
-    # are not interchangeable, see CLAUDE.md and every agent file — it is
-    # a commit gate 1 has simply never seen. If QA1 does look at it,
-    # sprint 7's live-loop audit (cmd_qa1, called while phase is in
-    # LIVEQA_PHASES) is how that gets put on the record, without touching
-    # anything either gate reads. This commit still has to resolve to a
-    # real commit: last_shipped_commit is what cmd_liveqa's
-    # --deployed-commit check compares against, and an unresolved ref
-    # would leave nothing real recorded to check.
+    """Sprint 36, Req 3: replaces the "no tree-hash check here" design
+    this function used to state outright — downstream Finding #2 (two
+    independent incidents) is why: an unaudited code change went live
+    contradicting a recorded decision a static read would have caught,
+    and separately, on the same framework version, one Pipeman turn held
+    an equivalent fix for an audit no rule required while another
+    reshipped one unaudited and called it "by design" — the rule was
+    being decided per turn, not by anything mechanical. The user has
+    settled it: a code change reshipped during the live loop now requires
+    a QA1 audit first, mechanically enforced, no override.
+
+    This is NOT "LiveQA's retest instead of a fresh QA1 pass" — the two
+    gates are still not interchangeable, see CLAUDE.md and every agent
+    file. The check below is exactly "a PASS is on record for the tree
+    being reshipped" (see _latest_qa1_verdict_for_tree's own docstring for
+    the full comparison), satisfied by either gate 1's own still-standing
+    PASS (state["qa1_audited_tree_hash"]) or a live-loop audit PASS
+    recorded via `/sprint-qa1` while this sprint sits in the fix loop
+    (sprint 7's own mechanism, Req 3a here gives it a second, independent
+    field to write so nothing it does can ever touch what gate 1 reads —
+    see _qa1_live_loop_audit's own docstring). This commit still has to
+    resolve to a real commit first: last_shipped_commit is what
+    cmd_liveqa's --deployed-commit check compares against, and an
+    unresolved ref would leave nothing real recorded to check."""
     with locked(f"sprint-{args.id}"):
         state = load_state(args.id)
         if state["phase"] not in LIVEQA_PHASES:
@@ -1855,17 +2007,40 @@ def cmd_reship(args) -> None:
             die(f"'{args.commit or ''}' does not resolve to a real commit in this repo. "
                 "--commit must be an actual commit hash Pipeman is about to push.")
 
+        # Sprint 36, Req 3: the new gate, checked before anything else
+        # below (including the CI check) — an unaudited commit refusing
+        # here should never get as far as a CI report suggesting it's
+        # otherwise ready to go. 3b: the refusal names both trees (the one
+        # being reshipped and whichever gate-1 tree is currently on
+        # record, if any) and the exact recovery command, because Pipeman
+        # hits this and cannot clear it any other way (CLAUDE.md's
+        # transition-precondition rule).
+        reshipped_tree = git_tree_hash_excluding(reshipped_commit, SHIP_HASH_EXCLUDE_PATTERNS)
+        verdict_for_tree = _latest_qa1_verdict_for_tree(state, reshipped_tree)
+        if verdict_for_tree != "PASS":
+            gate1_tree = state.get("qa1_audited_tree_hash")
+            why = ("no QA1 verdict is on record for it at all" if verdict_for_tree is None
+                   else f"the latest QA1 verdict on record for it is {verdict_for_tree}, not PASS")
+            gate1_note = (f"Gate 1's currently PASSed tree is {gate1_tree}, which does not match. "
+                          if gate1_tree else "Gate 1 has no PASSed tree on record for this sprint "
+                          "either. ")
+            die(f"Sprint {args.id}: the commit being reshipped ({reshipped_commit}, tree "
+                f"{reshipped_tree}) has never been through QA1's audit successfully — {why}. "
+                f"{gate1_note}Hand this commit to QA1 for `/sprint-qa1 {args.id} --verdict ... "
+                f"--commit {reshipped_commit}` on it, then reship again. No override.")
+
         # Sprint 24, Req 4 (added mid-flight, on QA1's own carried
         # question): the identical check cmd_ship runs, same reasoning.
         # Req 2 as originally written named /sprint-ship only, which was a
-        # correct reading of the text and the wrong place to stop — a
-        # reshipped commit carries STRICTLY LESS verification than a
-        # shipped one (it has never been through QA1's static audit at
-        # all, see this function's own opening comment), so exempting it
-        # from the CI check would mean the least-audited path gets the
-        # least mechanical scrutiny, the exact inversion of what this
-        # sprint exists to fix. Same three outcomes, same undeterminable-
-        # status decision, applied consistently rather than decided twice.
+        # correct reading of the text and the wrong place to stop — even
+        # now that sprint 36, Req 3 requires a QA1 PASS on the exact tree
+        # above, that audit is still a live-loop record, not a fresh gate-1
+        # pass through everything gate 1 checks (see this function's own
+        # opening comment), so exempting this path from the CI check would
+        # still mean less mechanical scrutiny than a normal ship gets, the
+        # exact inversion of what this sprint exists to fix. Same three
+        # outcomes, same undeterminable-status decision, applied
+        # consistently rather than decided twice.
         ci_status, ci_detail = check_ci_status(reshipped_commit)
         if ci_status == CI_STATUS_RED:
             die(f"Sprint {args.id}: CI is red for the exact commit being reshipped "
@@ -1883,24 +2058,27 @@ def cmd_reship(args) -> None:
         log_event(state, "pipeman", "reshipped", f"commit={args.commit or ''} | ci={ci_status}: {ci_detail}")
         save_state(args.id, state)
     # Sprint 15, Req 2: says, at the moment reship runs (not buried in an
-    # agent file nobody re-reads mid-loop), that this exact commit is
-    # unaudited and that the live-loop audit exists for it — sprint 7's own
-    # lesson, that naming a thing at the point of the wrong conclusion is
-    # what works. Deliberately does NOT say LiveQA's retest checks the same
-    # thing QA1 would: that conflation has reached three separate handoffs
-    # despite the code never having said it, per this requirement's own
-    # note, so this is worded to foreclose it rather than merely avoid
-    # repeating it. reshipped_commit (resolved), not args.commit (the raw
-    # ref) — the same fix Req 4 makes to cmd_ship's print, incidental here
-    # (not itself asked for) but the identical bug on the identical line
-    # this requirement already has open, so fixed rather than left for a
-    # future sprint to rediscover.
+    # agent file nobody re-reads mid-loop), what this commit's audit status
+    # actually is — sprint 7's own lesson, that naming a thing at the point
+    # of the wrong conclusion is what works. Sprint 36, Req 3: this now
+    # always follows a QA1 PASS on this exact tree (the gate above refused
+    # otherwise), so the old "has NOT been through QA1's static audit"
+    # claim would be flatly false here — corrected to say what's actually
+    # true without overstating it into "the same as a fresh gate-1 pass":
+    # the live-loop mechanism records a verdict against this specific
+    # commit, it does not re-run gate 1's full checklist against it.
+    # Deliberately does NOT say LiveQA's retest checks the same thing QA1
+    # would: that conflation has reached three separate handoffs despite
+    # the code never having said it, per sprint 15's own note, so this
+    # stays worded to foreclose it rather than merely avoid repeating it.
+    # reshipped_commit (resolved), not args.commit (the raw ref) — the
+    # same fix Req 4 (sprint 24) makes to cmd_ship's print.
     print(f"Sprint {args.id}: fix reshipped (commit {reshipped_commit}). "
-          "This commit has NOT been through QA1's static audit -- LiveQA's live test is a "
-          "different check of different things, not a substitute for one. If QA1 wants to "
-          "look at this commit, /sprint-qa1 will record a live-loop audit while this sprint "
-          "stays in the fix loop; it is a record, not a gate, and does not replace the retest "
-          "below. LiveQA: re-test and run /sprint-liveqa again.")
+          "A QA1 PASS is on record for this exact tree (gate 1's own audit, or a live-loop "
+          "audit recorded during this fix loop) -- required before this reship could proceed "
+          "at all (sprint 36, Req 3). That is a record of a verdict against this specific "
+          "commit, not a substitute for LiveQA's live test, and not the same as a fresh gate-1 "
+          "pass through everything gate 1 checks. LiveQA: re-test and run /sprint-liveqa again.")
 
 
 def npm_registry_view(package: str, version: str) -> Optional[dict]:
@@ -2491,20 +2669,23 @@ def cmd_block(args) -> None:
     files are only ever created (cmd_start) and never deleted by any
     command in this file, so there is nothing to race against here.
 
-    QA1 round 1, SECOND FINDING -- A DELIBERATE, RECORDED DECISION, NOT
-    AN OVERSIGHT: neither this command nor cmd_abort gates on phase, so
-    both can act on an already-complete sprint (cmd_abort has always
-    been able to; this command inherits it). Left unaddressed in this
-    sprint deliberately, not by omission: the Risks section's own
-    instruction is "the narrowest thing that preserves id, location and
-    analysis," and a phase guard is a real design question (which
-    phases legitimately allow blocking? does it interact with the
-    liveqa fix loop?) that deserves its own consideration, not a rushed
-    addition riding on a round-2 fix for something else. Recorded here
-    so a future reader sees this was decided, not overlooked -- worth
-    raising with Master Controller as a candidate for its own sprint if
-    an unauthorized un-complete of a closed sprint is judged worth
-    closing."""
+    QA1 round 1, SECOND FINDING -- HALF CLOSED, sprint 36 Req 2: neither
+    this command nor cmd_abort used to gate on phase at all, so both
+    could act on an already-complete sprint. That combined with
+    cmd_start's own former lack of a phase guard (see cmd_start's own
+    docstring, Req 1) into a genuine two-command path to erasing a closed
+    sprint's record: block a `complete` sprint, then `/sprint-start` it
+    -- Req 1's own fix closed the second half of that path, and this
+    closes the first. Only the closed-sprint case (`complete`, `aborted`)
+    is gated here, deliberately narrower than "which in-flight phases may
+    legitimately be blocked" (mid-LiveQA-loop included) -- that remains
+    the real, undecided design question the original finding named, left
+    to its own sprint (see the current sprint's own Out of Scope). This
+    command still gates on nothing else: every phase other than
+    `complete`/`aborted` may still be blocked exactly as before.
+    cmd_abort itself is intentionally NOT touched here -- see cmd_abort's
+    own docstring and this sprint's Out of Scope for why a phase guard on
+    abort is a separate, still-open question."""
     reason = resolve_text(args.reason, args.reason_file)
     if not reason.strip():
         die("--reason is required and must be non-empty. State the analysis of why this sprint "
@@ -2530,6 +2711,16 @@ def cmd_block(args) -> None:
         if not entry:
             die(f"Sprint {args.id} not found in registry.")
 
+        # Sprint 36, Req 2: loaded and checked before any mutation below
+        # -- a closed sprint's record must stay closed. Every other
+        # phase (including mid-LiveQA-loop) is left exactly as it was;
+        # see this function's own docstring for why the guard stops here.
+        state = load_state(args.id)
+        if state["phase"] in ("complete", "aborted"):
+            die(f"Sprint {args.id} is '{state['phase']}' and cannot be blocked -- a closed "
+                "sprint's record must stay closed, not be returned to the planner. Nothing "
+                "has been changed. No override.")
+
         src = ROOT / entry["file"]
         dest_dir = SPRINTS_DIR / STATUS_FOLDERS["blocked"]
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -2542,7 +2733,6 @@ def cmd_block(args) -> None:
         entry["status"] = "blocked"
         save_registry(reg)
 
-        state = load_state(args.id)
         state["phase"] = "blocked"
         log_event(state, actor, "blocked", reason)
         save_state(args.id, state)
@@ -3104,7 +3294,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Live-loop audits only: the commit this audit covers, resolved and "
                     "refused if it doesn't exist, then recorded in the event detail. Optional; "
                     "omitting it is unchanged from before this existed. Has no effect on a "
-                    "gate-1 audit.")
+                    "gate-1 audit. Sprint 36: a PASS with --commit is what /sprint-reship's own "
+                    "tree-hash gate checks for -- give this whenever the verdict covers a real "
+                    "fix commit Pipeman might reship, or reship will have nothing to find.")
     s.set_defaults(func=cmd_qa1)
 
     s = sub.add_parser("dev-done"); s.add_argument("id", type=int); s.set_defaults(func=cmd_dev_done)

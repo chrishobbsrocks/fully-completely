@@ -110,10 +110,28 @@ on that handoff.
    liveqa_live ──────────────────────────── LiveQA tests live
         │
 /sprint-liveqa <N> --deployed-commit <sha> --verdict ...   LiveQA
-        │  FAIL/CONDITIONAL → Dev Team fixes, Pipeman /sprint-reship, loop
+        │  FAIL/CONDITIONAL → Dev Team fixes, QA1 audits the fix, Pipeman /sprint-reship, loop
         │  PASS ↓
 /sprint-complete <N> --user-said "..."       Dev Team 1/2 closes it, only when told to
 ```
+
+**A code change reshipped during the live loop requires a QA1 audit
+first, mechanically enforced (sprint 36, Req 3).** `/sprint-reship`
+refuses, no override, unless the exact commit being reshipped has a QA1
+PASS on record for its tree — either gate 1's own still-standing PASS, or
+a live-loop audit PASS QA1 records mid-loop via `/sprint-qa1 <N>
+--verdict ... --commit <hash>` (sprint 7's mechanism). This closed a real
+gap: `/sprint-reship` used to ship a fix with no audit at all, by design
+("no time to route back through gate 1"), and that design produced two
+independent downstream incidents — an unaudited change went live
+contradicting a recorded decision a static read would have caught, and
+separately, one Pipeman turn held an equivalent fix for an audit no rule
+required while another reshipped one unaudited and called it "by
+design." The rule was being decided per turn; it no longer is. A
+live-loop audit is still not a substitute for a fresh gate-1 pass through
+everything gate 1 checks, and it is still not interchangeable with
+LiveQA's own retest — see `.claude/agents/qa1.md` and `.claude/agents/
+liveqa.md`.
 
 A sprint is never complete just because Dev Team said so mid-build. It's only
 complete once QA1's static audit AND LiveQA's live test have both
@@ -365,7 +383,30 @@ naming the return path explicitly:
 
 `/sprint-abort` isn't attributed to a role anywhere else in this file (it's absent from the lifecycle diagram above); "Dev Team 1/2" here is inferred from the "Command ownership" note further up — lifecycle transition commands belong to whichever Dev Team owns the sprint, not Master Controller — not a direct quote like the other eleven labels are. Sprint 33 gave it a second required argument, `--user-said`, the same non-overridable shape as `/sprint-complete`'s own — abort is this lifecycle's most destructive action (it burns the sprint id and makes re-filing a human act) and used to require strictly less than closing a sprint does.
 
-`/sprint-block` (sprint 33) is the non-destructive alternative abort was missing: a role that correctly determines a sprint isn't currently buildable (real content doesn't exist, a required decision is unmade) returns it to the planner instead of abandoning it. The sprint id is preserved, the file moves to `docs/sprints/4-blocked/` rather than `5-abandoned/`, and the role's own stated analysis is recorded in history for Master Controller to read and repair the file. No `--user-said` — blocking isn't destructive — but `--reason` is required and non-empty, same as abort's. Unlike every other command here, it has no single owning role: every headless profile's `Bash(python3 scripts/sprint_lifecycle.py *)` grant reaches every subcommand, so `cmd_abort` and `cmd_block` both derive the actor they log from `CLAUDE_CODE_AGENT` rather than a hardcoded string. Re-filing a blocked sprint is just `/sprint-start <N>` again, once the file's been repaired — `cmd_start` has no phase guard and always moves whatever the registry currently points at into `2-in-progress/`.
+`/sprint-block` (sprint 33) is the non-destructive alternative abort was missing: a role that correctly determines a sprint isn't currently buildable (real content doesn't exist, a required decision is unmade) returns it to the planner instead of abandoning it. The sprint id is preserved, the file moves to `docs/sprints/4-blocked/` rather than `5-abandoned/`, and the role's own stated analysis is recorded in history for Master Controller to read and repair the file. No `--user-said` — blocking isn't destructive — but `--reason` is required and non-empty, same as abort's. Unlike every other command here, it has no single owning role: every headless profile's `Bash(python3 scripts/sprint_lifecycle.py *)` grant reaches every subcommand, so `cmd_abort` and `cmd_block` both derive the actor they log from `CLAUDE_CODE_AGENT` rather than a hardcoded string. Re-filing a blocked sprint is just `/sprint-start <N>` again, once the file's been repaired.
+
+**`/sprint-start` and `/sprint-block` both now gate on phase (sprint 36,
+Reqs 1–2), closing a two-command path that could erase a closed sprint's
+record.** `cmd_start` used to have no phase guard at all — a headless Dev
+Team ran `/sprint-start` on a sprint already sitting in `liveqa_live`, and
+it silently rebuilt that sprint's state file from scratch, nulling every
+verdict, both audit hashes, `last_shipped_commit`, and its entire history.
+`cmd_block` had no phase guard either, which combined with the first gap
+into something worse than either alone: block a `complete` sprint, then
+start it, and a closed record is gone in two ordinary-looking commands.
+Both are fixed now, narrowly: `/sprint-start` proceeds only when a sprint
+has no state file yet (never started) or sits at `blocked` — every other
+phase, including every phase in between and `complete`/`aborted`
+themselves, refuses outright, no override. Re-filing from `blocked`
+preserves history (appending a restart event, never replacing it — the
+whole point of `/sprint-block` is recording an analysis worth keeping),
+`audit_rounds`, `live_test_rounds`, and the original `started` timestamp,
+and resets every gate-result field, because a repaired file has to clear
+both gates again. `/sprint-block` refuses only the closed-sprint half —
+`complete` or `aborted` — leaving which *in-flight* phases may legitimately
+be blocked (including mid-LiveQA-loop) as the still-open design question
+it always was; see the current sprint's own Out of Scope for why the two
+questions were kept apart.
 
 `/sprint-rename` (sprint 25) isn't a lifecycle-phase transition at all — it doesn't move a sprint between phases, it corrects a title that's stopped describing the sprint's current scope, the same kind of correction `/sprint-new` makes at creation. Master Controller here follows that same ownership, not the Dev Team pattern `/sprint-abort` uses. It updates the registry entry, the sprint file's own frontmatter, and the filename together, and preserves the original title. It never touches phase, verdicts, hashes, or history — but it does edit the sprint file itself, so renaming a sprint that already has a QA1 PASS on record will correctly require a fresh `/sprint-qa1` audit before `/sprint-dev-done` proceeds, the same as any other post-PASS edit to that file.
 
@@ -489,10 +530,10 @@ indexed directly, `state["phase"]`, never `state.get("phase")`. **This is
 not the same list as `cmd_start`'s dict literal** — that literal seeds a
 brand-new sprint with the *full current* schema, so it also initializes
 every post-hoc field (`qa1_audit_file_hash`, `qa1_audited_tree_hash`,
-`last_shipped_commit`), which must stay `.get()`-only everywhere else in
-the file for the sprints that predate them; don't take "it's in
-`cmd_start`'s literal" as license to index a field directly. A missing
-base-schema field means the state file is
+`last_shipped_commit`, and — sprint 36 — `live_loop_audit_trees`), which
+must stay `.get()`-only everywhere else in the file for the sprints that
+predate them; don't take "it's in `cmd_start`'s literal" as license to
+index a field directly. A missing base-schema field means the state file is
 corrupt, and that must fail loudly with a `KeyError` rather than silently
 evaluating to `None` and letting a malformed state limp through the state
 machine. Fields added to the schema *after* sprints already existed are
@@ -502,7 +543,12 @@ that's expected, not corruption. `cmd_dev_done`'s handling of
 `qa1_audit_file_hash` is the precedent: it reads
 `state.get("qa1_audit_file_hash")`, with a comment explaining that `None`
 there means "this sprint PASSed under a version of this script from before
-the hash field existed," not "the field failed to save." Follow this for
+the hash field existed," not "the field failed to save." `live_loop_audit_trees`
+(sprint 36, Req 3 — the trees a live-loop audit has recorded a verdict
+against, read by `cmd_reship`'s new audit-tree gate) follows the identical
+pattern: `.get("live_loop_audit_trees", [])` everywhere it's read, because
+every sprint that reached `liveqa_live` before this field existed
+genuinely has no such key. Follow this for
 the next field added to the schema: `.get()` with a default only for fields
 younger than some sprint still in flight could be; direct indexing for
 everything in the base schema.
