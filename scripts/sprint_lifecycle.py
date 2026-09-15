@@ -1188,8 +1188,9 @@ def cmd_start(args) -> None:
 
     Exactly two outcomes now proceed, checked before ANY mutation below
     (the file move, the registry write, the state write):
-      (a) no state file exists yet -- never started, proceeds exactly as
-          before this sprint (Req 1b: the fresh-state dict's own shape is
+      (a) no state file exists yet AND the registry's own status is
+          "todo" -- genuinely never started, proceeds exactly as before
+          this sprint (Req 1b: the fresh-state dict's own shape is
           unchanged by this Req; Req 3 separately adds one new schema key
           to it, see that Req's own field).
       (b) a state file exists and its phase is exactly "blocked" --
@@ -1200,9 +1201,31 @@ def cmd_start(args) -> None:
           timestamp are all kept, and every gate-result field is reset,
           because a repaired file must clear both gates again from
           scratch.
-    Every other phase refuses outright -- no override. The one legitimate
+    Every other case refuses outright -- no override. The one legitimate
     re-entry is (b); anything else already has a documented path (block,
-    then start)."""
+    then start).
+
+    QA1 round 1 FINDING, FIXED HERE: the first version of this fix
+    treated "no state file" as synonymous with "never started" -- wrong.
+    `cmd_abort` on a sprint that was never `/sprint-start`'ed writes NO
+    state file at all (see its own `if state_path(args.id).exists():`
+    guard below); it only moves the file to 5-abandoned/ and flips the
+    registry status to "abandoned". A guard that only ever checks the
+    state file therefore let `/sprint-start` on such a sprint sail
+    through as if it were case (a) above -- reviving an aborted sprint
+    with a single ordinary command, undoing exactly what CLAUDE.md says
+    abort does ("burns the sprint id and makes re-filing a human act").
+    Demonstrated directly against this repo's own sprint 37 (aborted with
+    no state file, per this sprint's own Out of Scope): `/sprint-start 37`
+    used to succeed cleanly, moving the file back to 2-in-progress/ and
+    fabricating a fresh state file whose history began at
+    "sprint_started", with no trace the sprint had ever been aborted. The
+    fix reads the REGISTRY's own status too, not only the state file --
+    the two facts this repository tracks about a sprint that predates any
+    state file (`todo` and `abandoned` are the only two `entry["status"]`
+    values `cmd_start`'s own `state_path(...).exists()` check cannot
+    already distinguish, since every other status implies a state file
+    exists) are no longer conflated."""
     sprint_id = args.id
     with locked("registry"), locked(f"sprint-{sprint_id}"):
         reg = load_registry()
@@ -1210,7 +1233,7 @@ def cmd_start(args) -> None:
         if not entry:
             die(f"Sprint {sprint_id} not found in registry.")
 
-        # The one real check this Req adds. Read and validated before the
+        # The real checks this Req adds. Read and validated before the
         # file move / registry write / state write just below, so a
         # refusal here is guaranteed to leave nothing on disk changed.
         existing_state = None
@@ -1225,6 +1248,24 @@ def cmd_start(args) -> None:
                     "the documented path is /sprint-block (with a real --reason) followed by "
                     "/sprint-start again, not this command acting directly on an in-flight or "
                     "closed sprint.")
+        elif entry.get("status") == "abandoned":
+            # QA1 round 1 finding: an aborted-before-it-ever-started
+            # sprint has no state file to catch above, but it is not
+            # "never started" either -- it is destroyed, and abort's own
+            # documented contract is that re-filing it is a human act,
+            # not an ordinary /sprint-start. `entry.get("status")` (not
+            # direct indexing): a registry entry's "status" key has been
+            # present since this project's first commit, but reading it
+            # with .get() here costs nothing and matches this file's own
+            # convention of never assuming a dict shape it doesn't have
+            # to.
+            die(f"Sprint {sprint_id} was aborted (registry status 'abandoned'), not merely "
+                "never started -- it has no state file for the same reason a never-started "
+                "sprint doesn't, but abort's own contract is that burning a sprint id makes "
+                "re-filing a human act, not a bare /sprint-start. Nothing has been changed. "
+                "No override -- if this sprint genuinely needs to resume, that decision belongs "
+                "to a human, via /sprint-new for a fresh sprint id, not this command reviving "
+                "the old one.")
 
         src = ROOT / entry["file"]
         dest_dir = SPRINTS_DIR / STATUS_FOLDERS["in_progress"]
@@ -1461,7 +1502,17 @@ def _qa1_live_loop_audit(args, state) -> None:
     save_state(args.id, state)
     # Req 3: printed plainly as a record, not a verdict — a reader must
     # not be able to mistake this for gate 1 passing or failing. Neither
-    # gate moves: phase stays exactly what it was above.
+    # GATE moves (phase stays exactly what it was above, and this never
+    # touches qa1_audit_result/qa1_audited_tree_hash), but sprint 36
+    # corrected an overclaim this message used to make unconditionally:
+    # it used to say plainly that a live-loop record has no effect at all
+    # ("LiveQA's live-test retest remains what actually gates this code"),
+    # which stopped being true the moment Req 3 made a live-loop PASS on
+    # this exact commit's tree exactly what /sprint-reship's own gate
+    # checks for. Corrected below to say what's actually true: still not
+    # a substitute for a fresh gate-1 pass through the FULL checklist,
+    # still not a substitute for LiveQA's own retest, but load-bearing for
+    # whether Pipeman can reship this specific commit at all.
     #
     # Sprint 15, Req 1: the second sentence is phase-conditional, because
     # this branch now fires from two genuinely different situations. Mid
@@ -1473,15 +1524,25 @@ def _qa1_live_loop_audit(args, state) -> None:
     # kind of misleading gate language Req 2 exists to stop elsewhere in
     # this same sprint.
     if state["phase"] in LIVEQA_PHASES:
-        next_step = ("LiveQA's live-test retest remains what actually gates this code; "
-                     "run /sprint-liveqa once Pipeman has reshipped.")
+        if resolved is not None:
+            next_step = ("Sprint 36: this audit is exactly what /sprint-reship's own gate "
+                         "checks for on this commit's exact tree -- without a PASS on record for "
+                         "it, Pipeman cannot reship it. That still is not the same as a fresh "
+                         "gate-1 pass through everything gate 1 checks, and LiveQA's own "
+                         "live-test retest is still what actually verifies the deployed fix "
+                         "works, not this record; run /sprint-liveqa once Pipeman has reshipped.")
+        else:
+            next_step = ("No --commit was given, so this record isn't tied to any specific "
+                         "artifact and has no effect on /sprint-reship's own tree-hash gate for "
+                         "any commit. LiveQA's live-test retest remains what actually gates the "
+                         "deployed code; run /sprint-liveqa once Pipeman has reshipped.")
     else:
         next_step = ("Both gates already passed for this sprint before this record was made; "
                      "this adds an audit record for a commit reached during the fix loop, it "
                      "does not reopen or re-gate anything.")
     print(f"Sprint {args.id}: live-loop audit recorded ({verdict}). This is a RECORD, not a "
-          f"gate verdict - it does not change the sprint's phase and does not substitute for "
-          f"either gate. {next_step}")
+          f"gate-1 verdict - it does not change the sprint's phase, and it is not the same as "
+          f"a fresh gate-1 pass through everything gate 1 checks. {next_step}")
 
 
 def cmd_qa1(args) -> None:
@@ -2640,10 +2701,15 @@ def cmd_block(args) -> None:
     own established pattern (new -> todo, start -> in_progress, complete
     -> done, abort -> abandoned) -- STATUS_FOLDERS["blocked"] has existed
     since this constant was defined and nothing had ever used it.
-    Re-filing is already free: cmd_start() has no phase guard and always
-    moves whatever the registry currently points at into 2-in-progress/,
-    so /sprint-start <id> on a blocked sprint works unchanged, once
-    Master Controller has read the analysis and fixed the file (Req 6).
+    Re-filing is free: /sprint-start <id> on a blocked sprint works,
+    once Master Controller has read the analysis and fixed the file
+    (Req 6) -- sprint 36, Req 1a, gave cmd_start() an explicit phase
+    guard that treats exactly this phase ("blocked") as the one
+    legitimate re-entry, preserving history and resetting gate results
+    rather than the "no guard at all, always overwrites" behavior this
+    comment used to describe (that behavior is exactly what let a
+    mis-issued /sprint-start silently erase a closed sprint's record --
+    see cmd_start's own docstring).
 
     Same actor derivation as cmd_abort, for the identical reason -- this
     command has no single owning role either. No --user-said: blocking
@@ -3145,9 +3211,21 @@ def cmd_gates(args) -> None:
     # each sprint's history in order; for every live_test FAIL/CONDITIONAL,
     # find the shipped/reshipped event immediately before it, then check
     # whether a qa1 audit PASS landed between that ship and the ship before
-    # it. A "reshipped" ship never has one by design (cmd_reship skips the
-    # hash/audit check on purpose), so those always land in the unaudited
-    # bucket. A "shipped" ship normally does, since cmd_ship refuses to
+    # it. A "reshipped" ship never has a FULL gate-1 "audit" event backing
+    # it (cmd_reship's own tree-hash gate, sprint 36, requires a QA1
+    # verdict for the exact commit, but that verdict is either gate 1's
+    # own already-standing PASS on record — which, if it's the reshipped
+    # tree's own tree, would already show up via the normal "shipped"
+    # audited-window logic below on THAT tree's own prior ship, not this
+    # reship — or a narrower live-loop audit, logged under the distinct
+    # "live_loop_audit" event name specifically so it stays invisible to
+    # this exact "audit"-event scan, sprint 7's own design), so those
+    # always land in the unaudited-of-a-FRESH-gate-1-pass bucket below.
+    # This bucket's name predates sprint 36 and still means what it always
+    # meant — "never went through a fresh, full gate-1 audit" — not
+    # "literally has no QA1 verdict on record at all," which is no longer
+    # true for any reship from sprint 36 onward. A "shipped" ship normally
+    # does have a fresh gate-1 audit, since cmd_ship refuses to
     # record one without it — UNLESS a ship-hash override (cmd_override
     # --gate ship-hash) also landed in that same window: that means the
     # content Pipeman actually pushed differs from what QA1's PASS covered,
@@ -3205,8 +3283,10 @@ def cmd_gates(args) -> None:
     print("1. Crossover (LiveQA catching what shipped, split by audit provenance):")
     print(f"   Audited miss - QA1 passed fresh, LiveQA still caught it: "
           f"{len(audited_miss)} - sprints: {counts_str(audited_miss)}")
-    print(f"   Unaudited-fix miss - fix reshipped without a fresh QA1 re-audit, not evidence "
-          f"QA1 missed anything: {len(unaudited_fix_miss)} - sprints: {counts_str(unaudited_fix_miss)}")
+    print(f"   Unaudited-fix miss - fix reshipped without a fresh, FULL gate-1 re-audit (sprint "
+          f"36 onward, it still has at most a narrower live-loop audit on its exact commit, "
+          f"logged separately and never counted here), not evidence QA1's gate-1 checklist "
+          f"missed anything: {len(unaudited_fix_miss)} - sprints: {counts_str(unaudited_fix_miss)}")
     if unclassified:
         print("   UNCLASSIFIED (doesn't match the expected shipped/reshipped state machine, "
               "check by hand):")

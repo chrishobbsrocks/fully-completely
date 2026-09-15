@@ -22,6 +22,7 @@
     "scripts/dev2_worktree.sh",
     "scripts/install.js",
     "scripts/launcher",
+    "scripts/mc-commit.js",
     "scripts/run-lifecycle.js",
     "scripts/smoke_test.sh",
     "scripts/sprint_lifecycle.py",

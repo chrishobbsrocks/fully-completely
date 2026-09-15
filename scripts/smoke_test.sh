@@ -754,6 +754,13 @@ cp "$LL_STATE" /tmp/ll_before.json
 LL_OUT=$($SCRIPT qa1 "$SPRINT_LL" --verdict PASS --notes "live-loop audit" --commit "$LL_COMMIT" 2>&1)
 echo "$LL_OUT" | grep -q "RECORD, not a" || fail "live-loop audit output should say plainly that this is a record, not a gate verdict"
 echo "$LL_OUT" | grep -q "does not change the sprint's phase" || fail "live-loop audit output should say plainly it doesn't move the sprint"
+# Sprint 36, Req 3/4 (QA1 round 1 finding): a PASS with --commit is now
+# load-bearing for /sprint-reship's own gate -- the message must say so,
+# not claim (as it used to) that this record has no gating effect at all.
+echo "$LL_OUT" | grep -q "exactly what /sprint-reship's own gate checks for" || \
+  fail "live-loop audit output (PASS, with --commit) should say this is exactly what reship's gate checks for -- got: $LL_OUT"
+echo "$LL_OUT" | grep -q "LiveQA's live-test retest remains what actually gates this code" && \
+  fail "live-loop audit output (PASS, with --commit) must not still claim LiveQA's retest is the only thing gating this code -- sprint 36 made this record load-bearing for reship too"
 
 python3 -c "
 import json
@@ -1979,6 +1986,32 @@ $SCRIPT start "$SPRINT_START_GUARD" > /tmp/out.txt 2>&1 && fail "start succeeded
 grep -q "has already started and is at phase 'liveqa_live'" /tmp/out.txt || fail "start's refusal on a liveqa_live sprint doesn't name the phase -- got: $(cat /tmp/out.txt)"
 $SCRIPT status "$SPRINT_START_GUARD" | grep -q "Phase: liveqa_live" || fail "a refused start should not have moved sprint $SPRINT_START_GUARD off liveqa_live"
 rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 1 (QA1 round 1 finding): /sprint-start refuses a sprint ABORTED BEFORE IT EVER STARTED -- no state file exists for it, exactly like a never-started sprint, but the registry's own status is 'abandoned', not 'todo' =="
+SPRINT_ABORTED_PRESTART=$(new_sprint "Aborted before start sprint")
+printf 'yes, abandon it, never built\n' > /tmp/abort_prestart_said.txt
+$SCRIPT abort "$SPRINT_ABORTED_PRESTART" --user-said-file /tmp/abort_prestart_said.txt --reason "content for this one never materialized" > /dev/null
+[ ! -f "docs/sprints/state/sprint-${SPRINT_ABORTED_PRESTART}.json" ] || fail "test setup broken: an abort of a never-started sprint should not create a state file"
+python3 -c "
+import json
+reg = json.load(open('docs/sprints/registry.json'))
+assert reg['sprints']['${SPRINT_ABORTED_PRESTART}']['status'] == 'abandoned', 'test setup broken: registry status should be abandoned'
+"
+$SCRIPT start "$SPRINT_ABORTED_PRESTART" > /tmp/out.txt 2>&1 && \
+  fail "start succeeded on a sprint aborted before it ever started -- this revives a burned sprint id with one ordinary command, the exact incident QA1 demonstrated against sprint 37" || true
+grep -q "was aborted (registry status 'abandoned')" /tmp/out.txt || \
+  fail "start's refusal on a pre-start-aborted sprint doesn't name the cause -- got: $(cat /tmp/out.txt)"
+grep -q "Nothing has been changed" /tmp/out.txt || fail "start's pre-start-abort refusal doesn't say nothing changed"
+[ ! -f "docs/sprints/state/sprint-${SPRINT_ABORTED_PRESTART}.json" ] || \
+  fail "a refused start must not have fabricated a state file for an aborted sprint"
+python3 -c "
+import json
+reg = json.load(open('docs/sprints/registry.json'))
+entry = reg['sprints']['${SPRINT_ABORTED_PRESTART}']
+assert entry['status'] == 'abandoned', f'a refused start must not have changed the registry status: {entry[\"status\"]}'
+assert '5-abandoned/' in entry['file'], f'a refused start must not have moved the file out of 5-abandoned/: {entry[\"file\"]}'
+"
+rm -f /tmp/out.txt /tmp/abort_prestart_said.txt
 
 echo "== sprint 36, Req 1b: a genuinely never-started sprint's fresh state is unaffected by the phase guard -- diffed against the known schema, not just 'it worked' =="
 SPRINT_NEVER_STARTED_2=$(new_sprint "Fresh start shape sprint")

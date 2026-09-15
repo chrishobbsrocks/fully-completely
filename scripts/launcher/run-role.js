@@ -836,58 +836,53 @@ const LIVEQA_API_ALLOWED_TOOLS = [
 
 const HEADLESS_PERMISSION_PROFILES = {
   'master-controller': {
-    // Sprint 36, Req 6: headless Master Controller could not commit ITS
-    // OWN sprint-bookkeeping (a sprint-file amendment, per its own Rule 6
-    // and CLAUDE.md's bookkeeping-commit rule) — the two lifecycle-script
-    // entries below cover writing the file (via acceptEdits) but nothing
-    // here ever reached `git`, and this role was never even eligible for
-    // the broader `OWNED_REPOSITORY_ALLOWED_TOOLS` grant the way dev-team/
-    // qa1 are. Downstream: five decision blocks in one sprint went
-    // uncommitted and were correctly ignored by every later role, exactly
-    // the failure a headless-only Master Controller run can't route
-    // around any other way (it has no human at the keyboard to run `git`
-    // by hand). Fixed here with the NARROWEST grant this Req's own 6a
-    // measured safe (see docs/sprint-36-mc-commit-permission-findings.md
-    // for the full measured record, CLI version, and what was actually
-    // tried): staging and pathspec-committing ONLY under docs/sprints/,
-    // with `git push` and every broad staging/commit form this role has
-    // no legitimate use for explicitly denied. This is deliberately much
-    // narrower than the owned-repository broad grant (npm/node/python/
-    // curl/etc.) — Master Controller's only legitimate git need here is
-    // committing its own sprint-file edits, nothing else, so nothing else
-    // is granted.
-    disallowedTools: [
-      'Bash(git push *)',
-      'Bash(git add -A*)',
-      'Bash(git add .*)',
-      'Bash(git add --all*)',
-      'Bash(git commit -a*)',
-      'Bash(git commit --all*)',
-      'Bash(git commit -am*)',
-      // MEASURED, NOT ASSUMED (Req 6a — see the findings doc above,
-      // probe M4): `Bash(git commit -m *)` alone is a prefix match on the
-      // whole command string, so a trailing ` -a` AFTER the quoted
-      // message sits inside that allow entry's own matched wildcard tail
-      // — a real, structural bypass shape this file's own comment on
-      // `.env` protection already warns is exactly how prefix matching
-      // can fail ("no generic file-target restriction, only
-      // command-prefix matching"). These two entries were added
-      // specifically to close it and CONFIRMED, by running
-      // `git commit -m "msg" -a` twice under the full candidate grant,
-      // to actually deny that exact invocation both times — not assumed
-      // safe from the pattern syntax alone. See the findings doc for why
-      // this is graded UNESTABLISHED (model-mediated, sprint 26's own
-      // ceiling on this method) rather than a stronger claim, and for why
-      // this does NOT establish that mid-string wildcards work in
-      // general.
-      'Bash(git commit -m *-a*)',
-      'Bash(git commit -m *--all*)',
-    ],
+    // Sprint 36, Req 6, CORRECTED in the fix round after QA1's round-1
+    // FAIL: headless Master Controller could not commit ITS OWN
+    // sprint-bookkeeping at all before this sprint (a sprint-file
+    // amendment, per its own Rule 6 and CLAUDE.md's bookkeeping-commit
+    // rule) — the two lifecycle-script entries below cover writing the
+    // file (via acceptEdits) but nothing here ever reached `git`, and
+    // this role was never even eligible for the broader
+    // `OWNED_REPOSITORY_ALLOWED_TOOLS` grant the way dev-team/qa1 are.
+    // Downstream: five decision blocks in one sprint went uncommitted and
+    // were correctly ignored by every later role.
+    //
+    // THE ROUND-1 DESIGN (raw `Bash(git add docs/sprints/*)` /
+    // `Bash(git commit -m *)` allow entries, with a pile of disallow
+    // entries for push/-a/-A/--all) SHIPPED WITH A REAL HOLE, confirmed
+    // by QA1's own real probes: a trailing wildcard on an allow pattern
+    // covers a PATHSPEC argument exactly as readily as it covers the free
+    // text before it — `git commit -m "tool tweak" scripts/tool.js`
+    // matched `Bash(git commit -m *)` and committed a file entirely
+    // outside docs/sprints/, zero denials; `git add docs/sprints/x.md
+    // scripts/tool.js` had the identical gap for the add-side grant the
+    // moment a second pathspec was appended. No disallow entry closes
+    // this — the vulnerable argument is a second PATH, not a flag, and
+    // prefix-then-wildcard matching cannot express "starts with X and
+    // has nothing else appended" for a command whose own syntax accepts
+    // an arbitrary number of trailing pathspecs. Confirmed, not assumed:
+    // the entire raw-git design was withdrawn rather than patched further.
+    //
+    // THE FIX: enforcement moved out of the Bash-permission-pattern layer
+    // entirely and into real code — `scripts/mc-commit.js`, a dedicated
+    // wrapper this role is granted Bash access to invoke and nothing else
+    // touching `git`. That script validates every given path in Node
+    // (path.resolve + a symlink-resolved prefix check against
+    // docs/sprints/) before anything reaches git, and its own CLI surface
+    // has no flag that could ever construct a `git push`, `git commit
+    // -a`/`-am`, or `git add -A`/`.` — there is no code path in it that
+    // does. See that file's own header comment for the full reasoning,
+    // launcher_test.js for the (now deterministic, non-model-mediated)
+    // tests, and docs/sprint-36-mc-commit-permission-findings.md for the
+    // measured record of why the raw-pattern approach was abandoned. This
+    // is deliberately much narrower than the owned-repository broad grant
+    // (npm/node/python/curl/etc.) — Master Controller's only legitimate
+    // git need is committing its own sprint-file edits, nothing else.
+    disallowedTools: [],
     allowedTools: [
       'Bash(node scripts/run-lifecycle.js *)',
       'Bash(python3 scripts/sprint_lifecycle.py *)',
-      'Bash(git add docs/sprints/*)',
-      'Bash(git commit -m *)',
+      'Bash(node scripts/mc-commit.js *)',
     ],
   },
   'dev-team-1': {

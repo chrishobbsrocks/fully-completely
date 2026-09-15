@@ -1873,37 +1873,32 @@ test('run-role: headlessPermissionArgs hard-disables Edit/Write for qa1 and live
 });
 
 test('run-role: headlessPermissionArgs does not disallow Edit/Write for roles that write source or sprint files', () => {
-  for (const roleId of ['dev-team-1', 'dev-team-2', 'pipeman']) {
+  for (const roleId of ['dev-team-1', 'dev-team-2', 'master-controller', 'pipeman']) {
     const role = RUN_ROLE_ROLES.find((r) => r.id === roleId);
     assert.ok(!headlessPermissionArgs(role).includes('--disallowedTools'), `${roleId}: must not disallow Edit/Write`);
   }
 });
 
-test('run-role: headlessPermissionArgs still never disallows Edit/Write for master-controller, only specific git forms (sprint 36, Req 6)', () => {
-  const role = RUN_ROLE_ROLES.find((r) => r.id === 'master-controller');
-  const args = headlessPermissionArgs(role);
-  const idx = args.indexOf('--disallowedTools');
-  assert.ok(idx !== -1, 'master-controller must now pass --disallowedTools (the new git-scoping entries)');
-  const disallowed = args[idx + 1];
-  assert.ok(!disallowed.split(',').includes('Edit'), 'master-controller must still be able to Edit sprint files');
-  assert.ok(!disallowed.split(',').includes('Write'), 'master-controller must still be able to Write sprint files');
-  for (const form of ['Bash(git push *)', 'Bash(git add -A*)', 'Bash(git add .*)', 'Bash(git commit -a*)', 'Bash(git commit -am*)']) {
-    assert.ok(disallowed.includes(form), `master-controller must disallow ${form}`);
-  }
-});
-
-test('run-role: headlessPermissionArgs grants master-controller a narrow git add/commit scoped to docs/sprints/, nothing broader (sprint 36, Req 6)', () => {
+test('run-role: headlessPermissionArgs grants master-controller ONLY the mc-commit.js wrapper for git, no raw git pattern at all (sprint 36, Req 6, corrected in the fix round after QA1\'s round-1 FAIL)', () => {
+  // QA1 round 1 demonstrated that raw `Bash(git add docs/sprints/*)` /
+  // `Bash(git commit -m *)` allow entries cannot actually be confined to
+  // docs/sprints/ -- a second pathspec appended after the matched prefix
+  // sails through regardless of any disallow entry. The fix withdraws
+  // every raw git pattern for this role and grants access to a dedicated
+  // wrapper script instead (scripts/mc-commit.js, tested directly and
+  // deterministically in this same file's own "mc-commit.js" section).
   const role = RUN_ROLE_ROLES.find((r) => r.id === 'master-controller');
   const args = headlessPermissionArgs(role);
   const allowedIdx = args.indexOf('--allowedTools');
   assert.ok(allowedIdx !== -1, 'master-controller must pass --allowedTools');
   const allowed = args[allowedIdx + 1];
-  assert.ok(allowed.includes('Bash(git add docs/sprints/*)'), 'master-controller must be allowed to stage under docs/sprints/');
-  assert.ok(allowed.includes('Bash(git commit -m *)'), 'master-controller must be allowed a pathspec/-m commit');
-  assert.ok(!allowed.includes('Bash(git *)'), 'master-controller must not receive the blanket git grant -- only the two scoped forms above');
+  assert.ok(allowed.includes('Bash(node scripts/mc-commit.js *)'), 'master-controller must be allowed to invoke the mc-commit.js wrapper');
+  assert.ok(!allowed.includes('git'), 'master-controller must not have ANY raw git pattern in allowedTools -- the wrapper script is the only path to git');
+  assert.ok(!args.includes('--disallowedTools'), 'no disallowedTools entries should be needed any more -- the wrapper script itself enforces the boundary in code, not a pattern list');
   // master-controller is deliberately NOT eligible for the broader
   // owned-repository grant (npm/node/python/curl/etc.) -- its only
-  // legitimate git need is committing its own sprint-file edits.
+  // legitimate git need is committing its own sprint-file edits, via the
+  // wrapper.
   assert.ok(!HEADLESS_PERMISSION_PROFILES['master-controller'].eligibleForOwnedRepositoryGrant,
     'master-controller must not be eligible for the broad owned-repository grant');
 });
@@ -2059,29 +2054,23 @@ test('run-role: sprint 23 touched only the liveqa profile -- every other role\'s
   // profile as committed before this sprint's changes.
   //
   // Sprint 36, Req 6: master-controller's OWN profile legitimately
-  // changed here (a narrow, measured git add/commit grant scoped to
-  // docs/sprints/ -- see docs/sprint-36-mc-commit-permission-findings.md
-  // and the profile's own comment in run-role.js) -- the assertion below
-  // is updated to match, not left asserting the pre-sprint-36 shape. This
-  // is the one deliberate exception to "byte-identical since sprint 23"
-  // this test's own name claims; every other role below is unaffected.
+  // changed here. Round 1 added raw `git add`/`git commit` allow patterns
+  // scoped to docs/sprints/ -- QA1's round-1 audit demonstrated those
+  // patterns cannot actually be confined that way (a second pathspec
+  // appended after the matched prefix sails through), so the fix round
+  // withdrew every raw git pattern and granted access to a dedicated
+  // wrapper script instead (scripts/mc-commit.js, which enforces the
+  // boundary in real code -- see that file and
+  // docs/sprint-36-mc-commit-permission-findings.md). The assertion below
+  // matches the CORRECTED shape, not the round-1 shape. This is the one
+  // deliberate exception to "byte-identical since sprint 23" this test's
+  // own name claims; every other role below is unaffected.
   assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES['master-controller'], {
-    disallowedTools: [
-      'Bash(git push *)',
-      'Bash(git add -A*)',
-      'Bash(git add .*)',
-      'Bash(git add --all*)',
-      'Bash(git commit -a*)',
-      'Bash(git commit --all*)',
-      'Bash(git commit -am*)',
-      'Bash(git commit -m *-a*)',
-      'Bash(git commit -m *--all*)',
-    ],
+    disallowedTools: [],
     allowedTools: [
       'Bash(node scripts/run-lifecycle.js *)',
       'Bash(python3 scripts/sprint_lifecycle.py *)',
-      'Bash(git add docs/sprints/*)',
-      'Bash(git commit -m *)',
+      'Bash(node scripts/mc-commit.js *)',
     ],
   });
   assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES['dev-team-1'], {
@@ -3614,6 +3603,171 @@ test('runHeadless (real subprocess): the staleness warning appears on stderr but
       fs.rmSync(noOpProtectDir, { recursive: true, force: true });
     }
   });
+});
+
+// -------------------------------------------------------------------------
+// mc-commit.js: sprint 36 fix round (QA1 FAIL round 1, items 1-3) --
+// replaces the Bash-permission-pattern approach to scoping headless
+// Master Controller's git grant (proven, by QA1's own real probes, not
+// to be expressible that way at all: a trailing wildcard on `git commit
+// -m *` covers a pathspec argument exactly as readily as it covers the
+// message, and `git add docs/sprints/*` has the identical gap the moment
+// a second pathspec is appended). Enforcement now lives in this file's
+// own real code, which makes it deterministically, non-model-mediated
+// testable -- every test below is a real subprocess run against a real
+// scratch git repo, never a permission-pattern assertion.
+// -------------------------------------------------------------------------
+const MC_COMMIT_PATH = path.join(REPO_ROOT, 'scripts', 'mc-commit.js');
+
+function withMcCommitFixture(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-mc-commit-test-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+    fs.copyFileSync(MC_COMMIT_PATH, path.join(dir, 'scripts', 'mc-commit.js'));
+    fs.mkdirSync(path.join(dir, 'docs', 'sprints', 'state'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'scripts_other'), { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    execFileSync('git', ['config', 'user.email', 'mc-commit-test@example.com'], { cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'MC Commit Test'], { cwd: dir });
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'existing.md'), 'base\n');
+    fs.writeFileSync(path.join(dir, 'scripts_other', 'tool.js'), 'base\n');
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-q', '-m', 'baseline'], { cwd: dir });
+    fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function runMcCommit(dir, args) {
+  return spawnSync(process.execPath, [path.join(dir, 'scripts', 'mc-commit.js'), ...args], { cwd: dir, encoding: 'utf8' });
+}
+
+function gitLog(dir) {
+  return execFileSync('git', ['log', '--oneline'], { cwd: dir, encoding: 'utf8' }).trim();
+}
+
+test('mc-commit.js: commits a brand-new file under docs/sprints/ (the /sprint-new shape -- untracked, needs staging first)', () => {
+  withMcCommitFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json'), '{}\n');
+    const result = runMcCommit(dir, ['--message', 'legit commit', '--', 'docs/sprints/state/sprint-1.json']);
+    assert.strictEqual(result.status, 0, `expected success, got: ${result.stderr}`);
+    assert.match(gitLog(dir), /legit commit/);
+    const stat = execFileSync('git', ['show', '--stat', '--format=', 'HEAD'], { cwd: dir, encoding: 'utf8' });
+    assert.match(stat, /sprint-1\.json/);
+  });
+});
+
+test('mc-commit.js: commits multiple paths under docs/sprints/ in one call', () => {
+  withMcCommitFixture((dir) => {
+    fs.appendFileSync(path.join(dir, 'docs', 'sprints', 'existing.md'), 'amended\n');
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-2.json'), '{}\n');
+    const result = runMcCommit(dir, ['--message', 'two paths', '--', 'docs/sprints/existing.md', 'docs/sprints/state/sprint-2.json']);
+    assert.strictEqual(result.status, 0, `expected success, got: ${result.stderr}`);
+    const stat = execFileSync('git', ['show', '--stat', '--format=', 'HEAD'], { cwd: dir, encoding: 'utf8' });
+    assert.match(stat, /existing\.md/);
+    assert.match(stat, /sprint-2\.json/);
+  });
+});
+
+test('mc-commit.js: refuses a path outside docs/sprints/ -- the exact QA1 P2 repro (git commit -m ... scripts/tool.js), nothing committed', () => {
+  withMcCommitFixture((dir) => {
+    fs.appendFileSync(path.join(dir, 'scripts_other', 'tool.js'), 'tweaked\n');
+    const before = gitLog(dir);
+    const result = runMcCommit(dir, ['--message', 'tool tweak', '--', 'scripts_other/tool.js']);
+    assert.notStrictEqual(result.status, 0, 'a path outside docs/sprints/ must be refused');
+    assert.match(result.stderr, /does not resolve to a path strictly inside docs\/sprints/);
+    assert.strictEqual(gitLog(dir), before, 'nothing must have been committed');
+  });
+});
+
+test('mc-commit.js: refuses when ONE OF SEVERAL paths is outside docs/sprints/ -- all or nothing, the exact QA1 P3 shape (git add docs/sprints/x scripts/tool.js)', () => {
+  withMcCommitFixture((dir) => {
+    fs.appendFileSync(path.join(dir, 'docs', 'sprints', 'existing.md'), 'amended\n');
+    fs.appendFileSync(path.join(dir, 'scripts_other', 'tool.js'), 'tweaked\n');
+    const before = gitLog(dir);
+    const result = runMcCommit(dir, ['--message', 'sneaky combo', '--', 'docs/sprints/existing.md', 'scripts_other/tool.js']);
+    assert.notStrictEqual(result.status, 0, 'a mixed legit+outside path list must be refused entirely');
+    assert.strictEqual(gitLog(dir), before, 'nothing must have been committed, not even the legitimate path');
+    const status = execFileSync('git', ['status', '--short'], { cwd: dir, encoding: 'utf8' });
+    assert.match(status, /docs\/sprints\/existing\.md/, 'the legitimate file must still be sitting uncommitted, not swept in');
+  });
+});
+
+test('mc-commit.js: refuses a `..` traversal path', () => {
+  withMcCommitFixture((dir) => {
+    const result = runMcCommit(dir, ['--message', 'traversal', '--', 'docs/sprints/../../etc-like.txt']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /does not resolve to a path strictly inside docs\/sprints/);
+  });
+});
+
+test('mc-commit.js: refuses a string-prefix trick (docs/sprints-evil/ is not docs/sprints/)', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, 'docs', 'sprints-evil'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints-evil', 'y.txt'), 'x\n');
+    const result = runMcCommit(dir, ['--message', 'prefix trick', '--', 'docs/sprints-evil/y.txt']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /does not resolve to a path strictly inside docs\/sprints/);
+  });
+});
+
+test('mc-commit.js: refuses when no paths are given -- there is no "commit everything" mode', () => {
+  withMcCommitFixture((dir) => {
+    const result = runMcCommit(dir, ['--message', 'nothing named', '--']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /At least one path is required/);
+  });
+});
+
+test('mc-commit.js: refuses an empty commit message', () => {
+  withMcCommitFixture((dir) => {
+    const result = runMcCommit(dir, ['--message', '', '--', 'docs/sprints/existing.md']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /non-empty commit message is required/);
+  });
+});
+
+test('mc-commit.js: --message-file reads the message from a file (matching qa1.md/liveqa.md\'s own established --notes-file pattern)', () => {
+  withMcCommitFixture((dir) => {
+    fs.appendFileSync(path.join(dir, 'docs', 'sprints', 'existing.md'), 'amended\n');
+    const msgFile = path.join(dir, 'msg.txt');
+    fs.writeFileSync(msgFile, 'message from a file\n');
+    const result = runMcCommit(dir, ['--message-file', msgFile, '--', 'docs/sprints/existing.md']);
+    assert.strictEqual(result.status, 0, `expected success, got: ${result.stderr}`);
+    assert.match(gitLog(dir), /message from a file/);
+  });
+});
+
+test('mc-commit.js: never reaches a remote -- a real bare remote receives nothing across every scenario above (no code path here ever constructs a git push)', () => {
+  withMcCommitFixture((dir) => {
+    const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-mc-commit-remote-'));
+    try {
+      execFileSync('git', ['init', '-q', '--bare'], { cwd: remoteDir });
+      execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: dir });
+      fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-3.json'), '{}\n');
+      const result = runMcCommit(dir, ['--message', 'legit commit', '--', 'docs/sprints/state/sprint-3.json']);
+      assert.strictEqual(result.status, 0);
+      const remoteLog = execFileSync('git', ['log', '--oneline', '--all'], { cwd: remoteDir, encoding: 'utf8' }).trim();
+      assert.strictEqual(remoteLog, '', 'the remote must have received nothing -- this script has no push capability at all');
+    } finally {
+      fs.rmSync(remoteDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('mc-commit.js: source-level check -- the only git subcommands this file ever passes to spawnSync are "add" and "commit", never "push", and no bare "-a"/"-A"/"--all"/"."  argv element exists anywhere', () => {
+  const src = fs.readFileSync(MC_COMMIT_PATH, 'utf8');
+  const spawnCalls = [...src.matchAll(/spawnSync\('git',\s*\[([^\]]*)\]/g)].map((m) => m[1]);
+  assert.strictEqual(spawnCalls.length, 2, `expected exactly two spawnSync('git', [...]) call sites, found ${spawnCalls.length}`);
+  assert.ok(spawnCalls.some((argsSrc) => /'add'/.test(argsSrc)), 'expected one call to pass "add"');
+  assert.ok(spawnCalls.some((argsSrc) => /'commit'/.test(argsSrc)), 'expected one call to pass "commit"');
+  for (const argsSrc of spawnCalls) {
+    assert.ok(!/'push'/.test(argsSrc), 'no spawnSync(\'git\', [...]) call may ever pass "push"');
+    for (const forbidden of ["'-a'", "'-A'", "'--all'", "'.'", "'-am'"]) {
+      assert.ok(!argsSrc.includes(forbidden), `no spawnSync('git', [...]) call may ever pass ${forbidden}`);
+    }
+  }
 });
 
 if (failures > 0) {

@@ -47,9 +47,15 @@ all found by FMC driving a real 0.2.9 install headlessly.
   blocked (missing hardware, for instance), but every check that CAN run
   in the same round now does, with every defect found reported together.
 - Headless Master Controller can now commit its own sprint-bookkeeping —
-  a narrow, measured grant (`git add`/pathspec `git commit -m` scoped to
-  `docs/sprints/`; `git push`, `git commit -a`/`-am`, and `git add -A`/`.`
-  explicitly denied) rather than the broad access other roles receive.
+  via a dedicated wrapper script (`scripts/mc-commit.js`) rather than a
+  raw `git` permission grant. A first attempt at scoping `git add`/`git
+  commit` directly via Bash allow patterns was measured, during this same
+  sprint's own QA1 audit, to be structurally unable to confine itself to
+  `docs/sprints/` (a pathspec argument passes through a wildcarded allow
+  pattern exactly as readily as a commit message does), so enforcement
+  moved into the wrapper script's own code instead: every path is
+  validated before anything reaches git, and the script has no way to be
+  asked to `git push`, `git commit -a`/`-am`, or `git add -A`/`.`.
   Previously it had no git access at all, so amendments it made after a
   sprint started could sit uncommitted through no fault of the process.
 - The installer's managed `.gitignore` block now includes
