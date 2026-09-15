@@ -21,6 +21,7 @@
 // separate question, answered in scripts/sprint_lifecycle.py.
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 // Sprint 25, Req 3: stated here, in code, not only in the sprint file --
 // four separate comments in this project have had to be corrected for
@@ -83,10 +84,18 @@ function readClaims(repoRoot) {
 // one -- this function only ever records whatever identity it's given,
 // it does not mint identity itself except via the `nowFn`/id fallback a
 // caller can also override for tests.
-function recordRoleClaim(roleId, repoRoot, { sessionId, now = () => new Date() } = {}) {
+//
+// Sprint 38, Req 1: also records `pid` (the CALLING process's own pid --
+// run-role.js's own launcher process, not the `claude` child it goes on
+// to spawn) -- `roleClaimWarning()` below reads this back on the NEXT
+// launch to determine whether the previous session has demonstrably
+// ended. Defaults to `process.pid`, overridable (like `now`) so a test
+// can record an already-known, controlled pid instead of this process's
+// own.
+function recordRoleClaim(roleId, repoRoot, { sessionId, now = () => new Date(), pid = process.pid } = {}) {
   const claims = readClaims(repoRoot);
   const previous = Object.prototype.hasOwnProperty.call(claims, roleId) ? claims[roleId] : null;
-  claims[roleId] = { sessionId: sessionId || null, startedAt: now().toISOString() };
+  claims[roleId] = { sessionId: sessionId || null, startedAt: now().toISOString(), pid };
   try {
     const file = claimsFilePath(repoRoot);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -100,13 +109,113 @@ function recordRoleClaim(roleId, repoRoot, { sessionId, now = () => new Date() }
   return previous;
 }
 
+// Sprint 38, Req 1/1a/1b: whether `pid` demonstrably still refers to a
+// running process, as a real, observable fact -- not a guess, and never
+// a lease that goes stale on its own. Returns:
+//   true  -- the process genuinely still exists and is running.
+//   false -- POSITIVELY confirmed gone. The only value that may ever
+//            suppress the NOTE (Req 1a: absence of the NOTE must rest on
+//            a positive determination, never an assumption).
+//   null  -- undeterminable (no pid recorded at all -- Req 1c's own
+//            0.2.10-and-earlier record shape; a check that can't be
+//            performed on this platform; any unexpected failure). Every
+//            null MUST be treated as "still running" by the caller --
+//            this is what keeps 1a's own promise: an old-format or
+//            unreadable record still warns, exactly as it did before
+//            this sprint.
+//
+// ESTABLISHED BY RUNNING (Req 1b's own explicit instruction), on macOS,
+// not assumed from POSIX signal semantics in the abstract:
+//   - `process.kill(pid, 0)` is the standard existence probe (throws
+//     ESRCH when truly gone, EPERM when it exists but is owned by
+//     someone else -- still running either way) -- confirmed directly:
+//     spawn a real child, confirm no throw while it runs, SIGKILL it,
+//     confirm ESRCH shortly after.
+//   - THE REAL HAZARD, found by running it, not by reasoning about
+//     kill(2): `process.kill(pid, 0)` CANNOT tell a genuinely-running
+//     process apart from a ZOMBIE (already exited, only awaiting reap by
+//     its own parent) -- confirmed directly: SIGKILL a real child, then
+//     immediately probe with `process.kill(child.pid, 0)` before the
+//     event loop has reaped it -- no throw, indistinguishable from
+//     alive. `ps -o stat= -p <pid>` reports state `Z` for that exact
+//     process at that exact moment, which `kill(pid, 0)` alone has no
+//     way to see. A launcher that has just exited (including via the
+//     orphan guard's own SIGTERM/SIGHUP handling in run-role.js, which
+//     DOES run in exactly the terminal-close/trash-can shutdown path
+//     Req 1 targets -- confirmed directly with a real pseudo-terminal,
+//     `pty.fork()`, closing the master side to simulate a VS Code
+//     terminal disposing its pty: both the launcher and its child
+//     process were gone within about a second, the launcher passing
+//     through a zombie state first) would otherwise be misread as
+//     "still running" by kill(pid,0) alone for as long as its own parent
+//     takes to reap it -- exactly the false-positive direction Req 1
+//     exists to fix, not the dangerous one, but real enough that this
+//     function checks for it explicitly rather than leaving it to chance.
+//   - Windows has no POSIX zombie state at all (a terminated process is
+//     simply gone once nothing holds its handle open), so the extra `ps`
+//     check below is POSIX-only, skipped entirely on win32 -- NOT
+//     independently measured on Windows in this session; `process.kill`
+//     signal-0 existence checking is Node's own documented cross-platform
+//     behaviour, not this project's own finding, and LiveQA's own Req 1
+//     live criteria for this sprint specifically re-confirms it there
+//     (`Get-Process` state at each step) rather than this comment simply
+//     asserting it holds.
+//   - A residual, named limitation, not implied coverage: a `kill -9
+//     <launcher-pid>` aimed at ONLY the launcher's specific pid (not
+//     through a terminal's process-group signalling, which the pty test
+//     above confirms reaches both processes together) bypasses the
+//     orphan guard entirely -- SIGKILL cannot be caught by any process,
+//     the same limitation run-role.js's own installOrphanGuard comment
+//     already names -- and can leave the child genuinely orphaned and
+//     running while the launcher's own pid is gone. This function would
+//     read that as "not running" and the NOTE would be wrongly
+//     suppressed in that one specific, already out-of-normal-control
+//     scenario (this project's own established position, stated in
+//     run-role.js, is that a targeted SIGKILL to the launcher is outside
+//     what cleanup code can ever guarantee). Not the F6 workshop
+//     scenario (trash-can, Terminate All Tasks), which goes through the
+//     terminal/process-group path this function correctly detects.
+function isPidAlive(pid) {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    process.kill(pid, 0);
+  } catch (err) {
+    if (err && err.code === 'ESRCH') return false;
+    if (err && err.code === 'EPERM') return true;
+    return null;
+  }
+  if (process.platform === 'win32') return true;
+  let ps;
+  try {
+    ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000 });
+  } catch (_) {
+    return null;
+  }
+  if (ps.error) return null;
+  const stat = (ps.stdout || '').trim();
+  if (ps.status !== 0 || !stat) return false; // gone by the time ps checked -- a real, current fact
+  return !stat.startsWith('Z');
+}
+
 // Sprint 25, Req 1's own required wording: names the blind spot in the
 // message itself, not only in a code comment nobody launching a role will
 // ever read. Returns null (nothing to print) when there is no previous
 // claim to warn about -- the common, correct case for a role's first
 // launch in a tree.
+//
+// Sprint 38, Req 1: also returns null -- suppressing the NOTE -- when
+// `previousClaim.pid` is POSITIVELY confirmed no longer running
+// (isPidAlive() returns exactly `false`). Every other outcome (still
+// running, or undeterminable -- an old-format record with no `pid` at
+// all, or a platform/check failure) still prints the identical wording
+// this function always has: Req 1a's own instruction is that absence of
+// the NOTE must never be inferred from anything less than a positive
+// determination, and the existing wording about what this record cannot
+// see already states that honestly -- it does not need new wording for
+// the undeterminable case, only to keep firing in it.
 function roleClaimWarning(roleLabel, previousClaim) {
   if (!previousClaim) return null;
+  if (isPidAlive(previousClaim.pid) === false) return null;
   return (
     `NOTE: another ${roleLabel} session was recorded starting at ` +
     `${previousClaim.startedAt} in this same tree${previousClaim.sessionId ? ` (session ${previousClaim.sessionId})` : ''}. ` +
@@ -125,4 +234,5 @@ module.exports = {
   readClaims,
   recordRoleClaim,
   roleClaimWarning,
+  isPidAlive,
 };

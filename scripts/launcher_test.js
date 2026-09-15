@@ -109,6 +109,7 @@ const {
   readClaims,
   recordRoleClaim,
   roleClaimWarning,
+  isPidAlive,
 } = require('./launcher/role-claims');
 
 function withTmpRepoRoot(fn) {
@@ -140,12 +141,13 @@ test('role-claims: a role\'s first claim returns null (nothing previous) and wri
 test('role-claims: a role\'s second claim returns the FIRST claim, not null, and overwrites it with the new one', () => {
   withTmpRepoRoot((repoRoot) => {
     const firstNow = () => new Date('2026-01-01T00:00:00.000Z');
-    recordRoleClaim('qa1', repoRoot, { sessionId: 'first-session', now: firstNow });
+    recordRoleClaim('qa1', repoRoot, { sessionId: 'first-session', now: firstNow, pid: 111 });
     const secondNow = () => new Date('2026-01-02T00:00:00.000Z');
-    const previous = recordRoleClaim('qa1', repoRoot, { sessionId: 'second-session', now: secondNow });
-    assert.deepStrictEqual(previous, { sessionId: 'first-session', startedAt: '2026-01-01T00:00:00.000Z' });
+    const previous = recordRoleClaim('qa1', repoRoot, { sessionId: 'second-session', now: secondNow, pid: 222 });
+    assert.deepStrictEqual(previous, { sessionId: 'first-session', startedAt: '2026-01-01T00:00:00.000Z', pid: 111 });
     const claims = readClaims(repoRoot);
     assert.strictEqual(claims.qa1.sessionId, 'second-session', 'the record now reflects the newer launch, not the one being warned about');
+    assert.strictEqual(claims.qa1.pid, 222);
   });
 });
 
@@ -168,6 +170,98 @@ test('role-claims: a write failure (unwritable directory) never throws -- Req 1\
       fs.chmodSync(claudeDir, 0o755); // restore so withTmpRepoRoot's own cleanup can remove it
     }
   });
+});
+
+// -------------------------------------------------------------------------
+// isPidAlive() / roleClaimWarning() pid-liveness: sprint 38, Req 1/1a/1b/1c.
+// Every "alive"/"dead" fact below comes from a REAL spawned process, never
+// a mocked or guessed pid -- matching this file's own established
+// preference for real subprocess behavior over simulation, and Req 1b's
+// own explicit "measure before building" instruction.
+// -------------------------------------------------------------------------
+test('isPidAlive: true for a real, currently-running process', () => {
+  const sleeper = spawn('sleep', ['5']);
+  try {
+    assert.strictEqual(isPidAlive(sleeper.pid), true);
+  } finally {
+    sleeper.kill('SIGKILL');
+  }
+});
+
+// Spawns `sleep 30` in a background shell job, SIGKILLs it, and `wait`s on
+// it -- the shell's own `wait` builtin blocks synchronously until that
+// exact child has exited AND reaps it itself, so by the time this
+// function returns, the pid is fully gone from the OS process table (not
+// merely killed-but-unreaped) -- confirmed directly: `ps -p <pid>`
+// afterward finds nothing at all, not even a zombie entry. This sidesteps
+// this test file's own synchronous `test()` harness (no async/await
+// support) needing to wait on Node's own asynchronous 'exit' event, which
+// a busy-loop using execFileSync cannot observe -- confirmed directly
+// that approach fails: execFileSync blocks the whole event loop, so
+// Node's own child_process exit callback never runs until the loop
+// exits, by which point the deadline has already passed.
+function killAndReapSync(seconds) {
+  const r = spawnSync('sh', ['-c', `sleep ${seconds} & pid=$!; kill -9 $pid; wait $pid 2>/dev/null; echo $pid`], { encoding: 'utf8' });
+  return parseInt(r.stdout.trim(), 10);
+}
+
+test('isPidAlive: false for a pid that has been confirmed to exit', () => {
+  const pid = killAndReapSync(30);
+  assert.strictEqual(isPidAlive(pid), false);
+});
+
+test('isPidAlive: a zombie (killed but not yet reaped) is treated as NOT alive, on POSIX -- the real hazard this function exists to guard against', () => {
+  if (process.platform === 'win32') return; // POSIX-only concept; skip rather than assert something Windows has no equivalent of
+  const child = spawn('sleep', ['30']);
+  const pid = child.pid;
+  child.kill('SIGKILL');
+  // Deliberately do NOT wait for Node's own 'exit' event here -- the
+  // whole point is to catch the process while it is still a zombie in
+  // the OS process table (killed, not yet reaped by its real parent,
+  // this test process). A short, fixed wait gives the kernel time to
+  // actually transition the process to zombie state without giving
+  // Node's own child_process machinery time to reap it first.
+  const start = Date.now();
+  while (Date.now() - start < 50) { /* busy-wait briefly, no sleep syscall needed */ }
+  assert.strictEqual(isPidAlive(pid), false, 'a zombie must read as not-alive, not as still-running');
+});
+
+test('isPidAlive: null (undeterminable) for a missing/invalid pid -- Req 1c\'s own 0.2.10-and-earlier record shape', () => {
+  assert.strictEqual(isPidAlive(undefined), null, 'an old-format record with no pid field at all');
+  assert.strictEqual(isPidAlive(null), null);
+  assert.strictEqual(isPidAlive('123'), null, 'a string, never a real pid type this code would have written');
+  assert.strictEqual(isPidAlive(-1), null);
+  assert.strictEqual(isPidAlive(0), null);
+});
+
+test('roleClaimWarning: fires for a genuinely running previous session (real spawned process)', () => {
+  const sleeper = spawn('sleep', ['5']);
+  try {
+    const warning = roleClaimWarning('QA1', { startedAt: '2026-01-01T00:00:00.000Z', sessionId: 'x', pid: sleeper.pid });
+    assert.match(warning, /NOTE: another QA1 session was recorded starting at/);
+  } finally {
+    sleeper.kill('SIGKILL');
+  }
+});
+
+test('roleClaimWarning: sprint 38, Req 1 -- suppressed (null) once the previous session\'s process is confirmed to have exited', () => {
+  const pid = killAndReapSync(30);
+  const warning = roleClaimWarning('QA1', { startedAt: '2026-01-01T00:00:00.000Z', sessionId: 'x', pid });
+  assert.strictEqual(warning, null, 'the previous session has demonstrably ended -- no NOTE');
+});
+
+test('roleClaimWarning: Req 1a/1c -- still fires (never silently suppressed) for an undeterminable record: missing pid, or any other non-positive result', () => {
+  // A 0.2.10-and-earlier claim record: no `pid` key exists on the object
+  // at all (not even `undefined` explicitly) -- exactly what JSON.parse
+  // produces from a real pre-sprint-38 role-claims.json.
+  const oldFormatClaim = { startedAt: '2026-01-01T00:00:00.000Z', sessionId: 'x' };
+  assert.ok(!('pid' in oldFormatClaim), 'test setup: this must genuinely lack the key, not merely be undefined');
+  const warning = roleClaimWarning('QA1', oldFormatClaim);
+  assert.match(warning, /NOTE: another QA1 session was recorded starting at/, 'Req 1a: undeterminable must still warn');
+  // The NOTE's own established wording already states its blind spot
+  // honestly ("Silence never means 'nobody else is working here.'") --
+  // Req 1a requires that this stays true, not that the phrase is absent.
+  assert.match(warning, /Silence never means "nobody else is working here\."/);
 });
 
 test('role-claims: roleClaimWarning is null when there is no previous claim -- silence on a role\'s first launch', () => {
@@ -2726,8 +2820,8 @@ test('run-role CLI (real subprocess, Sprint 31 Req 4): PERMISSION_RECORD matches
   });
 });
 
-test('run-role CLI (real subprocess, Req 1): a role\'s first launch writes a claim and stays silent; the SAME role\'s second launch warns but still launches', () => {
-  withFakeClaude(true, ({ dir, readArgv }) => {
+test('run-role CLI (real subprocess, Req 1): a role\'s first launch writes a claim, with its own real pid, and stays silent', () => {
+  withFakeClaude(true, ({ dir }) => {
     const claimsPath = freshRoleClaimsPathOverride();
     const env = { PATH: dir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath };
 
@@ -2740,14 +2834,94 @@ test('run-role CLI (real subprocess, Req 1): a role\'s first launch writes a cla
     assert.ok(fs.existsSync(claimsPath), 'the claim must actually be written to disk');
     const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
     assert.ok(claims.qa1 && claims.qa1.startedAt, 'the claim must record qa1 with a start time');
+    assert.ok(Number.isInteger(claims.qa1.pid) && claims.qa1.pid > 0, 'sprint 38, Req 1: the claim must record a real pid');
+  });
+});
+
+test('run-role CLI (real subprocess, sprint 38 Req 1): a SEQUENTIAL second launch of the same role -- the first launcher process has already fully exited by the time the second one checks -- does NOT warn', () => {
+  // runRoleCli() is synchronous (spawnSync): by construction, the first
+  // launch's own launcher process (whose pid was recorded in the claim)
+  // has completely exited before this line returns, let alone before the
+  // second launch below even starts. This is exactly Req 1's own target
+  // case -- "the previously recorded session is demonstrably no longer
+  // running" -- and is the regression test for the behavior change this
+  // sprint makes: before this sprint, this exact sequence warned every
+  // time (the old, unconditional-fire behavior); now it must not.
+  withFakeClaude(true, ({ dir }) => {
+    const claimsPath = freshRoleClaimsPathOverride();
+    const env = { PATH: dir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath };
+
+    const first = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
+    assert.strictEqual(first.status, 0);
 
     const second = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
-    // Req 1's own FAIL-level criterion: a launch that warns must still launch.
-    assert.strictEqual(second.status, 0, 'a second launch of the same role must still succeed -- never gates');
-    assert.strictEqual(second.stdout, FAKE_JSON_RESULT, 'the launch itself proceeded normally, warning or not');
-    assert.match(second.stderr, /NOTE: another QA1 session was recorded starting at/, 'must name that an earlier session exists');
-    assert.match(second.stderr, /nobody else is working here/i, 'must state its own blind spot in the message, not only in a comment');
+    assert.strictEqual(second.status, 0, 'a second launch must succeed regardless -- never gates');
+    assert.strictEqual(second.stdout, FAKE_JSON_RESULT, 'the launch itself proceeded normally');
+    assert.strictEqual(
+      stripPermissionRecordLine(second.stderr), '',
+      'the previous launcher process has genuinely exited by now -- no NOTE should fire (sprint 38, Req 1)'
+    );
+    const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
+    assert.ok(Number.isInteger(claims.qa1.pid), 'the claim must still be updated to the new (second) launch\'s own pid');
   });
+});
+
+test('run-role CLI (real subprocess, sprint 38 Req 1): a second launch WHILE the first is still genuinely running still warns', () => {
+  // A real overlap, not simulated: the first launch's own fake-claude
+  // child sleeps for a controlled interval before exiting, keeping the
+  // REAL launcher process (run-role.js itself) alive and blocked on it
+  // for that whole window -- spawnClaude()'s own Promise only resolves
+  // once its child exits. The second launch runs synchronously to
+  // completion well inside that window and must see the first launcher's
+  // pid as still alive.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-fake-claude-slow-'));
+  const argvLog = path.join(dir, 'argv.log');
+  const script = [
+    '#!/bin/sh',
+    'if [ "$1" = "--version" ]; then exit 0; fi',
+    'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then echo \'{"loggedIn": true}\'; exit 0; fi',
+    'for a in "$@"; do printf \'%s\\0\' "$a" >> ' + JSON.stringify(argvLog) + '; done',
+    'sleep 3',
+    `printf '%s' '${FAKE_JSON_RESULT}'`,
+    'exit 0',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(dir, 'claude'), script);
+  fs.chmodSync(path.join(dir, 'claude'), 0o755);
+  try {
+    const claimsPath = freshRoleClaimsPathOverride();
+    const env = {
+      ...process.env,
+      PATH: dir,
+      FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath,
+    };
+    const firstChild = spawn(process.execPath, [RUN_ROLE_PATH, '--headless', '--agent', 'qa1', '--sprint', '4'], {
+      cwd: REPO_ROOT,
+      env,
+    });
+    try {
+      // Wait for the claim to actually land on disk (the first launcher
+      // records it before ever spawning its own slow child), rather than
+      // a fixed sleep guessing when that write has happened.
+      const deadline = Date.now() + 5000;
+      while (!fs.existsSync(claimsPath) && Date.now() < deadline) {
+        execFileSync('sleep', ['0.05']);
+      }
+      assert.ok(fs.existsSync(claimsPath), 'the first launch should have recorded its claim by now');
+
+      const second = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
+      assert.strictEqual(second.status, 0, 'a second launch must succeed regardless -- never gates');
+      assert.match(
+        second.stderr, /NOTE: another QA1 session was recorded starting at/,
+        'the first launcher is still genuinely alive (blocked on its own slow child) -- the NOTE must still fire'
+      );
+      assert.match(second.stderr, /nobody else is working here/i);
+    } finally {
+      firstChild.kill('SIGKILL');
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('run-role CLI (real subprocess, Req 1): a DIFFERENT role launching after qa1 is a first launch for IT -- no warning', () => {

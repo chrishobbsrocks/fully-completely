@@ -87,7 +87,7 @@ from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 try:
     import fcntl  # POSIX only (macOS, Linux)
@@ -620,23 +620,72 @@ def is_git_repository() -> bool:
         return False
 
 
-def current_branch() -> Optional[str]:
-    """The branch this checkout is on, or None if that can't be
-    determined (detached HEAD, git missing from PATH, not a git
-    repository at all). Sprint 7, Req 7: this must never be the reason a
-    read-only command fails to answer at all, so every failure mode here
-    collapses to None exactly like git_tree_hash/git_commit_sha above,
-    and tree_description() below already treats a missing branch as
-    something to omit, not something to error on."""
+def branch_state() -> Tuple[str, Optional[str]]:
+    """Sprint 38, Req 2 (Finding F2): `python3 scripts/sprint_lifecycle.py
+    list` — the exact line the workshop guides tell attendees to check —
+    printed "(branch unknown)" both BEFORE and AFTER `git init`, because
+    the previous implementation (`git rev-parse --abbrev-ref HEAD`)
+    collapsed four genuinely different situations into one None: no
+    repository at all, an unborn branch with zero commits, a detached
+    HEAD, and git missing from PATH.
+
+    ESTABLISHED BY RUNNING, not assumed: `git symbolic-ref --short HEAD`
+    resolves the branch NAME even on a completely fresh `git init` with
+    zero commits — confirmed directly (exits 0, prints the configured
+    initial branch name, "master" in this environment) — unlike `git
+    rev-parse --abbrev-ref HEAD`, which FAILS on that exact case ("fatal:
+    ambiguous argument 'HEAD': unknown revision or path not in the
+    working tree") and is exactly why this function's own predecessor
+    produced Finding F2. `git symbolic-ref --short HEAD` correctly FAILS
+    on a detached HEAD too (confirmed: "fatal: ref HEAD is not a symbolic
+    ref"), so that case still falls through to "unknown", never a
+    fabricated branch name.
+
+    Returns (kind, name):
+      ("named",  "<branch>") -- a real branch with at least one commit
+                                (unchanged rendering from before this
+                                sprint).
+      ("unborn", "<branch>") -- a real branch name, genuinely no commits
+                                yet (the exact gap Finding F2 named).
+      ("no-repo", None)      -- git ran and confirmed ROOT is not inside
+                                a git working tree at all.
+      ("unknown", None)      -- every remaining undeterminable case
+                                (detached HEAD, git missing from PATH, or
+                                any other subprocess failure) -- Sprint 7,
+                                Req 7's rule stands here unchanged: none
+                                of this may ever raise or make a
+                                read-only command fail to answer, so
+                                every failure mode collapses to this one
+                                case rather than propagating."""
     try:
-        result = subprocess.run(  # nosec B603 B607
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
+        repo_check = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=ROOT, capture_output=True, text=True,
         )
-        branch = result.stdout.strip()
-        return branch if branch and branch != "HEAD" else None
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-        return None
+    except (FileNotFoundError, OSError):
+        return ("unknown", None)
+    if repo_check.returncode != 0 or repo_check.stdout.strip() != "true":
+        return ("no-repo", None)
+
+    try:
+        sym = subprocess.run(  # nosec B603 B607
+            ["git", "symbolic-ref", "--short", "HEAD"],
+            cwd=ROOT, capture_output=True, text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return ("unknown", None)
+    branch = sym.stdout.strip()
+    if sym.returncode != 0 or not branch:
+        return ("unknown", None)
+
+    try:
+        has_commit = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "--verify", "-q", "HEAD"],
+            cwd=ROOT, capture_output=True, text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return ("unknown", None)
+    return ("named", branch) if has_commit.returncode == 0 else ("unborn", branch)
 
 
 def tree_description() -> str:
@@ -645,9 +694,23 @@ def tree_description() -> str:
     of the output (main()'s wrong-script line already does that, Req 8,
     and it printed correctly in every one of the four wrong readings that
     motivated this). An agent reads the answer, not the header; this
-    puts the answer in the sentence that's actually read."""
-    branch = current_branch()
-    return f"{ROOT} (branch: {branch})" if branch else f"{ROOT} (branch unknown)"
+    puts the answer in the sentence that's actually read.
+
+    Sprint 38, Req 2/2a: every call site gets the corrected text
+    automatically, with no special-casing anywhere, because this is the
+    one function every caller already goes through — see branch_state()'s
+    own docstring for what changed and why. The stderr `[sprint_lifecycle]
+    repo=... script=...` banner (printed by main(), never through this
+    function) is deliberately untouched — Req 2a names it explicitly as
+    CLAUDE.md's own wrong-script safety net."""
+    kind, name = branch_state()
+    if kind == "named":
+        return f"{ROOT} (branch: {name})"
+    if kind == "unborn":
+        return f"{ROOT} (branch: {name}, no commits yet)"
+    if kind == "no-repo":
+        return f"{ROOT} (not a git repository)"
+    return f"{ROOT} (branch unknown)"
 
 
 def file_hash(path: Path) -> Optional[str]:

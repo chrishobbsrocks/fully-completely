@@ -2232,4 +2232,57 @@ echo "$MAIN_CLOSE_OUT" | grep -q "HAS NOT REACHED main" && \
   fail "closing from the primary checkout must never print the strand statement (false positive) -- output: $MAIN_CLOSE_OUT"
 rm -f /tmp/main_close_user_said.txt
 
+echo "== sprint 38, Req 2 (Finding F2): the tree description distinguishes a real, never-committed repo from every other case, on a real git init with no commits =="
+BRANCH_SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/fully-completely-smoke-branch.XXXXXX")"
+mkdir -p "$BRANCH_SANDBOX/scripts" "$BRANCH_SANDBOX/templates"
+cp "$REPO_ROOT/scripts/sprint_lifecycle.py" "$BRANCH_SANDBOX/scripts/sprint_lifecycle.py"
+if [ -f "$REPO_ROOT/templates/sprint-template.md" ]; then
+  cp "$REPO_ROOT/templates/sprint-template.md" "$BRANCH_SANDBOX/templates/sprint-template.md"
+fi
+BRANCH_SCRIPT="python3 $BRANCH_SANDBOX/scripts/sprint_lifecycle.py"
+
+# Case (c): not a git repository at all -- before `git init` ever runs.
+NOREPO_OUT=$(cd "$BRANCH_SANDBOX" && $BRANCH_SCRIPT list 2>&1)
+echo "$NOREPO_OUT" | grep -qF "(not a git repository)" || \
+  fail "tree_description should say plainly this isn't a git repository before git init -- got: $NOREPO_OUT"
+echo "$NOREPO_OUT" | grep -q "branch unknown" && \
+  fail "a genuinely non-repository directory must not be reported as merely 'branch unknown' -- Req 2 requires the specific case"
+
+# Case (b): a real, unborn branch -- git init has run, but there is not
+# yet a single commit. This is Finding F2's own exact repro: the OLD
+# implementation printed "(branch unknown)" here, identical to the
+# not-a-repository case above, which is exactly the conflation Req 2
+# exists to fix.
+(cd "$BRANCH_SANDBOX" && git init -q && git config user.email smoke@example.com && git config user.name "Smoke Test")
+UNBORN_OUT=$(cd "$BRANCH_SANDBOX" && $BRANCH_SCRIPT list 2>&1)
+echo "$UNBORN_OUT" | grep -qE "\(branch: [^,]+, no commits yet\)" || \
+  fail "tree_description should name the branch AND say it has no commits yet on a real unborn branch -- got: $UNBORN_OUT"
+echo "$UNBORN_OUT" | grep -q "not a git repository" && \
+  fail "an unborn branch must not still be reported as 'not a git repository' -- it is one, just without commits"
+echo "$UNBORN_OUT" | grep -q "branch unknown" && \
+  fail "an unborn branch must not fall back to 'branch unknown' -- its name IS determinable via git symbolic-ref"
+
+# Case (a): a named branch with at least one commit -- unchanged wording
+# from before this sprint.
+(cd "$BRANCH_SANDBOX" && echo x > f.txt && git add f.txt && git commit -q -m "first commit")
+NAMED_OUT=$(cd "$BRANCH_SANDBOX" && $BRANCH_SCRIPT list 2>&1)
+echo "$NAMED_OUT" | grep -qE '\(branch: [^,)]+\)\.' || \
+  fail "tree_description should print the plain, unchanged (branch: <name>) form once a commit exists -- got: $NAMED_OUT"
+echo "$NAMED_OUT" | grep -q "no commits yet" && \
+  fail "a branch with a real commit must not still say 'no commits yet'"
+
+# Case (d): detached HEAD -- a real, determinable-elsewhere state that
+# must still fall through to the same undeterminable wording as before,
+# never a fabricated branch name.
+(cd "$BRANCH_SANDBOX" && echo y > g.txt && git add g.txt && git commit -q -m "second commit")
+FIRST_COMMIT=$(cd "$BRANCH_SANDBOX" && git rev-parse HEAD~1)
+(cd "$BRANCH_SANDBOX" && git checkout -q "$FIRST_COMMIT")
+DETACHED_OUT=$(cd "$BRANCH_SANDBOX" && $BRANCH_SCRIPT list 2>&1)
+echo "$DETACHED_OUT" | grep -q "branch unknown" || \
+  fail "a detached HEAD should fall through to the existing 'branch unknown' wording -- got: $DETACHED_OUT"
+echo "$DETACHED_OUT" | grep -qE '\(branch: [^,)]+\)\.' && \
+  fail "a detached HEAD must never be reported as a real named branch"
+
+rm -rf "$BRANCH_SANDBOX"
+
 echo "ALL SMOKE TESTS PASSED"

@@ -13,6 +13,32 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.12 — Sprint 38
+
+Workshop readiness: stop a clean relaunch warning about a session that
+isn't running, and name the branch correctly on a fresh repository —
+both found by LiveQA running the workshop setup guides against published
+0.2.10 on real Mac and Windows 11 ARM hardware.
+
+- The role-claims relaunch NOTE (`recordRoleClaim`/`roleClaimWarning` in
+  `scripts/launcher/role-claims.js`) no longer fires when the previously
+  recorded session is demonstrably no longer running — a positive
+  determination via the recorded launcher pid, not a lease and not a
+  timeout: it still fires whenever the previous session genuinely is
+  still running, or whenever that can't be determined at all (an
+  unreadable or pre-0.2.12 record, a check that can't run on this
+  platform). Before this, every relaunch printed a collision warning
+  forever, regardless of whether anything was actually still running,
+  teaching attendees to ignore the one warning that matters.
+- `python3 scripts/sprint_lifecycle.py list` (and every other command
+  that names the tree it looked in) now distinguishes a real,
+  never-committed repository ("no commits yet") from not being a git
+  repository at all, from a genuinely undeterminable case (detached
+  HEAD, git missing from PATH). Previously both of the first two cases
+  printed the identical "(branch unknown)", regardless of whether `git
+  init` had been run — exactly the line the workshop guides tell
+  attendees to check.
+
 ## 0.2.11 — Sprint 36 (Corrects 0.2.10)
 
 Two defects found during 0.2.10's own LiveQA live-test loop, both message-
