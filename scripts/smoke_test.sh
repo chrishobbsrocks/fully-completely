@@ -154,7 +154,18 @@ echo "$SHIP_OUT_1" | grep -qF "shipped (commit ${AUDITED_COMMIT_1})" || \
 echo "$SHIP_OUT_1" | grep -qF "shipped (commit HEAD)" && \
   fail "ship --commit HEAD printed the raw ref 'HEAD' instead of resolving it -- Req 4 regression"
 
-$SCRIPT liveqa "$SPRINT_1" --deployed-commit "$AUDITED_COMMIT_1" --verdict FAIL --notes "expected fail" > /dev/null
+LIVEQA_FAIL_OUT_1=$($SCRIPT liveqa "$SPRINT_1" --deployed-commit "$AUDITED_COMMIT_1" --verdict FAIL --notes "expected fail" 2>&1)
+# Sprint 36, Req 4 (second finding from QA1's own live-loop audit of
+# 711c5fc): a LiveQA FAIL/CONDITIONAL used to tell the reader "Dev Team:
+# fix, then Pipeman: /sprint-reship" with no QA1 audit step in between,
+# even though cmd_reship itself has refused an unaudited commit since
+# this same sprint. Must name the audit step now.
+echo "$LIVEQA_FAIL_OUT_1" | grep -q "QA1 audits the fix on that exact commit" || \
+  fail "a LiveQA FAIL's printed next-step message doesn't mention QA1 auditing the fix -- got: $LIVEQA_FAIL_OUT_1"
+echo "$LIVEQA_FAIL_OUT_1" | grep -qF "/sprint-qa1 ${SPRINT_1} --verdict" || \
+  fail "a LiveQA FAIL's printed next-step message doesn't name the /sprint-qa1 recovery command"
+echo "$LIVEQA_FAIL_OUT_1" | grep -q "Dev Team: fix, then Pipeman: /sprint-reship\.$" && \
+  fail "a LiveQA FAIL's printed next-step message still describes the pre-Req-3 loop with no audit step"
 # Real content, not --allow-empty: an empty commit's tree is identical to
 # its parent's, which would coincidentally already match gate 1's own
 # audited tree (self-correcting per Req 3) and defeat the refusal test

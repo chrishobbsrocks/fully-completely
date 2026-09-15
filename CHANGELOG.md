@@ -13,6 +13,28 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.11 — Sprint 36 (Corrects 0.2.10)
+
+Two defects found during 0.2.10's own LiveQA live-test loop, both message-
+text only — neither changes any gate's actual behavior.
+
+- **Corrects:** `/sprint-reship`'s refusal message claimed a tree "has
+  never been through QA1's audit successfully" even when a PASS had been
+  recorded for it and was later superseded by a FAIL — untrue in that
+  case. It also printed the same tree hash twice, once as "the commit
+  being reshipped" and again as "Gate 1's currently PASSed tree ... which
+  does not match," when the two were in fact identical. Found live by
+  LiveQA. The gate itself needed no change — every behavioral case it
+  tested passed — only the wording, which now says plainly when an
+  earlier PASS for the exact tree has since been superseded, and only
+  names gate 1's own tree when it's actually a different one.
+- **Corrects:** a LiveQA FAIL/CONDITIONAL still told the reader "Dev
+  Team: fix, then Pipeman: /sprint-reship," describing the pre-0.2.10
+  loop with no QA1 audit step in between, even though `/sprint-reship`
+  itself has refused an unaudited commit since 0.2.10. Found by QA1's own
+  live-loop audit of the first fix above. Now names the QA1 audit step
+  explicitly.
+
 ## 0.2.10 — Sprint 36
 
 Stop a mis-issued command erasing a sprint's record, require a QA1 audit

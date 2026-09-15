@@ -2591,8 +2591,22 @@ def cmd_liveqa(args) -> None:
                   "/sprint-complete requires the user's explicit, real-time "
                   "go-ahead (--user-said) - both gates passing is not that.")
         else:
+            # Sprint 36, Req 4/3 (second finding from QA1's own live-loop
+            # audit of 711c5fc, not caught in round 1): this message
+            # still described the pre-Req-3 loop -- "fix, then reship" --
+            # with no QA1 audit step in between, even though cmd_reship
+            # itself has refused an unaudited commit since this same
+            # sprint. Printed at the exact moment a reader is deciding
+            # what to do next, so it is exactly the kind of place Req 4's
+            # own instruction ("every document that describes the
+            # live-loop fix path says an audit is required") was meant to
+            # reach, and it was missed because it's a print statement
+            # inside this file, not a doc file Req 4's own grep pass
+            # searched.
             print(f"LiveQA live test {verdict} (round {state['live_test_rounds']}). "
-                  "Dev Team: fix, then Pipeman: /sprint-reship.")
+                  "Dev Team: fix, then QA1 audits the fix on that exact commit "
+                  f"(/sprint-qa1 {args.id} --verdict ... --commit <hash>) -- /sprint-reship "
+                  "refuses without a PASS on record for its tree -- then Pipeman: /sprint-reship.")
 
         save_state(args.id, state)
 
