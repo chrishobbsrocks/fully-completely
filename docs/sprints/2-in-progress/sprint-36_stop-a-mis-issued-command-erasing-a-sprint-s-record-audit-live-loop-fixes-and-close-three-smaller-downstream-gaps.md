@@ -144,6 +144,27 @@ two sprints cannot share one publish.
    the findings, choose the narrowest grant that is measured safe, and flag
    the gap to Master Controller rather than widening silently.
 
+   **6a, RESOLVED — amended post-build to record what this requirement was
+   actually satisfied by, not left describing only the original question.**
+   Measured, twice, in round 1: raw `Bash(git add docs/sprints/*)` /
+   `Bash(git commit -m *)` allow patterns genuinely CANNOT express "confined
+   to `docs/sprints/`, nothing else" — QA1's own real probes showed a
+   trailing wildcard covers a pathspec argument exactly as readily as it
+   covers the free text before it (`git commit -m "tool tweak"
+   scripts/tool.js` matched and committed a file entirely outside
+   `docs/sprints/`, zero denials). Rather than stop at flagging the gap, the
+   narrowest grant that measured safe turned out to be a different
+   *mechanism*, not a narrower pattern: `scripts/mc-commit.js`, a dedicated
+   wrapper script that validates every path in real code before it ever
+   reaches `git`. Master Controller's headless profile grants Bash access to
+   only that script (plus the two pre-existing lifecycle-script patterns) —
+   no raw `git` pattern at all. QA1 reviewed this design change directly
+   (round 2 audit) and confirmed it stays within this Req's own "choose the
+   narrowest grant that is measured safe" latitude, not a widening and not
+   requiring separate Master Controller escalation. Full measured record,
+   across three CLI versions and two operators (Dev Team, then QA1
+   independently): `docs/sprint-36-mc-commit-permission-findings.md`.
+
    **6b.** Update `master-controller.md` and the headless note in
    `sprint-new.md` to describe what headless Master Controller can now commit.
 
@@ -278,7 +299,11 @@ two sprints cannot share one publish.
   it in a separate field and QA1 greps for the four forbidden assignments.
 - **Req 6's permission patterns can't express the needed denials, and the grant
   quietly goes broad.** — Req 6a makes it a flagged assumption, requires
-  measured denials, and requires escalation instead of widening.
+  measured denials, and requires escalation instead of widening. **Materialized
+  and resolved**: the patterns genuinely couldn't express it (measured, not
+  assumed); resolved not by widening but by moving enforcement into
+  `scripts/mc-commit.js`'s own real code, reviewed and confirmed in-scope by
+  QA1 — see Req 6a's own resolved note above.
 - **Docs drift: one file keeps describing unaudited reship.** — Req 4 requires
   a repo-wide search and QA1 lists what was checked.
 - **This release is published without the user choosing it.** — Req 8 was
