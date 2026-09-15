@@ -2093,14 +2093,51 @@ def cmd_reship(args) -> None:
         reshipped_tree = git_tree_hash_excluding(reshipped_commit, SHIP_HASH_EXCLUDE_PATTERNS)
         verdict_for_tree = _latest_qa1_verdict_for_tree(state, reshipped_tree)
         if verdict_for_tree != "PASS":
+            # LiveQA round 1 FINDING, FIXED HERE: the gate logic was
+            # always correct (this refuses exactly when it should), but
+            # the message text used to claim this tree "has never been
+            # through QA1's audit successfully" unconditionally — false
+            # whenever a PASS WAS on record for this exact tree and was
+            # later superseded by a FAIL (Req 3a's own "latest verdict
+            # wins" case). It also unconditionally printed "Gate 1's
+            # currently PASSed tree is <hash>, which does not match" even
+            # when that hash WAS this exact tree (gate-1 PASSed it, then a
+            # later live-loop FAIL on the identical tree superseded it) —
+            # self-contradictory: the same hash printed twice, called a
+            # mismatch. Reproduced live by LiveQA against a real gate-1
+            # PASS immediately followed by a live-loop FAIL on the same
+            # commit. Fixed by stating only what is actually true: whether
+            # ANY PASS (gate-1's own, or an earlier live-loop entry) was
+            # ever recorded for this exact tree, distinct from whether the
+            # LATEST verdict is PASS (`verdict_for_tree`, unchanged).
             gate1_tree = state.get("qa1_audited_tree_hash")
-            why = ("no QA1 verdict is on record for it at all" if verdict_for_tree is None
-                   else f"the latest QA1 verdict on record for it is {verdict_for_tree}, not PASS")
-            gate1_note = (f"Gate 1's currently PASSed tree is {gate1_tree}, which does not match. "
-                          if gate1_tree else "Gate 1 has no PASSed tree on record for this sprint "
-                          "either. ")
+            ever_passed_this_tree = gate1_tree == reshipped_tree or any(
+                e.get("tree_hash") == reshipped_tree and e.get("verdict") == "PASS"
+                for e in state.get("live_loop_audit_trees", [])
+            )
+            if verdict_for_tree is None:
+                reason = "no QA1 verdict is on record for it at all"
+            elif ever_passed_this_tree:
+                reason = (f"the latest QA1 verdict on record for it is {verdict_for_tree}, not "
+                          "PASS -- a PASS was recorded earlier for this exact tree and has since "
+                          "been superseded")
+            else:
+                reason = f"the latest QA1 verdict on record for it is {verdict_for_tree}, not PASS"
+            # Only worth naming gate 1's own tree when it's informative:
+            # a genuinely DIFFERENT tree (helps Pipeman find what IS
+            # audited), or no tree at all. When gate1_tree equals
+            # reshipped_tree, that fact is already covered by
+            # `ever_passed_this_tree` above -- repeating the identical
+            # hash and calling it a non-match is exactly the bug this
+            # fixes.
+            if gate1_tree and gate1_tree != reshipped_tree:
+                gate1_note = f"Gate 1's currently PASSed tree is {gate1_tree}, a different tree. "
+            elif not gate1_tree:
+                gate1_note = "Gate 1 has no PASSed tree on record for this sprint either. "
+            else:
+                gate1_note = ""
             die(f"Sprint {args.id}: the commit being reshipped ({reshipped_commit}, tree "
-                f"{reshipped_tree}) has never been through QA1's audit successfully — {why}. "
+                f"{reshipped_tree}) has no QA1 PASS currently on record for it — {reason}. "
                 f"{gate1_note}Hand this commit to QA1 for `/sprint-qa1 {args.id} --verdict ... "
                 f"--commit {reshipped_commit}` on it, then reship again. No override.")
 

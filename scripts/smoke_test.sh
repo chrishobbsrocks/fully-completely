@@ -167,8 +167,10 @@ FIX_COMMIT_1=$(git rev-parse HEAD)
 echo "== sprint 36, Req 3: reship refuses when no QA1 verdict is on record for the reshipped commit's exact tree =="
 RESHIP_REFUSE_1=$($SCRIPT reship "$SPRINT_1" --commit "$FIX_COMMIT_1" 2>&1) && \
   fail "reship succeeded on a commit with no QA1 audit recorded for its tree -- Req 3 regression"
-echo "$RESHIP_REFUSE_1" | grep -q "has never been through QA1's audit successfully" || \
+echo "$RESHIP_REFUSE_1" | grep -q "has no QA1 PASS currently on record for it" || \
   fail "reship's unaudited-tree refusal message is missing -- got: $RESHIP_REFUSE_1"
+echo "$RESHIP_REFUSE_1" | grep -q "no QA1 verdict is on record for it at all" || \
+  fail "reship's refusal should say no verdict at all is on record (not merely 'not PASS') when there truly is none -- got: $RESHIP_REFUSE_1"
 echo "$RESHIP_REFUSE_1" | grep -qF "$FIX_COMMIT_1" || fail "reship's refusal doesn't name the commit being reshipped"
 echo "$RESHIP_REFUSE_1" | grep -qF "/sprint-qa1 ${SPRINT_1} --verdict" || fail "reship's refusal doesn't name the QA1 recovery command"
 python3 -c "
@@ -2102,6 +2104,15 @@ $SCRIPT reship "$SPRINT_TREE_ORDER" --commit "$TREE_ORDER_FIX" > /tmp/out.txt 2>
   fail "reship succeeded even though the LATEST QA1 verdict for this exact tree is FAIL, not PASS -- Req 3a regression" || true
 grep -q "the latest QA1 verdict on record for it is FAIL, not PASS" /tmp/out.txt || \
   fail "reship's refusal doesn't explain that the latest verdict for this tree is FAIL -- got: $(cat /tmp/out.txt)"
+# LiveQA round 1 FINDING: this is exactly its case (b) -- a PASS was on
+# record for this tree, then superseded by a FAIL. The message must say
+# so plainly, never the old, false "has never been through QA1's audit
+# successfully" (which is untrue here -- it WAS audited, and it WAS
+# PASSed, just not most recently).
+grep -q "a PASS was recorded earlier for this exact tree and has since been superseded" /tmp/out.txt || \
+  fail "reship's refusal doesn't say a PASS for this tree was superseded -- got: $(cat /tmp/out.txt)"
+grep -q "has never been through QA1's audit successfully" /tmp/out.txt && \
+  fail "reship's refusal must not claim this tree was never audited -- LiveQA's round-1 finding, it WAS audited and DID pass, just not most recently"
 rm -f /tmp/out.txt
 
 echo "== sprint 36, Req 3a: a live-loop FAIL on a DIFFERENT tree never revokes a PASS already on record for the tree actually being reshipped =="
@@ -2127,6 +2138,31 @@ $SCRIPT qa1 "$SPRINT_TREE_ORDER_2" --verdict FAIL --notes "this one has a real p
 $SCRIPT reship "$SPRINT_TREE_ORDER_2" --commit "$TREE_ORDER_2_GOOD_FIX" > /tmp/out.txt 2>&1 || \
   fail "reship refused the good fix's own tree just because a DIFFERENT tree was later FAILed -- Req 3a regression -- output: $(cat /tmp/out.txt)"
 grep -q "fix reshipped" /tmp/out.txt || fail "reship of the good fix should have succeeded"
+rm -f /tmp/out.txt
+
+echo "== sprint 36, Req 3a (LiveQA round 1 finding, case a): gate 1 PASSes a tree, a LATER live-loop FAIL on that exact same tree supersedes it -- refuse, with accurate wording, no self-contradictory 'Gate 1's tree ... does not match' when the two hashes are identical =="
+SPRINT_GATE1_SUPERSEDED=$(new_sprint "Gate1 superseded sprint")
+$SCRIPT start "$SPRINT_GATE1_SUPERSEDED" > /dev/null
+echo "gate1 content" > "sprint${SPRINT_GATE1_SUPERSEDED}-c1.txt"
+git add "sprint${SPRINT_GATE1_SUPERSEDED}-c1.txt"
+git commit -q -m "sprint $SPRINT_GATE1_SUPERSEDED work"
+$SCRIPT qa1 "$SPRINT_GATE1_SUPERSEDED" --verdict PASS --notes "gate-1 pass" > /dev/null
+$SCRIPT dev-done "$SPRINT_GATE1_SUPERSEDED" > /dev/null
+GATE1_SUPERSEDED_SHIPPED=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_GATE1_SUPERSEDED" --commit "$GATE1_SUPERSEDED_SHIPPED" > /dev/null
+$SCRIPT liveqa "$SPRINT_GATE1_SUPERSEDED" --deployed-commit "$GATE1_SUPERSEDED_SHIPPED" --verdict FAIL --notes "found a bug" > /dev/null
+# A live-loop audit against the EXACT SAME commit gate 1 already PASSed --
+# reproduces LiveQA's own repro directly (a real QA1 second look at the
+# already-shipped commit finding a real problem on reflection).
+$SCRIPT qa1 "$SPRINT_GATE1_SUPERSEDED" --verdict FAIL --notes "second look, found a real problem" --commit "$GATE1_SUPERSEDED_SHIPPED" > /dev/null
+$SCRIPT reship "$SPRINT_GATE1_SUPERSEDED" --commit "$GATE1_SUPERSEDED_SHIPPED" > /tmp/out.txt 2>&1 && \
+  fail "reship succeeded even though a live-loop FAIL superseded gate 1's own PASS on this exact tree -- Req 3a regression" || true
+grep -q "a PASS was recorded earlier for this exact tree and has since been superseded" /tmp/out.txt || \
+  fail "reship's refusal doesn't say gate 1's own PASS for this tree was superseded -- got: $(cat /tmp/out.txt)"
+grep -q "has never been through QA1's audit successfully" /tmp/out.txt && \
+  fail "reship's refusal must not claim this tree was never audited -- it WAS, by gate 1 itself"
+grep -qE "Gate 1's currently PASSed tree is [0-9a-f]+, which does not match" /tmp/out.txt && \
+  fail "reship's refusal must not print the same tree hash twice and call it a mismatch -- LiveQA's exact round-1 repro"
 rm -f /tmp/out.txt
 
 echo "== sprint 34, Req 1/2/4: closing a sprint from inside a Dev Team 2 worktree prints an unmissable statement that it hasn't reached main, naming the branch and Pipeman by name -- and main's own view stays stranded (the sprint 32 incident, reproduced directly) =="
