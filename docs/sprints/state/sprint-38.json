@@ -1,0 +1,28 @@
+{
+  "id": 38,
+  "title": "Stop a clean relaunch warning about a session that isn't running, and name the branch on a fresh repository",
+  "phase": "dev_build",
+  "qa1_audit_result": null,
+  "qa1_audit_file_hash": null,
+  "qa1_audited_tree_hash": null,
+  "last_shipped_commit": null,
+  "groundtruth_result": null,
+  "live_loop_audit_trees": [],
+  "audit_rounds": 0,
+  "live_test_rounds": 0,
+  "started": "2026-09-15T15:19:08+00:00",
+  "completed": null,
+  "history": [
+    {
+      "ts": "2026-09-15T15:19:08+00:00",
+      "actor": "system",
+      "event": "sprint_started",
+      "detail": ""
+    }
+  ],
+  "last_claim": {
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-15T15:19:08+00:00"
+  }
+}
