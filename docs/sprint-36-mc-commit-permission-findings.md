@@ -83,10 +83,15 @@ shipped `allowedTools` value**, copied verbatim into the repro script so
 a reader can diff it against `HEADLESS_PERMISSION_PROFILES['master-controller']`
 by eye rather than trust a paraphrase.
 
-**CLI version:** `claude 2.1.271` (`claude --version`, captured
-2026-09-15, the fix round). Run twice, back to back, per sprint 26's own
-instruction that this method's reproducibility is itself part of what's
-being reported, not assumed.
+**CLI version:** `claude 2.1.271` for the N1–N4 probes below (`claude
+--version`, captured 2026-09-15, the fix round). Run twice, back to
+back, per sprint 26's own instruction that this method's reproducibility
+is itself part of what's being reported, not assumed. **The CLI on this
+machine moved to `2.1.272` before QA1's own round-2 audit** — the R1–R3
+probes further down are explicitly marked with that version rather than
+silently folded into the `2.1.271` results above; a version drift
+mid-sprint is exactly the kind of fact `run-role.js`'s own
+`warnIfPermissionFindingsStale()` exists to keep from going unnoticed.
 
 **Grading key**, carried from sprint 12/26: CONFIRMED (run and observed,
 reliably reproducible — used above for the code-level `mc-commit.js`
@@ -149,21 +154,51 @@ refuse it.
   wrapper's own code enforces the real boundary) behaves correctly from
   a real launch, not only in the standalone unit test.
 
+## R1-R3 — additional forms measured by QA1 during round 2 (not assumed subsumed)
+
+This document's own round-2 draft argued that `git commit -am`, `git add
+-A`, and `git add .` didn't need separate probes because they're
+"subsumed" by N2's finding (no raw `git` pattern in the shipped profile
+at all). QA1's own round-2 audit correctly rejected that as an
+unmeasured argument resting on "unlisted means denied" — exactly the
+assumption `scripts/permission-gate-repro.js` already found DRIFTED for
+the `qa1`/`liveqa` profiles on a nearby CLI version. QA1 measured these
+forms directly rather than bouncing the sprint a second time for it;
+recorded here, credited to QA1, exactly as run:
+
+**Source: QA1's round-2 audit. CLI: `claude 2.1.272`** (moved from
+`2.1.271`, the version N1–N4 above were run at, to `2.1.272` on this
+machine during the sprint — noted so a reader knows which runs are at
+which version, per QA1's own instruction). Method: a throwaway probe
+loading the SHIPPED `master-controller` profile from `run-role.js` at
+commit `6ab3a7f`, one real headless launch per form, verdicts from
+`permission_denials` plus independent git/remote reads, never the
+model's narration.
+
+- **R1 — `git commit -am "sweep"`**, with a tracked file modified:
+  denied; nothing committed.
+- **R2 — `git add -A`**: denied; nothing staged.
+- **R3 — a compound bypass attempt in ONE Bash call**:
+  `node scripts/mc-commit.js --message "amend" -- docs/sprints/sprint-1.md && git push origin HEAD`
+  (chaining the ALLOWED wrapper invocation with a raw `git push`, testing
+  whether an allowed command chained to a disallowed one lets the whole
+  line through). The whole compound was denied; no commit landed, and
+  the bare remote stayed empty.
+
+**Grade: UNESTABLISHED (model-mediated, one run each)**, but consistent
+with the N1–N4 results above and with intent.
+
 ## What this means for the grant
 
-Every form Req 6a's own acceptance criterion cares about is now covered:
-the legitimate commit shape (N1, including the exact "-a"-in-filename
-regression QA1 found), a direct `git push` bypass (N3), a direct
-`git add`/`git commit` bypass entirely skipping the wrapper (N2), and the
-wrapper's own out-of-scope refusal exercised end-to-end (N4). `git commit
--am`/`git add -A`/`git add .` are not separately probed here because they
-are subsumed by N2's own finding: there is no allowedTools entry matching
-raw `git` at all under the shipped profile, so no `git` subcommand or
-flag combination reaches this role directly — the question Req 6a asked
-about those specific forms is answered by "no raw `git` pattern exists to
-match them," not by enumerating every flag combination against a pattern
-that no longer exists. What remains is the finite, enumerable question
-this document answers: does the gate still deny raw `git` under this
-profile at all, and does the wrapper's own code hold. Both are now
-measured, consistent across two runs, against the exact literal
-`allowedTools` value that ships.
+Every form Req 6a's own acceptance criterion cares about is now
+genuinely measured, not argued from the pattern's absence: the legitimate
+commit shape (N1, including the exact "-a"-in-filename regression QA1
+found in round 1), a direct `git push` bypass (N3), a direct `git
+add`/`git commit` bypass entirely skipping the wrapper (N2), `git commit
+-am` and `git add -A` (R1, R2), a compound allowed-then-disallowed chain
+(R3), and the wrapper's own out-of-scope refusal exercised end-to-end
+(N4). All eight probes, across two CLI versions (`2.1.271` and
+`2.1.272`) and two operators (Dev Team's N1–N4, QA1's R1–R3), are
+consistent: the shipped profile denies every raw-`git` form tried against
+it, and the wrapper script itself holds under a real headless launch, not
+only in the standalone unit test.

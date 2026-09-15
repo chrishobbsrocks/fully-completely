@@ -1999,7 +1999,7 @@ assert reg['sprints']['${SPRINT_ABORTED_PRESTART}']['status'] == 'abandoned', 't
 "
 $SCRIPT start "$SPRINT_ABORTED_PRESTART" > /tmp/out.txt 2>&1 && \
   fail "start succeeded on a sprint aborted before it ever started -- this revives a burned sprint id with one ordinary command, the exact incident QA1 demonstrated against sprint 37" || true
-grep -q "was aborted (registry status 'abandoned')" /tmp/out.txt || \
+grep -q "its registry status is 'abandoned', not 'todo'" /tmp/out.txt || \
   fail "start's refusal on a pre-start-aborted sprint doesn't name the cause -- got: $(cat /tmp/out.txt)"
 grep -q "Nothing has been changed" /tmp/out.txt || fail "start's pre-start-abort refusal doesn't say nothing changed"
 [ ! -f "docs/sprints/state/sprint-${SPRINT_ABORTED_PRESTART}.json" ] || \
@@ -2012,6 +2012,29 @@ assert entry['status'] == 'abandoned', f'a refused start must not have changed t
 assert '5-abandoned/' in entry['file'], f'a refused start must not have moved the file out of 5-abandoned/: {entry[\"file\"]}'
 "
 rm -f /tmp/out.txt /tmp/abort_prestart_said.txt
+
+echo "== sprint 36, Req 1 (QA1 round 2 finding): /sprint-start refuses ANY registry status other than 'todo' when no state file exists, not only 'abandoned' -- the code now matches its own docstring's stronger guarantee =="
+SPRINT_CORRUPTED_STATUS=$(new_sprint "Corrupted status sprint")
+# Simulate a hand-damaged registry entry: some status other than 'todo'
+# or 'abandoned', with no state file ever created for it (this shape
+# should be structurally unreachable through the normal commands, which
+# is exactly why it needs its own explicit guard rather than trusting
+# "abandoned" to be the only non-todo status a state-file-less sprint
+# could ever have).
+python3 -c "
+import json
+reg = json.load(open('docs/sprints/registry.json'))
+reg['sprints']['${SPRINT_CORRUPTED_STATUS}']['status'] = 'done'
+json.dump(reg, open('docs/sprints/registry.json', 'w'), indent=2)
+"
+[ ! -f "docs/sprints/state/sprint-${SPRINT_CORRUPTED_STATUS}.json" ] || fail "test setup broken: this sprint should have no state file"
+$SCRIPT start "$SPRINT_CORRUPTED_STATUS" > /tmp/out.txt 2>&1 && \
+  fail "start succeeded on a sprint with no state file and a corrupted registry status ('done') -- Req 1 must refuse anything other than 'todo', not only 'abandoned'" || true
+grep -q "its registry status is 'done', not 'todo'" /tmp/out.txt || \
+  fail "start's refusal doesn't name the corrupted status -- got: $(cat /tmp/out.txt)"
+[ ! -f "docs/sprints/state/sprint-${SPRINT_CORRUPTED_STATUS}.json" ] || \
+  fail "a refused start must not have fabricated a state file"
+rm -f /tmp/out.txt
 
 echo "== sprint 36, Req 1b: a genuinely never-started sprint's fresh state is unaffected by the phase guard -- diffed against the known schema, not just 'it worked' =="
 SPRINT_NEVER_STARTED_2=$(new_sprint "Fresh start shape sprint")

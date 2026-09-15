@@ -1248,24 +1248,38 @@ def cmd_start(args) -> None:
                     "the documented path is /sprint-block (with a real --reason) followed by "
                     "/sprint-start again, not this command acting directly on an in-flight or "
                     "closed sprint.")
-        elif entry.get("status") == "abandoned":
+        elif entry.get("status") != "todo":
             # QA1 round 1 finding: an aborted-before-it-ever-started
             # sprint has no state file to catch above, but it is not
             # "never started" either -- it is destroyed, and abort's own
             # documented contract is that re-filing it is a human act,
-            # not an ordinary /sprint-start. `entry.get("status")` (not
-            # direct indexing): a registry entry's "status" key has been
-            # present since this project's first commit, but reading it
-            # with .get() here costs nothing and matches this file's own
+            # not an ordinary /sprint-start. QA1 round 2 finding: the
+            # first fix here only refused literal status "abandoned",
+            # which is a weaker guarantee than this function's own
+            # docstring claims ("no state file exists yet AND the
+            # registry's own status is 'todo'") -- any OTHER unexpected
+            # status with no state file (a hand-damaged "done"/"blocked"/
+            # "in_progress" entry, or a status this schema doesn't even
+            # have yet) still sailed through as a fresh start. Checking
+            # `!= "todo"` instead of `== "abandoned"` makes the code
+            # enforce exactly what the docstring already claimed, rather
+            # than the weaker thing being quietly true underneath a
+            # stronger-sounding comment -- precisely the mismatch this
+            # sprint exists to stop. `entry.get("status")` (not direct
+            # indexing): a registry entry's "status" key has been present
+            # since this project's first commit, but reading it with
+            # .get() here costs nothing and matches this file's own
             # convention of never assuming a dict shape it doesn't have
             # to.
-            die(f"Sprint {sprint_id} was aborted (registry status 'abandoned'), not merely "
-                "never started -- it has no state file for the same reason a never-started "
-                "sprint doesn't, but abort's own contract is that burning a sprint id makes "
-                "re-filing a human act, not a bare /sprint-start. Nothing has been changed. "
-                "No override -- if this sprint genuinely needs to resume, that decision belongs "
-                "to a human, via /sprint-new for a fresh sprint id, not this command reviving "
-                "the old one.")
+            die(f"Sprint {sprint_id} has no state file, but its registry status is "
+                f"'{entry.get('status')}', not 'todo' -- this is not a genuinely never-started "
+                "sprint (that would read 'todo'). If it was aborted, abort's own contract is "
+                "that burning a sprint id makes re-filing a human act, not a bare /sprint-start; "
+                "any other status here means the record doesn't match what this command expects "
+                "and should be looked at by hand rather than guessed past. Nothing has been "
+                "changed. No override -- if this sprint genuinely needs to resume, that decision "
+                "belongs to a human, via /sprint-new for a fresh sprint id, not this command "
+                "reviving the old one.")
 
         src = ROOT / entry["file"]
         dest_dir = SPRINTS_DIR / STATUS_FOLDERS["in_progress"]

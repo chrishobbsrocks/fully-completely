@@ -150,6 +150,24 @@ const FRAMEWORK_OWNED = [
   '.claude/commands',
   'scripts/sprint_lifecycle.py',
   'scripts/run-lifecycle.js',
+  // Sprint 36 fix round (QA1 round 2 finding): package.json's "files"
+  // allowlist controls what SHIPS in the tarball; this list controls
+  // what an install/upgrade actually COPIES into a target project --
+  // two separate lists, and Dev Team's own round-1 fix caught a gap in
+  // the first one without checking the second. mc-commit.js reaching
+  // "files" made it present in every published tarball, but absent HERE
+  // meant no real install or upgrade ever copied it, while
+  // run-role.js's own master-controller profile (which DOES ship,
+  // listed via 'scripts/launcher' below) still names it as the only
+  // path to git -- every consumer's headless Master Controller pointed
+  // at a script that doesn't exist, the exact FMC incident Req 6 exists
+  // to fix, reproduced downstream instead of caught here. Both lists
+  // must name a new runtime-required script; nothing enforces that
+  // structurally, which is why launcher_test.js now also asserts this
+  // directly (see "install.js: every script in package.json's files
+  // list that a real installed project needs at runtime is also in
+  // FRAMEWORK_OWNED").
+  'scripts/mc-commit.js',
   'scripts/smoke_test.sh',
   'scripts/dev2_worktree.sh',
   'scripts/worktree_test.sh',

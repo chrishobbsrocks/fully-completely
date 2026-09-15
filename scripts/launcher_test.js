@@ -601,6 +601,76 @@ test('install.js: fresh project gets the framework and an 8-task tasks.json', ()
   });
 });
 
+// Sprint 36 fix round (QA1 round 2 finding): package.json's own "files"
+// allowlist (what SHIPS in the published tarball) and install.js's own
+// FRAMEWORK_OWNED list (what an install/upgrade actually COPIES into a
+// target project) are two separate lists, and nothing before this
+// enforced they stay in sync. scripts/mc-commit.js reached the first
+// list (caught in this same sprint's own round-1 fix, after
+// package.json's files array was found missing it) but not the second —
+// every real consumer install shipped a headless master-controller
+// profile pointing at a script that was never actually copied in. This
+// structural test catches the CLASS of gap, not just this one instance;
+// the two behavioral tests below catch this exact instance directly, on
+// both the fresh-install and upgrade paths (upgrades walk the same
+// FRAMEWORK_OWNED list, so both matter independently, per QA1's own
+// instruction).
+test('install.js: every runtime script/template in package.json "files" is also covered by FRAMEWORK_OWNED, so nothing ships in the tarball without also being installed', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+  const installSrc = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'install.js'), 'utf8');
+  const match = installSrc.match(/const FRAMEWORK_OWNED = \[([\s\S]*?)\];/);
+  assert.ok(match, 'could not find the FRAMEWORK_OWNED array in install.js -- update this test\'s regex if the declaration shape changed');
+  const frameworkOwned = [...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+
+  // Two documented, deliberate exceptions, not gaps: docs/sprints/* ships
+  // only the phase-folder .gitkeep placeholders (SPRINT_SKELETON_FILES,
+  // a special case install.js's own comment explains, never copied via
+  // FRAMEWORK_OWNED) and scripts/baselines ships for other tooling
+  // (npm run baselines:*) to read directly off the installed package,
+  // never copied into a target project's own scripts/ at all.
+  const exempt = (p) => p.startsWith('docs/sprints/') || p === 'scripts/baselines';
+  const coveredByFrameworkOwned = (p) => frameworkOwned.some((owned) => p === owned || p.startsWith(`${owned}/`));
+
+  const uncovered = pkg.files.filter((p) => (p.startsWith('scripts/') || p.startsWith('templates/')) && !exempt(p) && !coveredByFrameworkOwned(p));
+  assert.deepStrictEqual(uncovered, [],
+    `these package.json "files" entries ship in the published tarball but install.js's FRAMEWORK_OWNED would never copy them into a target project: ${uncovered.join(', ')}`);
+});
+
+test('install.js: a fresh install copies scripts/mc-commit.js with the real, current content', () => {
+  // NOT checked against the install manifest: that file only ever
+  // tracks USER_OWNED paths (the six agent personas plus CLAUDE.md, used
+  // to detect a customization worth protecting on upgrade) -- confirmed
+  // directly, a fresh install's own manifest contains exactly those
+  // seven paths and no FRAMEWORK_OWNED file at all, sprint_lifecycle.py
+  // and install.js itself included. A framework-owned file is simply
+  // copied/overwritten unconditionally on every run, with nothing to
+  // track drift against, so there is no manifest entry to assert here.
+  withFixture((dir) => {
+    runInstall(dir);
+    const installedPath = path.join(dir, 'scripts', 'mc-commit.js');
+    assert.ok(fs.existsSync(installedPath), 'scripts/mc-commit.js must land on a fresh install -- master-controller\'s own headless profile grants Bash access to run it');
+    const REAL_MC_COMMIT_JS = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'mc-commit.js'), 'utf8');
+    assert.strictEqual(fs.readFileSync(installedPath, 'utf8'), REAL_MC_COMMIT_JS);
+  });
+});
+
+test('install.js: an upgrade from before mc-commit.js existed (0.2.9) adds it, same as any other new framework-owned file', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.2.9');
+    // Simulate a pre-sprint-36 install: scripts/launcher/ present (an
+    // existing framework-owned directory), scripts/mc-commit.js absent
+    // (it did not exist in 0.2.9).
+    fs.mkdirSync(path.join(dir, 'scripts', 'launcher'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'scripts', 'launcher', 'run-role.js'), '// old 0.2.9 placeholder\n');
+
+    const output = runInstall(dir);
+
+    const installedPath = path.join(dir, 'scripts', 'mc-commit.js');
+    assert.ok(fs.existsSync(installedPath), 'an upgrade from 0.2.9 must add scripts/mc-commit.js -- it walks the same FRAMEWORK_OWNED list a fresh install does');
+    assert.match(output, /mc-commit\.js/, 'the install output should name mc-commit.js as something it added');
+  });
+});
+
 test('install.js: a fresh install adds fullyCompletely.testCommand, empty, with a note explaining what it is for (Req 1)', () => {
   withFixture((dir) => {
     const output = runInstall(dir);
