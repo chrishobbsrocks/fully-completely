@@ -5,7 +5,7 @@
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "1d949cd59cee0aa2a3e1a77acfa92fcd065fb3dd501e25e428c493b414beec52",
   "qa1_audited_tree_hash": "94f83984914219ff37d04ff3918cdc427d97f2acf7fba0c2c9016704a9be5e0d",
-  "last_shipped_commit": "6283d8b9817d447e61790e14f63230fa00a29106",
+  "last_shipped_commit": "711c5fcc8f5e157bda9b0bff1b95b805f562ae0f",
   "groundtruth_result": "CONDITIONAL",
   "audit_rounds": 3,
   "live_test_rounds": 1,
@@ -59,12 +59,18 @@
       "actor": "qa1",
       "event": "live_loop_audit",
       "detail": "PASS: QA1 live-loop audit, sprint 36, commit 711c5fc. Verdict: PASS for reship of this exact tree.\n\nWHAT THIS COVERS. The full tree delta from last_shipped_commit 6283d8b to 711c5fc, excluding sprint bookkeeping (docs/sprints registry, state, sprint .md files are all in SHIP_HASH_EXCLUDE_PATTERNS). There are exactly three files:\n - scripts/sprint_lifecycle.py (711c5fc, cmd_reship refusal wording)\n - scripts/smoke_test.sh (711c5fc, two new or extended tests)\n - scripts/baselines/user-owned-content.json (Pipeman's e726ad2 regen for 0.2.10)\nCommits in range: e726ad2, 44d00ff, e50d28e (sprint 38 definition, bookkeeping only), 876af2a (sprint file only), 711c5fc.\n\n1. cmd_reship refusal text (LiveQA round-1 LOW): FIXED.\n - Gate logic is unchanged: verdict_for_tree != \"PASS\" still refuses, and _latest_qa1_verdict_for_tree is untouched.\n - The message now branches on what is actually on record:\n   - No verdict: \"no QA1 verdict is on record for it at all\".\n   - A PASS was ever recorded for this tree (gate1_tree equals the reshipped tree, or a live-loop PASS entry exists for it) and the latest is not PASS: says that PASS was superseded.\n   - Otherwise: latest verdict is not PASS.\n - The gate-1 tree is only named when it is a DIFFERENT tree (or absent). The same-hash-called-mismatch contradiction is gone.\n - Edge checked: if the reshipped tree were None, verdict_for_tree is None and the first branch wins, so the new ever_passed comparison cannot produce a misleading message. Still fails closed.\n - The headline changed from the false \"has never been through QA1's audit successfully\" to \"has no QA1 PASS currently on record for it\", which is true in every branch.\n - The recovery command is still named.\n - Smoke coverage:\n   - Case (a), LiveQA's exact shape: gate-1 PASS on C1, ship, LiveQA FAIL, live-loop FAIL --commit C1, reship C1. Asserts the refusal, the superseded wording, a negative grep for the old claim, and a negative grep for the \"PASSed tree is X, which does not match\" contradiction.\n   - Case (b): the existing PASS-then-FAIL test now asserts the superseded wording and a negative grep for the old claim.\n   - The no-verdict test asserts the new \"at all\" wording.\n\n2. Baseline table (e726ad2): CORRECT. For each of the seven USER_OWNED paths, QA1 recomputed hashContent(normalizeLineEndings(git show 6c33432:path)), using scripts/launcher/content-hash, against files[path][\"0.2.10\"]. All 7 OK, 0 mismatches. npm run baselines:check reports it covers every published version through 0.2.10.\n\n3. Tests: QA1 ran everything at 711c5fc in a clean clone. node scripts/launcher_test.js: ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh: ALL SMOKE TESTS PASSED, exit 0, with the new case-(a) block executing. pyflakes on sprint_lifecycle.py is clean.\n\nPROCESS NOTE FOR MASTER CONTROLLER (not a code finding, not blocking this reship). 876af2a is Dev Team 1 editing the sprint file's requirement text: it appends a \"6a, RESOLVED\" block and amends a Risks bullet. Defining and amending requirements is Master Controller's job, and Rule 6 there covers exactly this kind of amendment. The content is mostly accurate and QA1's round-2 position is quoted fairly. But one claim is wrong: it says the measured record spans \"three CLI versions\". The findings doc records two, claude 2.1.271 (N1-N4) and 2.1.272 (R1-R3), and LiveQA's check C was also at 2.1.272. MC should review that amendment, correct \"three\" to \"two\", and decide whether a Dev-authored requirement amendment stands or should be re-authored. It sits outside the audited tree hash, so it does not affect this verdict or the reship gate.\n\nFOR LIVEQA'S NARROW RETEST. Rerun A2 cases (a) and (b) against the published package and confirm the new wording. Confirm reship still succeeds on a live-loop-PASSed tree and still refuses a no-verdict tree. Redo the gitHead provenance check against the new last_shipped_commit. | commit=711c5fcc8f5e157bda9b0bff1b95b805f562ae0f"
+    },
+    {
+      "ts": "2026-09-15T14:15:42+00:00",
+      "actor": "pipeman",
+      "event": "reshipped",
+      "detail": "commit=711c5fcc8f5e157bda9b0bff1b95b805f562ae0f | ci=green: 1 CI run(s) for 711c5fcc8f5e157bda9b0bff1b95b805f562ae0f all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-15T14:04:53+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-15T14:15:42+00:00"
   },
   "live_loop_audit_trees": [
     {
