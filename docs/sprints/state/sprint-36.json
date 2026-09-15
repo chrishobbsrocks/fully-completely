@@ -5,7 +5,7 @@
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "1d949cd59cee0aa2a3e1a77acfa92fcd065fb3dd501e25e428c493b414beec52",
   "qa1_audited_tree_hash": "94f83984914219ff37d04ff3918cdc427d97f2acf7fba0c2c9016704a9be5e0d",
-  "last_shipped_commit": "711c5fcc8f5e157bda9b0bff1b95b805f562ae0f",
+  "last_shipped_commit": "c79f476e1cdda7f1106bd3f6938392e6d953b1c1",
   "groundtruth_result": "CONDITIONAL",
   "audit_rounds": 3,
   "live_test_rounds": 1,
@@ -77,12 +77,18 @@
       "actor": "qa1",
       "event": "live_loop_audit",
       "detail": "PASS: QA1 live-loop audit, sprint 36, commit c79f476. Verdict: PASS for reship of this exact tree.\n\nSCOPE, as stated in the 16d3f45 CONDITIONAL: the three attribution strings. Tree delta 16d3f45..c79f476 outside sprint bookkeeping is CHANGELOG.md, scripts/sprint_lifecycle.py and scripts/smoke_test.sh.\n\n1. Attribution corrected in all three files. The CHANGELOG 0.2.11 entry, the cmd_liveqa comment and the smoke-test comment each now say the finding came from the user, and that QA1 missed it across all three gate-1 rounds and its own live-loop audit of 711c5fc. The only independent record, sprint 36's state history, shows no QA1 event raising it, which is consistent with this. The \"found by the user\" part is Dev Team 1's first-hand account; QA1 has no record either way and takes it as stated. A grep at c79f476 outside docs/sprints for \"finding from QA1\", \"Found by QA1\" and \"QA1's own live-loop audit of 711c5fc\" returns nothing, so no misattribution survives. The c79f476 commit message corrects 16d3f45's message without a history rewrite, as instructed.\n\n2. No behavioural change. In the diff 16d3f45..c79f476 -- scripts, every added or removed line is a comment line; a filter for non-comment +/- lines returns nothing. The CHANGELOG change is prose only. c79f476's sprint_lifecycle.py passes py_compile and its smoke_test.sh passes bash -n. QA1 ran both full suites at 16d3f45 in a clean clone last round (both pass), and the only difference since is comments and prose, so they were not re-run.\n\nEverything else from the 16d3f45 audit carries forward unchanged. The cmd_liveqa message now names the QA1 audit step, with a smoke test. package.json 0.2.11 is published+1 (npm still at 0.2.10). A sweep of user-facing strings found no other stale fix-loop description.\n\nFOR PIPEMAN AND LIVEQA. The working tree currently holds uncommitted sprint 39 files (a new sprint file in 1-todo and a registry.json change) that are not part of c79f476. Keep them out of the reship, publish from c79f476 itself, and regenerate the baseline table for 0.2.11 at publish time as before. LiveQA's retest should cover the 0.2.10 CONDITIONAL cases (a) and (b) plus the new cmd_liveqa FAIL message wording, against the published 0.2.11. | commit=c79f476e1cdda7f1106bd3f6938392e6d953b1c1"
+    },
+    {
+      "ts": "2026-09-15T14:52:41+00:00",
+      "actor": "pipeman",
+      "event": "reshipped",
+      "detail": "commit=c79f476e1cdda7f1106bd3f6938392e6d953b1c1 | ci=green: 1 CI run(s) for c79f476e1cdda7f1106bd3f6938392e6d953b1c1 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-15T14:45:48+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-15T14:52:41+00:00"
   },
   "live_loop_audit_trees": [
     {
