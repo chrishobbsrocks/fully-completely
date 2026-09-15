@@ -65,12 +65,18 @@
       "actor": "pipeman",
       "event": "reshipped",
       "detail": "commit=711c5fcc8f5e157bda9b0bff1b95b805f562ae0f | ci=green: 1 CI run(s) for 711c5fcc8f5e157bda9b0bff1b95b805f562ae0f all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-15T14:28:27+00:00",
+      "actor": "qa1",
+      "event": "live_loop_audit",
+      "detail": "CONDITIONAL: QA1 live-loop audit, sprint 36, commit 16d3f45. Verdict: CONDITIONAL. The code is correct; the provenance record it ships with is false. Fix the attribution, then re-audit. That re-audit will be fast.\n\nWHAT THIS COVERS. The tree delta from 711c5fc (the live-loop PASS already on record) to 16d3f45, outside sprint bookkeeping: scripts/sprint_lifecycle.py, scripts/smoke_test.sh, package.json and CHANGELOG.md. The sprint file was re-read; the only change since QA1's last read is 1619e6a, Master Controller accepting the Req 6a amendment and correcting \"three CLI versions\" to two. That resolves QA1's process note, and there is no requirement change to audit against.\n\nWHAT IS FINE.\n - cmd_liveqa's FAIL/CONDITIONAL next-step message now names the QA1 audit step and the exact /sprint-qa1 <N> --verdict ... --commit <hash> command before reship. Accurate against cmd_reship's gate.\n - Smoke asserts the new text, the recovery command, and a negative grep for the old ending.\n - package.json is 0.2.11; npm view fully-completely version still returns 0.2.10, so this is published+1.\n - The CHANGELOG 0.2.11 \"Corrects 0.2.10\" content is accurate, apart from the provenance line below.\n - QA1 ran both suites at 16d3f45 in a clean clone. node scripts/launcher_test.js: ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh: ALL SMOKE TESTS PASSED, exit 0.\n - QA1 also re-swept every print/die string in sprint_lifecycle.py, scripts/launcher, templates and .claude/commands for fix-loop descriptions. This cmd_liveqa message was the ONLY survivor; there are no others.\n\nREQUIRED FIX: a false provenance claim, in three committed files.\n - 16d3f45 attributes this finding to QA1 in:\n   - CHANGELOG.md (0.2.11 entry): \"Found by QA1's own live-loop audit of the first fix above.\"\n   - scripts/sprint_lifecycle.py, the cmd_liveqa comment: \"second finding from QA1's own live-loop audit of 711c5fc\".\n   - scripts/smoke_test.sh, the comment above LIVEQA_FAIL_OUT_1: \"second finding from QA1's own live-loop audit of 711c5fc\".\n   - The commit message says the same thing, and Dev Team 1's handoff repeats it.\n - Demonstrated false. Sprint 36's state history holds exactly 4 qa1 events: gate-1 FAIL round 1, FAIL round 2, PASS round 3, and the live-loop PASS on 711c5fc. A search of all four details for \"cmd_liveqa\" or \"Dev Team: fix, then\" returns False. QA1's live-loop notes on 711c5fc (recorded 2026-09-15T14:04:53) contain no such finding.\n - The truth is the opposite: this was a Req 4 survivor QA1 MISSED in gate-1 rounds 1-3 and in the live-loop audit.\n - Why it matters, not pedantry: CHANGELOG.md ships in the npm package, and a record that converts a QA1 miss into a QA1 catch corrupts exactly the evidence the gates crossover report and the sprint retro rely on to judge whether the static gate is earning its keep. This framework has treated a false statement in printed or recorded text as a defect all sprint (LiveQA's CONDITIONAL on the reship wording is the same class).\n - Fix: in all three files, credit whoever actually found it (Dev Team 1 or Master Controller, whichever is true; QA1 does not know which) and state plainly that QA1's gate-1 and live-loop audits missed it.\n - Do not rewrite 16d3f45's commit message if it has been pushed. Correct it in the fix commit's own message instead.\n\nThis is message and comment text only, with no behavioral change, so QA1's re-audit of the correcting commit will be confined to those three strings. | commit=16d3f4566de349feee6fb3029ca2b8524fab7b3a"
     }
   ],
   "last_claim": {
-    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-15T14:15:42+00:00"
+    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
+    "claude_agent": "qa1",
+    "ts": "2026-09-15T14:28:27+00:00"
   },
   "live_loop_audit_trees": [
     {
@@ -78,6 +84,12 @@
       "commit": "711c5fcc8f5e157bda9b0bff1b95b805f562ae0f",
       "tree_hash": "63233b202deaaa21ea34deede6fbbeae627aae8298d14343fd699de386433514",
       "verdict": "PASS"
+    },
+    {
+      "ts": "2026-09-15T14:28:27+00:00",
+      "commit": "16d3f4566de349feee6fb3029ca2b8524fab7b3a",
+      "tree_hash": "830a7a8265db633ee0fe3c61d636dc1db0fb5eedac2974f64071baa3ca6a12bc",
+      "verdict": "CONDITIONAL"
     }
   ]
 }
