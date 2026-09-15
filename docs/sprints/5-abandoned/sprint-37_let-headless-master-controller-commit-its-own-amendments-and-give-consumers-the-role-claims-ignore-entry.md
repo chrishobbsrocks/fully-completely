@@ -2,7 +2,7 @@
 id: 37
 title: "Let headless Master Controller commit its own amendments, and give consumers the role-claims ignore entry"
 epic: "Downstream findings: FMC ShowOffTest run"
-status: todo
+status: abandoned
 created: 2026-09-14T23:17:42+00:00
 ---
 

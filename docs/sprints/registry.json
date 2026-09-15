@@ -221,8 +221,8 @@
     "37": {
       "title": "Let headless Master Controller commit its own amendments, and give consumers the role-claims ignore entry",
       "epic": "Downstream findings: FMC ShowOffTest run",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-37_let-headless-master-controller-commit-its-own-amendments-and-give-consumers-the-role-claims-ignore-entry.md"
+      "status": "abandoned",
+      "file": "docs/sprints/5-abandoned/sprint-37_let-headless-master-controller-commit-its-own-amendments-and-give-consumers-the-role-claims-ignore-entry.md"
     }
   }
 }
