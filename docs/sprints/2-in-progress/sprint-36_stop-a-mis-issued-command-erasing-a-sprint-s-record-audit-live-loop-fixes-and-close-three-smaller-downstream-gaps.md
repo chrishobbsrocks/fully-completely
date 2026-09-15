@@ -162,8 +162,12 @@ two sprints cannot share one publish.
    (round 2 audit) and confirmed it stays within this Req's own "choose the
    narrowest grant that is measured safe" latitude, not a widening and not
    requiring separate Master Controller escalation. Full measured record,
-   across three CLI versions and two operators (Dev Team, then QA1
-   independently): `docs/sprint-36-mc-commit-permission-findings.md`.
+   across two CLI versions (2.1.271 and 2.1.272) and two operators (Dev
+   Team, then QA1 independently): `docs/sprint-36-mc-commit-permission-findings.md`.
+   *Master Controller review (2026-09-15): this amendment records how Req 6a
+   was satisfied; it does not change what was required. Accepted, with the
+   CLI-version count corrected from "three" to two. Master Controller had
+   already accepted the wrapper design when QA1's round-3 PASS was relayed.*
 
    **6b.** Update `master-controller.md` and the headless note in
    `sprint-new.md` to describe what headless Master Controller can now commit.
