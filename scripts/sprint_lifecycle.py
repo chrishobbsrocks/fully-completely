@@ -647,8 +647,8 @@ def branch_state() -> Tuple[str, Optional[str]]:
                                 sprint).
       ("unborn", "<branch>") -- a real branch name, genuinely no commits
                                 yet (the exact gap Finding F2 named).
-      ("no-repo", None)      -- git ran and confirmed ROOT is not inside
-                                a git working tree at all.
+      ("no-repo", None)      -- git ran and POSITIVELY confirmed ROOT is
+                                not inside a git working tree at all.
       ("unknown", None)      -- every remaining undeterminable case
                                 (detached HEAD, git missing from PATH, or
                                 any other subprocess failure) -- Sprint 7,
@@ -656,7 +656,28 @@ def branch_state() -> Tuple[str, Optional[str]]:
                                 of this may ever raise or make a
                                 read-only command fail to answer, so
                                 every failure mode collapses to this one
-                                case rather than propagating."""
+                                case rather than propagating.
+
+    QA1 round 1 FINDING, FIXED HERE: `git rev-parse --is-inside-work-tree`
+    exiting non-zero does NOT always mean "not a repository" -- it also
+    exits 128 for a real repository git refuses to operate on for an
+    unrelated reason, and the first version of this function collapsed
+    every such refusal straight into "no-repo", claiming the specific
+    "not a git repository" case for something that wasn't it. Demonstrated
+    directly: `GIT_TEST_ASSUME_DIFFERENT_OWNER=1` (git's own test hook for
+    its safe.directory ownership check) makes this exact command fail with
+    "fatal: detected dubious ownership in repository at ..." against a
+    real, ordinary repository — this is exactly what happens on Windows
+    whenever a checkout is owned by a different OS user than the one
+    running git (elevated creation, a VM shared folder), one of this
+    sprint's own two workshop platforms. Fixed by checking WHAT git
+    actually said, not merely that it failed: only a stdout of exactly
+    "false" (git ran fine and answered the question) or stderr containing
+    the specific, stable "not a git repository" phrasing (confirmed
+    directly against a genuinely empty directory) counts as the positive
+    "no-repo" determination Req 2 requires; every other failure — a
+    dubious-ownership refusal very much included — falls through to
+    "unknown", same as any other undeterminable case."""
     try:
         repo_check = subprocess.run(  # nosec B603 B607
             ["git", "rev-parse", "--is-inside-work-tree"],
@@ -664,8 +685,15 @@ def branch_state() -> Tuple[str, Optional[str]]:
         )
     except (FileNotFoundError, OSError):
         return ("unknown", None)
-    if repo_check.returncode != 0 or repo_check.stdout.strip() != "true":
-        return ("no-repo", None)
+    if repo_check.returncode == 0:
+        if repo_check.stdout.strip() == "true":
+            pass  # a real work tree -- fall through to the branch checks below
+        else:
+            return ("no-repo", None)  # exited 0 printing "false" -- git positively answered "no"
+    else:
+        if "not a git repository" in (repo_check.stderr or ""):
+            return ("no-repo", None)  # git's own specific, positive claim
+        return ("unknown", None)  # refused for some OTHER reason (dubious ownership, etc.) -- undeterminable, not "no-repo"
 
     try:
         sym = subprocess.run(  # nosec B603 B607

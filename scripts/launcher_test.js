@@ -226,6 +226,42 @@ test('isPidAlive: a zombie (killed but not yet reaped) is treated as NOT alive, 
   assert.strictEqual(isPidAlive(pid), false, 'a zombie must read as not-alive, not as still-running');
 });
 
+test('isPidAlive: sprint 38, QA1 round 1 FINDING -- a `ps` that cannot answer (BusyBox\'s own shape) must NOT be read as "process gone" for a genuinely running process', () => {
+  // BusyBox ps (Alpine, and many slim containers/devcontainers) has no
+  // `-p` flag at all: `ps -o stat= -p <pid>` prints BusyBox's own usage
+  // text and exits 1, regardless of whether <pid> is alive. A PATH-shimmed
+  // `ps` reproducing exactly that shape, in front of a REAL, currently
+  // running process, is what QA1 used to demonstrate the bug end to end;
+  // reproduced identically here as the regression test.
+  if (process.platform === 'win32') return; // this function's own ps-based check is POSIX-only
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-busybox-ps-shim-'));
+  const shimScript = [
+    '#!/bin/sh',
+    'echo "BusyBox v1.36.1 multi-call binary." >&2',
+    'echo "Usage: ps" >&2',
+    'exit 1',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(shimDir, 'ps'), shimScript);
+  fs.chmodSync(path.join(shimDir, 'ps'), 0o755);
+  const sleeper = spawn('sleep', ['5']);
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = `${shimDir}:${originalPath}`;
+    // Give spawn a moment to actually land before probing.
+    execFileSync('sleep', ['0.1']);
+    const result = isPidAlive(sleeper.pid);
+    assert.notStrictEqual(result, false,
+      'a ps that cannot answer must never be read as "confirmed gone" -- the exact QA1 round-1 finding. got: ' + result);
+    const warning = roleClaimWarning('QA1', { startedAt: '2026-01-01T00:00:00.000Z', sessionId: 'x', pid: sleeper.pid });
+    assert.ok(warning !== null, 'end to end: the NOTE must still fire for a genuinely running session when ps cannot answer');
+  } finally {
+    process.env.PATH = originalPath;
+    sleeper.kill('SIGKILL');
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
 test('isPidAlive: null (undeterminable) for a missing/invalid pid -- Req 1c\'s own 0.2.10-and-earlier record shape', () => {
   assert.strictEqual(isPidAlive(undefined), null, 'an old-format record with no pid field at all');
   assert.strictEqual(isPidAlive(null), null);

@@ -189,12 +189,54 @@ function isPidAlive(pid) {
   try {
     ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000 });
   } catch (_) {
+    return reprobeAfterUnusablePs(pid);
+  }
+  if (ps.error) return reprobeAfterUnusablePs(pid);
+  const stat = (ps.stdout || '').trim();
+  if (ps.status !== 0 || !stat) {
+    // QA1 round 1 FINDING, FIXED HERE: this used to collapse straight to
+    // `false` ("gone by the time ps checked") the instant `ps` gave back
+    // anything other than a usable STAT column -- but a non-zero ps exit
+    // does NOT always mean the pid is gone; it can just as easily mean
+    // this platform's `ps` cannot answer the question at all. Demonstrated
+    // directly: BusyBox ps (Alpine and many slim containers/devcontainers)
+    // has no `-p` flag -- `ps -o stat= -p <pid>` against a REAL, currently
+    // running process prints BusyBox's own usage text and exits 1, the
+    // exact shape this branch used to read as "confirmed gone". Running
+    // the real code with a `ps` shimmed to behave the same way reproduced
+    // it end to end: process.kill(pid,0) correctly said the process was
+    // running, and this function still returned `false`, silencing the
+    // NOTE for a session that was genuinely still alive -- precisely the
+    // dangerous direction Req 1a forbids ("every undeterminable branch
+    // falls through to the NOTE"). Fixed by never trusting a `ps` that
+    // couldn't answer: re-probe existence directly instead of guessing
+    // from `ps`'s own failure.
+    return reprobeAfterUnusablePs(pid);
+  }
+  return !stat.startsWith('Z');
+}
+
+// Called only when `ps` itself could not be trusted (missing, erroring, or
+// -- BusyBox's own shape -- simply incompatible with the flags used
+// above), immediately after `process.kill(pid, 0)` already succeeded once.
+// Re-probes existence directly rather than guessing from `ps`'s own
+// failure: if the process has genuinely exited in the brief window since
+// the first probe, THIS probe will now correctly see ESRCH (a real, fresh
+// fact, not a stale one) and return `false`; any other outcome (still
+// alive, or a probe that itself can't answer) returns `null` -- Req 1a's
+// own "undeterminable still warns" rule, never a guessed `false`.
+function isPidAliveRaw(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    if (err && err.code === 'ESRCH') return false;
     return null;
   }
-  if (ps.error) return null;
-  const stat = (ps.stdout || '').trim();
-  if (ps.status !== 0 || !stat) return false; // gone by the time ps checked -- a real, current fact
-  return !stat.startsWith('Z');
+}
+function reprobeAfterUnusablePs(pid) {
+  const result = isPidAliveRaw(pid);
+  return result === false ? false : null;
 }
 
 // Sprint 25, Req 1's own required wording: names the blind spot in the

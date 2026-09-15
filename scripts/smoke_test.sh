@@ -2283,6 +2283,20 @@ echo "$DETACHED_OUT" | grep -q "branch unknown" || \
 echo "$DETACHED_OUT" | grep -qE '\(branch: [^,)]+\)\.' && \
   fail "a detached HEAD must never be reported as a real named branch"
 
+echo "== sprint 38, Req 2 (QA1 round 1 finding): a real repository git refuses for an UNRELATED reason (dubious ownership) is never reported as 'not a git repository' =="
+# git's own test hook for its safe.directory ownership check
+# (GIT_TEST_ASSUME_DIFFERENT_OWNER=1) makes `git rev-parse
+# --is-inside-work-tree` fail with "fatal: detected dubious ownership in
+# repository at ..." against a real, ordinary repository -- exactly what
+# happens on Windows whenever a checkout is owned by a different OS user
+# (elevated creation, a VM shared folder), one of this sprint's own two
+# workshop platforms.
+DUBIOUS_OUT=$(cd "$BRANCH_SANDBOX" && GIT_TEST_ASSUME_DIFFERENT_OWNER=1 $BRANCH_SCRIPT list 2>&1)
+echo "$DUBIOUS_OUT" | grep -q "not a git repository" && \
+  fail "a real repository refused for dubious ownership must NOT be reported as 'not a git repository' -- got: $DUBIOUS_OUT"
+echo "$DUBIOUS_OUT" | grep -q "branch unknown" || \
+  fail "a dubious-ownership refusal should fall through to the undeterminable 'branch unknown' wording -- got: $DUBIOUS_OUT"
+
 rm -rf "$BRANCH_SANDBOX"
 
 echo "ALL SMOKE TESTS PASSED"
