@@ -1,5 +1,5 @@
 {
-  "next_id": 38,
+  "next_id": 39,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -223,6 +223,12 @@
       "epic": "Downstream findings: FMC ShowOffTest run",
       "status": "abandoned",
       "file": "docs/sprints/5-abandoned/sprint-37_let-headless-master-controller-commit-its-own-amendments-and-give-consumers-the-role-claims-ignore-entry.md"
+    },
+    "38": {
+      "title": "Stop a clean relaunch warning about a session that isn't running, and name the branch on a fresh repository",
+      "epic": "Workshop readiness: a new attendee's first launch reads correctly",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-38_stop-a-clean-relaunch-warning-about-a-session-that-isn-t-running-and-name-the-branch-on-a-fresh-repository.md"
     }
   }
 }
