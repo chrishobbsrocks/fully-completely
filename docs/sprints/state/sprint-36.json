@@ -1,7 +1,7 @@
 {
   "id": 36,
   "title": "Stop a mis-issued command erasing a sprint's record, audit live-loop fixes, and close three smaller downstream gaps",
-  "phase": "complete_ready",
+  "phase": "complete",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "1d949cd59cee0aa2a3e1a77acfa92fcd065fb3dd501e25e428c493b414beec52",
   "qa1_audited_tree_hash": "94f83984914219ff37d04ff3918cdc427d97f2acf7fba0c2c9016704a9be5e0d",
@@ -10,7 +10,7 @@
   "audit_rounds": 3,
   "live_test_rounds": 2,
   "started": "2026-09-14T23:22:29+00:00",
-  "completed": null,
+  "completed": "2026-09-15T15:12:25+00:00",
   "history": [
     {
       "ts": "2026-09-14T23:22:29+00:00",
@@ -95,12 +95,18 @@
       "actor": "liveqa",
       "event": "sprint_file_drift_since_audit",
       "detail": "NOTE: sprint 36's file has changed since QA1's PASS (audited hash 1d949cd59cee..., current 90fd4aae4dcf...). Recorded, not refused \u2014 see this function's own comment for why. If this sprint's own acceptance criteria changed for a real reason, that's worth a fresh /sprint-qa1 look once the live-test loop settles; if it was a cosmetic edit, this note is the whole record of it."
+    },
+    {
+      "ts": "2026-09-15T15:12:25+00:00",
+      "actor": "dev-team",
+      "event": "sprint_closed",
+      "detail": "user_said=/sprint-complete 36"
     }
   ],
   "last_claim": {
-    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
-    "claude_agent": "liveqa",
-    "ts": "2026-09-15T15:08:47+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-15T15:12:25+00:00"
   },
   "live_loop_audit_trees": [
     {

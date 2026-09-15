@@ -214,8 +214,8 @@
     "36": {
       "title": "Stop a mis-issued command erasing a sprint's record, audit live-loop fixes, and close three smaller downstream gaps",
       "epic": "Downstream findings: FMC ShowOffTest run",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-36_stop-a-mis-issued-command-erasing-a-sprint-s-record-audit-live-loop-fixes-and-close-three-smaller-downstream-gaps.md",
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-36_stop-a-mis-issued-command-erasing-a-sprint-s-record-audit-live-loop-fixes-and-close-three-smaller-downstream-gaps--done.md",
       "original_title": "Stop start erasing a live sprint's record, and put a live-loop fix through the audit it skips"
     },
     "37": {
