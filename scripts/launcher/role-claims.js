@@ -132,26 +132,62 @@ function acquireClaimsLock(repoRoot) {
     } catch (err) {
       if (!err || err.code !== 'EEXIST') return null; // some other failure -- don't block on it
       try {
-        const age = Date.now() - fs.statSync(lockPath).mtimeMs;
+        const beforeStat = fs.statSync(lockPath);
+        const age = Date.now() - beforeStat.mtimeMs;
         if (age > LOCK_STALE_MS) {
-          // QA1 live-loop finding: a plain `unlinkSync` here raced with
-          // ANOTHER process also stealing the same stale lock -- both
-          // could compute `age > LOCK_STALE_MS` from the same stale
-          // stat(), then one unlinks and re-creates its own fresh lock,
-          // and the OTHER's later, unconditional unlink deletes that
-          // freshly-created lock out from under its rightful holder,
-          // letting a third looper acquire it too. `renameSync` onto a
-          // per-process-unique path is the fix: POSIX rename is atomic,
-          // so only ONE racing process's rename can ever succeed against
-          // the SAME source path -- everyone else gets ENOENT (the source
-          // is already gone by the time they try) and simply loops back
-          // to attempt a fresh `openSync('wx')`, never touching whatever
-          // is at `lockPath` by then, stale or not.
+          // QA1 live-loop finding (round 2): a plain `unlinkSync` here
+          // raced with ANOTHER process also stealing the same stale
+          // lock -- both could compute `age > LOCK_STALE_MS` from the
+          // same stale stat(), then one unlinks and re-creates its own
+          // fresh lock, and the other's later, unconditional unlink
+          // deletes that freshly-created lock out from under its
+          // rightful holder.
+          //
+          // QA1 live-loop finding (round 3): swapping the unlink for a
+          // `renameSync` onto a per-process-unique path, on its own,
+          // does NOT actually close this -- confirmed by QA1 directly,
+          // by interleaving two real `acquireClaimsLock` calls. `rename`
+          // is atomic in the sense that only one caller's rename can
+          // succeed against a given SOURCE PATH at a given instant, but
+          // it has no idea WHICH FILE is at that path when it runs: the
+          // staleness decision above is made from a stat() taken before
+          // the rename, and by the time the rename actually executes,
+          // some OTHER process may have already completed its own full
+          // steal-and-recreate cycle at this exact path -- meaning our
+          // rename call still "succeeds", but it just moved away that
+          // other process's brand-new, legitimately-held lock, not the
+          // stale one we actually staleness-checked. THE FIX: verify,
+          // after the rename, that the file we actually moved is still
+          // the SAME one this attempt staleness-checked -- inode identity
+          // (stable across a same-filesystem rename, and never coincides
+          // between two different files a filesystem hands out at
+          // meaningfully close times) is the real guarantee here; mtime
+          // is compared too only as cheap corroboration. A mismatch means
+          // we grabbed someone else's fresh lock by accident: put it back
+          // exactly where it was and retry from scratch, never treating
+          // this as a successful acquisition.
           const stolenPath = `${lockPath}.stolen-${process.pid}-${Date.now()}`;
           try {
             fs.renameSync(lockPath, stolenPath);
           } catch (_) {
             continue; // someone else already claimed it -- try openSync('wx') again
+          }
+          let afterStat;
+          try {
+            afterStat = fs.statSync(stolenPath);
+          } catch (_) {
+            continue; // vanished already -- try again
+          }
+          const sameFile = afterStat.ino === beforeStat.ino && afterStat.mtimeMs === beforeStat.mtimeMs;
+          if (!sameFile) {
+            try {
+              fs.renameSync(stolenPath, lockPath); // hand it back to its rightful holder
+            } catch (_) {
+              // Couldn't restore it (already gone, or the path is now
+              // occupied by yet another fresh lock) -- nothing more this
+              // attempt can safely do; either way, we acquired nothing.
+            }
+            continue;
           }
           try {
             fs.unlinkSync(stolenPath);
@@ -221,6 +257,18 @@ function normalizeClaimList(raw) {
   return [];
 }
 
+// Whether `claim` carries a pid this file could ever actually check again
+// later -- the exact same numeric/positive-integer test isPidAlive() itself
+// applies before it will even attempt a probe. A pre-0.2.13 record has no
+// `pid` key at all (0.2.10/0.2.11's own shape), so isPidAlive() on it can
+// only ever return `null` (undeterminable) -- FOREVER, not just on this one
+// check -- since there is no pid to ever positively confirm as gone. See
+// recordRoleClaim's own comment for why that distinction matters.
+function hasTrackablePid(claim) {
+  const pid = claim && claim.pid;
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0;
+}
+
 // Records that `roleId` is launching now, in `repoRoot`, returning every
 // PRIOR claim for that role not yet confirmed to have exited (see
 // normalizeClaimList's own comment above) so the caller can decide what to
@@ -251,8 +299,28 @@ function recordRoleClaim(roleId, repoRoot, { sessionId, now = () => new Date(), 
   try {
     const claims = readClaims(repoRoot);
     const existingList = normalizeClaimList(claims[roleId]);
-    const survivors = existingList.filter((claim) => isPidAlive(claim && claim.pid) !== false);
-    claims[roleId] = [...survivors, { sessionId: sessionId || null, startedAt: now().toISOString(), pid }];
+    // Every entry not yet POSITIVELY confirmed dead -- what THIS launch
+    // warns the caller about. Includes a pid-less (pre-0.2.13) entry:
+    // Req 1a says undeterminable must still warn.
+    const notConfirmedDead = existingList.filter((claim) => isPidAlive(claim && claim.pid) !== false);
+    // QA1 live-loop finding (round 3): what actually gets WRITTEN BACK for
+    // FUTURE launches to see is narrower than the above -- an upgraded
+    // install's pre-0.2.13 claim has no pid at all, so isPidAlive() on it
+    // can never resolve to `false`; keeping it in `notConfirmedDead`
+    // forever (as the second fix round's own code did) meant it was
+    // never pruned, and every relaunch warned about it, permanently --
+    // the exact F6 regression this whole sprint exists to fix, reached a
+    // third way. This launch still warns about it (notConfirmedDead,
+    // returned below, still includes it), but it is dropped from what
+    // gets persisted: only entries with a real, trackable pid -- ones
+    // that could, in principle, later be positively confirmed dead --
+    // survive into the file. A modern (has-a-pid) entry whose liveness is
+    // merely undeterminable RIGHT NOW (a platform check that failed this
+    // one time) is NOT dropped here -- unlike a pid-less record, it has
+    // real information to re-check on a later launch, so it keeps its
+    // chance to eventually resolve to `false` and be pruned for real.
+    const persistable = notConfirmedDead.filter(hasTrackablePid);
+    claims[roleId] = [...persistable, { sessionId: sessionId || null, startedAt: now().toISOString(), pid }];
     try {
       const file = claimsFilePath(repoRoot);
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -263,7 +331,7 @@ function recordRoleClaim(roleId, repoRoot, { sessionId, now = () => new Date(), 
       // block a launch. The launch proceeds either way; only the record of
       // it may be missing this once.
     }
-    return survivors;
+    return notConfirmedDead;
   } finally {
     releaseClaimsLock(lockPath);
   }

@@ -110,6 +110,7 @@ const {
   recordRoleClaim,
   roleClaimWarning,
   isPidAlive,
+  acquireClaimsLock,
 } = require('./launcher/role-claims');
 
 function withTmpRepoRoot(fn) {
@@ -195,6 +196,32 @@ test('role-claims: A survives being overwritten by B (still alive when B claims)
   });
 });
 
+// Sprint 38, third fix round (QA1 live-loop finding): a pid-less
+// (pre-0.2.13) claim can never be positively confirmed dead, so it must
+// warn on the launch that reads it (Req 1a) but must NOT be carried
+// forward into the file, or it would warn on every relaunch forever --
+// the exact regression QA1 found. Unit-level, deterministic version of
+// the real-subprocess repro further down.
+test('role-claims: recordRoleClaim warns about a planted pid-less claim once, then drops it from what gets persisted', () => {
+  withTmpRepoRoot((repoRoot) => {
+    const file = claimsFilePath(repoRoot);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ qa1: { sessionId: 'old', startedAt: '2026-01-01T00:00:00.000Z' } }, null, 2) + '\n');
+
+    const firstPrevious = recordRoleClaim('qa1', repoRoot, { sessionId: 'first-new', pid: killAndReapSync(1) });
+    assert.strictEqual(firstPrevious.length, 1, 'the pid-less claim must still be reported to THIS launch');
+    assert.strictEqual(firstPrevious[0].sessionId, 'old');
+    assert.ok(roleClaimWarning('QA1', firstPrevious) !== null, 'and must still produce a warning -- Req 1a');
+
+    const claimsAfterFirst = readClaims(repoRoot);
+    assert.strictEqual(claimsAfterFirst.qa1.length, 1, 'the untrackable old claim must already be dropped from what was written');
+    assert.strictEqual(claimsAfterFirst.qa1[0].sessionId, 'first-new');
+
+    const secondPrevious = recordRoleClaim('qa1', repoRoot, { sessionId: 'second-new', pid: killAndReapSync(1) });
+    assert.deepStrictEqual(secondPrevious, [], 'the old pid-less claim must never resurface on a later launch');
+  });
+});
+
 test('role-claims: two DIFFERENT roles never see each other\'s claims (independent keys)', () => {
   withTmpRepoRoot((repoRoot) => {
     recordRoleClaim('qa1', repoRoot, { sessionId: 'qa1-session', pid: killAndReapSync(1) });
@@ -212,6 +239,57 @@ test('role-claims: a write failure (unwritable directory) never throws -- Req 1\
       assert.doesNotThrow(() => recordRoleClaim('qa1', repoRoot, { sessionId: 'irrelevant' }));
     } finally {
       fs.chmodSync(claudeDir, 0o755); // restore so withTmpRepoRoot's own cleanup can remove it
+    }
+  });
+});
+
+// Sprint 38, third fix round (QA1 live-loop finding): a deterministic,
+// white-box reproduction of the exact TOCTOU QA1 found by interleaving two
+// real `acquireClaimsLock` calls -- the staleness DECISION for a lock is
+// made from a stat() taken before the rename that acts on it, so by the
+// time the rename runs, another process may already have completed its
+// own full steal-and-recreate cycle at the same path. A plain `renameSync`
+// swap (this sprint's own second fix round) cannot tell that apart from
+// genuinely stealing the original stale lock -- it just moves whatever is
+// currently there. This test forces exactly that gap open, deterministically:
+// it intercepts this module's own `fs.statSync` call on the lock path (the
+// SAME `fs` module object role-claims.js itself required, since Node's
+// module cache returns one shared instance per process) to simulate
+// another process completing its own steal-and-recreate between the stat
+// and the rename, then restores the real fs.statSync no matter what the
+// assertion below does.
+test('acquireClaimsLock: a lock recreated between this attempt\'s own staleness check and its rename must not be stolen out from under its new, rightful holder', () => {
+  withTmpRepoRoot((repoRoot) => {
+    const lockPath = claimsFilePath(repoRoot) + '.lock';
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(lockPath, '');
+    const staleTime = new Date(Date.now() - 60000); // well past LOCK_STALE_MS
+    fs.utimesSync(lockPath, staleTime, staleTime);
+
+    const realStatSync = fs.statSync;
+    let intercepted = false;
+    fs.statSync = function (target, ...rest) {
+      if (target === lockPath && !intercepted) {
+        intercepted = true;
+        // Capture what THIS attempt actually observes (the genuinely
+        // stale file) before simulating another process's full
+        // steal-and-recreate cycle happening in the gap between this
+        // stat() returning and this attempt's own subsequent rename().
+        const observed = realStatSync.call(fs, target);
+        fs.unlinkSync(target);
+        fs.writeFileSync(target, ''); // a DIFFERENT, fresh lock now legitimately occupies this path
+        return observed;
+      }
+      return realStatSync.apply(fs, [target, ...rest]);
+    };
+    try {
+      const acquired = acquireClaimsLock(repoRoot);
+      assert.strictEqual(
+        acquired, null,
+        'must never report success by renaming away a lock that was actually recreated by someone else in the gap between the staleness check and the steal'
+      );
+    } finally {
+      fs.statSync = realStatSync;
     }
   });
 });
@@ -3085,6 +3163,47 @@ test('run-role CLI (real subprocess, sprint 38 second fix round): the exact QA1 
   } finally {
     fs.rmSync(slowDir, { recursive: true, force: true });
   }
+});
+
+test('run-role CLI (real subprocess, sprint 38 third fix round): a planted pre-0.2.13 (pid-less) claim warns on the launch that reads it, then never again -- QA1\'s exact upgrade repro', () => {
+  // QA1's exact reproduction: a claim written by 0.2.10/0.2.11 (or the
+  // second fix round's own now-superseded code) has no `pid` at all, so
+  // isPidAlive() on it can only ever return `null` (undeterminable) --
+  // FOREVER, since there's no pid to ever positively confirm as gone.
+  // Keeping an entry like that in the file forever (what the second fix
+  // round's code did, by design, to satisfy Req 1a) meant an upgraded
+  // install's own leftover pre-0.2.13 claim warned on every single
+  // relaunch, permanently -- the exact "every relaunch warns, forever"
+  // regression (F6) this whole sprint exists to fix, reached a third way.
+  // Real repro: plant an old-format file directly (this project's own
+  // pre-0.2.13 shape -- a bare object, no `pid` key), with nothing else
+  // running, then launch the same role twice in a row.
+  withFakeClaude(true, ({ dir }) => {
+    const claimsPath = freshRoleClaimsPathOverride();
+    fs.mkdirSync(path.dirname(claimsPath), { recursive: true });
+    fs.writeFileSync(claimsPath, JSON.stringify({
+      qa1: { sessionId: 'pre-0.2.13-session', startedAt: '2026-01-01T00:00:00.000Z' }, // genuinely no `pid` key
+    }, null, 2) + '\n');
+    const env = { ...process.env, PATH: dir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath };
+
+    const first = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
+    assert.strictEqual(first.status, 0);
+    assert.match(
+      stripPermissionRecordLine(first.stderr), /NOTE: another QA1 session was recorded starting at/,
+      'Req 1a: an undeterminable (pid-less) record must still warn on the launch that reads it'
+    );
+
+    const second = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
+    assert.strictEqual(second.status, 0);
+    assert.strictEqual(
+      stripPermissionRecordLine(second.stderr), '',
+      'the pid-less record must not be carried forward -- it already had its one warning, and nothing else is running'
+    );
+
+    const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
+    assert.strictEqual(claims.qa1.length, 1, 'the untrackable pre-0.2.13 entry must be gone -- only the second launch\'s own trackable claim remains');
+    assert.notStrictEqual(claims.qa1[0].sessionId, 'pre-0.2.13-session', 'the surviving entry must be the second launch\'s own, not the old planted one');
+  });
 });
 
 // Single-quotes a string for safe embedding in a POSIX `sh` script (the

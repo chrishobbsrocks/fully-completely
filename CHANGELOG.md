@@ -15,10 +15,11 @@ had already gone out by the time it was ready. It was corrected to
 
 ## 0.2.13 — Sprint 38 (Corrects 0.2.12, live-loop fix)
 
-Two defects in `.claude/role-claims.json`'s own bookkeeping, found across
-LiveQA's live test of 0.2.12 and QA1's own live-loop audit of the first
-fix, both in the same dangerous direction: a role whose session is
-genuinely still running gets its relaunch NOTE silenced anyway.
+Three defects in `.claude/role-claims.json`'s own bookkeeping, found
+across LiveQA's live test of 0.2.12 and two rounds of QA1's own live-loop
+audit of the fix, all in the same dangerous direction: a role whose
+session is genuinely still running gets its relaunch NOTE silenced
+anyway.
 
 - **Corrects (LiveQA, round 1):** `FC: Start All` launches all six roles'
   launcher processes within the same instant, and every one of them
@@ -55,18 +56,41 @@ genuinely still running gets its relaunch NOTE silenced anyway.
   being written, and is only ever dropped once IT is confirmed to have
   exited. A pre-0.2.13 single-record file, and every existing single-
   object caller, are read as a one-element list, unchanged.
-- Also closes a related TOCTOU race in the lock's own stale-lock recovery
-  (QA1, minor): two processes racing to steal the same abandoned lock
-  could both succeed, one unlinking the other's freshly re-acquired lock
-  out from under it. Fixed with an atomic `renameSync`-based claim instead
-  of a blind `unlinkSync` — only one racing process's rename can ever
-  succeed against the same source path.
-- Added a concurrent-launch test that starts all six roles' real launcher
-  processes at essentially the same instant and asserts all six claim
-  records survive, and an end-to-end real-subprocess test reproducing the
-  exact A/B/C sequence above. Both confirmed as real regression tests, not
-  just passing ones: run against the fix disabled, each reliably fails,
-  matching the live findings that motivated it.
+- **Corrects (QA1, second live-loop audit):** the list fix above
+  introduced its own regression on an UPGRADED install: a claim written by
+  0.2.10/0.2.11 has no `pid` at all, so it can never be positively
+  confirmed dead and the previous fix kept it in the file forever —
+  meaning every relaunch warned, permanently, on any tree with pre-0.2.13
+  homework already done. Fixed: an undeterminable-because-pid-less claim
+  still warns on the launch that reads it (Req 1a is unchanged — an
+  undeterminable record always warns), but is now dropped from what gets
+  WRITTEN BACK, so it never resurfaces on a later launch. A modern
+  (has-a-pid) claim whose liveness merely can't be determined right now
+  (a platform check that failed once) is unaffected — it keeps its own
+  chance to be positively confirmed dead on a later check, unlike a
+  pid-less record which never can be.
+- **Corrects (QA1, second live-loop audit):** the stale-lock TOCTOU fix
+  from the round above did not actually close the race — `renameSync`
+  onto a unique path is atomic with respect to WHICH CALLER wins against
+  a given source path, but has no way to tell WHICH FILE currently
+  occupies that path, and the staleness decision is made from a `stat()`
+  taken before the rename runs. QA1 confirmed live, by interleaving two
+  real `acquireClaimsLock` calls, that one process's rename could still
+  carry off another process's freshly re-acquired lock. Fixed: after the
+  rename, the moved file's identity (inode, corroborated by mtime) is
+  compared against what was actually observed stale; a mismatch means
+  someone else's fresh lock was grabbed by accident, so it's renamed back
+  to its rightful place and the attempt retries from scratch instead of
+  treating the mismatch as a successful acquisition.
+- Added: a concurrent-launch test asserting all six roles' claim records
+  survive `FC: Start All`; an end-to-end real-subprocess test for the
+  A/B/C sequence above; a real-subprocess test planting a pre-0.2.13
+  claims file and asserting the NOTE fires once, not on every relaunch;
+  and a deterministic, white-box test of the stale-lock identity check
+  (simulating the exact interleaving QA1 found by intercepting this
+  module's own `fs.statSync` call). All four confirmed as real regression
+  tests, not just passing ones: run against each fix disabled in turn,
+  every one reliably fails, matching the finding that motivated it.
 - Windows was not covered by LiveQA's round-1 live test and needs
   covering in the retest, including whether `claude` itself outlives the
   launcher there — the orphan guard 0.2.12 added is POSIX-only.
