@@ -134,11 +134,29 @@ function acquireClaimsLock(repoRoot) {
       try {
         const age = Date.now() - fs.statSync(lockPath).mtimeMs;
         if (age > LOCK_STALE_MS) {
+          // QA1 live-loop finding: a plain `unlinkSync` here raced with
+          // ANOTHER process also stealing the same stale lock -- both
+          // could compute `age > LOCK_STALE_MS` from the same stale
+          // stat(), then one unlinks and re-creates its own fresh lock,
+          // and the OTHER's later, unconditional unlink deletes that
+          // freshly-created lock out from under its rightful holder,
+          // letting a third looper acquire it too. `renameSync` onto a
+          // per-process-unique path is the fix: POSIX rename is atomic,
+          // so only ONE racing process's rename can ever succeed against
+          // the SAME source path -- everyone else gets ENOENT (the source
+          // is already gone by the time they try) and simply loops back
+          // to attempt a fresh `openSync('wx')`, never touching whatever
+          // is at `lockPath` by then, stale or not.
+          const stolenPath = `${lockPath}.stolen-${process.pid}-${Date.now()}`;
           try {
-            fs.unlinkSync(lockPath);
+            fs.renameSync(lockPath, stolenPath);
           } catch (_) {
-            // Someone else already cleared it, or a race in removing it --
-            // either way, loop around and try to acquire again.
+            continue; // someone else already claimed it -- try openSync('wx') again
+          }
+          try {
+            fs.unlinkSync(stolenPath);
+          } catch (_) {
+            // Already gone -- nothing left to clean up.
           }
           continue;
         }
@@ -174,15 +192,45 @@ function readClaims(repoRoot) {
   }
 }
 
-// Records that `roleId` is launching now, in `repoRoot`, returning
-// whatever claim existed for that role BEFORE this call (or null if none
-// did) so the caller can decide what to print. `sessionId` is caller-
-// supplied rather than generated in here, so a caller with a real,
-// already-computed identifier (the interactive path's own deterministic
-// UUIDv5 from session.js) can pass that instead of a second, unrelated
-// one -- this function only ever records whatever identity it's given,
-// it does not mint identity itself except via the `nowFn`/id fallback a
-// caller can also override for tests.
+// Sprint 38, second fix round (QA1 live-loop finding): a stored claim
+// used to be ONE object per role, unconditionally overwritten by every
+// new launch -- which meant a role's record could only ever remember its
+// single MOST RECENT launch, never an earlier one that might still be
+// running. Real repro QA1 found: launch A (still running); launch B while
+// A is up (correctly warns, then B itself exits); launch C, with A
+// CONFIRMED still alive -- no warning, because B's own now-dead pid had
+// already silently replaced A's still-live record the moment B launched.
+// That's an ordinary duplicate-tab-then-relaunch sequence, not a contrived
+// edge case, and it's exactly the silencing direction Req 1a forbids,
+// reached a second way.
+//
+// FIX: a role's claims are now a LIST, not a single record. Every launch
+// prunes only the entries POSITIVELY confirmed gone (the identical bar
+// Req 1a already sets for warning -- an undeterminable entry is kept,
+// never discarded on a guess) and appends its own new claim, so a still-
+// running earlier launch's record survives a later launch's own claim
+// being written, and is only ever dropped once IT is confirmed to have
+// exited. `normalizeClaimList` reads a pre-0.2.13 single-object record (or
+// a bare object passed directly by a caller/test) as a one-element list,
+// so an existing role-claims.json from an older install, and every
+// existing single-object call site in this project's own test suite,
+// both keep working unchanged.
+function normalizeClaimList(raw) {
+  if (Array.isArray(raw)) return raw.filter((c) => c && typeof c === 'object');
+  if (raw && typeof raw === 'object') return [raw];
+  return [];
+}
+
+// Records that `roleId` is launching now, in `repoRoot`, returning every
+// PRIOR claim for that role not yet confirmed to have exited (see
+// normalizeClaimList's own comment above) so the caller can decide what to
+// print -- an empty array when none survive, including a role's first-
+// ever launch. `sessionId` is caller-supplied rather than generated in
+// here, so a caller with a real, already-computed identifier (the
+// interactive path's own deterministic UUIDv5 from session.js) can pass
+// that instead of a second, unrelated one -- this function only ever
+// records whatever identity it's given, it does not mint identity itself
+// except via the `nowFn`/id fallback a caller can also override for tests.
 //
 // Sprint 38, Req 1: also records `pid` (the CALLING process's own pid --
 // run-role.js's own launcher process, not the `claude` child it goes on
@@ -202,8 +250,9 @@ function recordRoleClaim(roleId, repoRoot, { sessionId, now = () => new Date(), 
   const lockPath = acquireClaimsLock(repoRoot);
   try {
     const claims = readClaims(repoRoot);
-    const previous = Object.prototype.hasOwnProperty.call(claims, roleId) ? claims[roleId] : null;
-    claims[roleId] = { sessionId: sessionId || null, startedAt: now().toISOString(), pid };
+    const existingList = normalizeClaimList(claims[roleId]);
+    const survivors = existingList.filter((claim) => isPidAlive(claim && claim.pid) !== false);
+    claims[roleId] = [...survivors, { sessionId: sessionId || null, startedAt: now().toISOString(), pid }];
     try {
       const file = claimsFilePath(repoRoot);
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -214,7 +263,7 @@ function recordRoleClaim(roleId, repoRoot, { sessionId, now = () => new Date(), 
       // block a launch. The launch proceeds either way; only the record of
       // it may be missing this once.
     }
-    return previous;
+    return survivors;
   } finally {
     releaseClaimsLock(lockPath);
   }
@@ -356,22 +405,39 @@ function reprobeAfterUnusablePs(pid) {
 // claim to warn about -- the common, correct case for a role's first
 // launch in a tree.
 //
-// Sprint 38, Req 1: also returns null -- suppressing the NOTE -- when
-// `previousClaim.pid` is POSITIVELY confirmed no longer running
-// (isPidAlive() returns exactly `false`). Every other outcome (still
-// running, or undeterminable -- an old-format record with no `pid` at
-// all, or a platform/check failure) still prints the identical wording
-// this function always has: Req 1a's own instruction is that absence of
-// the NOTE must never be inferred from anything less than a positive
-// determination, and the existing wording about what this record cannot
-// see already states that honestly -- it does not need new wording for
-// the undeterminable case, only to keep firing in it.
-function roleClaimWarning(roleLabel, previousClaim) {
-  if (!previousClaim) return null;
-  if (isPidAlive(previousClaim.pid) === false) return null;
+// Sprint 38, Req 1: also returns null -- suppressing the NOTE -- once
+// EVERY entry in `previousClaims` is POSITIVELY confirmed no longer
+// running (isPidAlive() returns exactly `false` for each). Any entry
+// still running, or undeterminable (an old-format record with no `pid` at
+// all, or a platform/check failure), keeps the NOTE firing: Req 1a's own
+// instruction is that absence of the NOTE must never be inferred from
+// anything less than a positive determination, for every recorded launch,
+// not only the most recent one.
+//
+// `previousClaims` accepts a single claim object (this function's own
+// original shape, and every existing direct caller/test in this project),
+// a list of them (recordRoleClaim's own current return value -- see its
+// comment for why a role can have more than one surviving claim), or
+// null/undefined -- `normalizeClaimList` handles all three identically.
+//
+// Sprint 38, second fix round (QA1 live-loop finding): when more than one
+// prior claim survives, the message still centers on the most recently
+// recorded one (last in the list -- recordRoleClaim appends, never
+// reorders) since that's almost always the one whoever reads this NOTE
+// just tried to relaunch over, and names how many OTHER still-open
+// claims exist alongside it rather than silently picking one and hiding
+// the rest.
+function roleClaimWarning(roleLabel, previousClaims) {
+  const stillOpen = normalizeClaimList(previousClaims).filter((claim) => isPidAlive(claim && claim.pid) !== false);
+  if (stillOpen.length === 0) return null;
+  const mostRecent = stillOpen[stillOpen.length - 1];
+  const otherCount = stillOpen.length - 1;
+  const otherClause = otherCount > 0
+    ? ` (plus ${otherCount} other earlier ${otherCount === 1 ? 'session' : 'sessions'} recorded here and not yet confirmed to have ended)`
+    : '';
   return (
     `NOTE: another ${roleLabel} session was recorded starting at ` +
-    `${previousClaim.startedAt} in this same tree${previousClaim.sessionId ? ` (session ${previousClaim.sessionId})` : ''}. ` +
+    `${mostRecent.startedAt} in this same tree${mostRecent.sessionId ? ` (session ${mostRecent.sessionId})` : ''}${otherClause}. ` +
     'This may be exactly what you intended (a second, deliberately separate session on a ' +
     'different sprint, or a session someone restarted) or a genuine collision -- this record ' +
     'only sees launches that went through this script, and only at the moment of launch, so a ' +

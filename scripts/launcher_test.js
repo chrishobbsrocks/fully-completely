@@ -127,35 +127,79 @@ test('role-claims: readClaims on a repo with no claims file yet returns {} rathe
   });
 });
 
-test('role-claims: a role\'s first claim returns null (nothing previous) and writes the file', () => {
+test('role-claims: a role\'s first claim returns [] (nothing previous) and writes the file as a one-element list', () => {
   withTmpRepoRoot((repoRoot) => {
-    const previous = recordRoleClaim('qa1', repoRoot, { sessionId: 'abc-123' });
-    assert.strictEqual(previous, null);
+    const previous = recordRoleClaim('qa1', repoRoot, { sessionId: 'abc-123', pid: killAndReapSync(1) });
+    assert.deepStrictEqual(previous, []);
     assert.ok(fs.existsSync(claimsFilePath(repoRoot)));
     const claims = readClaims(repoRoot);
-    assert.strictEqual(claims.qa1.sessionId, 'abc-123');
-    assert.match(claims.qa1.startedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.strictEqual(claims.qa1.length, 1);
+    assert.strictEqual(claims.qa1[0].sessionId, 'abc-123');
+    assert.match(claims.qa1[0].startedAt, /^\d{4}-\d{2}-\d{2}T/);
   });
 });
 
-test('role-claims: a role\'s second claim returns the FIRST claim, not null, and overwrites it with the new one', () => {
+test('role-claims: a role\'s second claim, once the FIRST is confirmed dead, prunes it -- returns [] and the file keeps only the new one', () => {
   withTmpRepoRoot((repoRoot) => {
     const firstNow = () => new Date('2026-01-01T00:00:00.000Z');
-    recordRoleClaim('qa1', repoRoot, { sessionId: 'first-session', now: firstNow, pid: 111 });
+    recordRoleClaim('qa1', repoRoot, { sessionId: 'first-session', now: firstNow, pid: killAndReapSync(1) });
     const secondNow = () => new Date('2026-01-02T00:00:00.000Z');
-    const previous = recordRoleClaim('qa1', repoRoot, { sessionId: 'second-session', now: secondNow, pid: 222 });
-    assert.deepStrictEqual(previous, { sessionId: 'first-session', startedAt: '2026-01-01T00:00:00.000Z', pid: 111 });
+    const previous = recordRoleClaim('qa1', repoRoot, { sessionId: 'second-session', now: secondNow, pid: killAndReapSync(1) });
+    assert.deepStrictEqual(previous, [], 'the first claim is confirmed gone -- nothing survives to warn about');
     const claims = readClaims(repoRoot);
-    assert.strictEqual(claims.qa1.sessionId, 'second-session', 'the record now reflects the newer launch, not the one being warned about');
-    assert.strictEqual(claims.qa1.pid, 222);
+    assert.strictEqual(claims.qa1.length, 1, 'a confirmed-dead claim must not be carried forward');
+    assert.strictEqual(claims.qa1[0].sessionId, 'second-session');
+  });
+});
+
+// Sprint 38, second fix round (QA1 live-loop finding): the exact A/B/C
+// sequence QA1 reproduced with real launches, at the recordRoleClaim/
+// roleClaimWarning level -- deterministic and fast, using a real spawned
+// process for "genuinely still running" (A) and a real killed-and-reaped
+// one for "confirmed exited" (B), rather than guessed pids. See the
+// dedicated real-subprocess version further down for the end-to-end
+// confirmation via actual `run-role.js` launches.
+test('role-claims: A survives being overwritten by B (still alive when B claims), then survives B\'s own exit too -- the exact QA1 A/B/C repro', () => {
+  withTmpRepoRoot((repoRoot) => {
+    const sleeperA = spawn('sleep', ['5']);
+    try {
+      // Launch A: first claim for this role, nothing to prune yet.
+      const beforeA = recordRoleClaim('qa1', repoRoot, { sessionId: 'A', pid: sleeperA.pid });
+      assert.deepStrictEqual(beforeA, []);
+
+      // Launch B, while A is still genuinely running: A must survive as a
+      // still-open claim, not be discarded just because B is newer.
+      const deadPidForB = killAndReapSync(1); // B's own launcher, confirmed to have since exited
+      const beforeB = recordRoleClaim('qa1', repoRoot, { sessionId: 'B', pid: deadPidForB });
+      assert.strictEqual(beforeB.length, 1, 'A must still be there for B to see');
+      assert.strictEqual(beforeB[0].sessionId, 'A');
+      assert.ok(roleClaimWarning('QA1', beforeB) !== null, 'B must still be warned -- A is genuinely running');
+
+      // Launch C, with A STILL alive and B now confirmed dead: this is
+      // QA1's exact repro step -- the OLD code returned only B's own
+      // (now-dead) record here, silently losing A's, and printed no
+      // warning. A must still be reported.
+      const deadPidForC = killAndReapSync(1);
+      const beforeC = recordRoleClaim('qa1', repoRoot, { sessionId: 'C', pid: deadPidForC });
+      assert.strictEqual(beforeC.length, 1, 'A must still be present -- confirmed dead B is pruned, but A never was');
+      assert.strictEqual(beforeC[0].sessionId, 'A', 'the surviving claim must actually be A\'s, not a stale B');
+      const warning = roleClaimWarning('QA1', beforeC);
+      assert.ok(warning !== null, 'C must be warned that A (still genuinely running) exists -- the exact bug QA1 found');
+      assert.match(warning, /NOTE: another QA1 session was recorded starting at/);
+
+      const claims = readClaims(repoRoot);
+      assert.strictEqual(claims.qa1.length, 2, 'A (still alive) and C (the newest launch) both on record; B was pruned once confirmed dead');
+    } finally {
+      sleeperA.kill('SIGKILL');
+    }
   });
 });
 
 test('role-claims: two DIFFERENT roles never see each other\'s claims (independent keys)', () => {
   withTmpRepoRoot((repoRoot) => {
-    recordRoleClaim('qa1', repoRoot, { sessionId: 'qa1-session' });
-    const previousForDifferentRole = recordRoleClaim('dev-team-1', repoRoot, { sessionId: 'dt1-session' });
-    assert.strictEqual(previousForDifferentRole, null, 'dev-team-1 launching for the first time must not see qa1\'s claim');
+    recordRoleClaim('qa1', repoRoot, { sessionId: 'qa1-session', pid: killAndReapSync(1) });
+    const previousForDifferentRole = recordRoleClaim('dev-team-1', repoRoot, { sessionId: 'dt1-session', pid: killAndReapSync(1) });
+    assert.deepStrictEqual(previousForDifferentRole, [], 'dev-team-1 launching for the first time must not see qa1\'s claim');
   });
 });
 
@@ -316,6 +360,20 @@ test('role-claims: roleClaimWarning names the earlier session\'s start time and 
   assert.match(warning, /only sees launches that went through this script/i);
   // Req 1: never gates.
   assert.match(warning, /never blocks/i);
+});
+
+test('roleClaimWarning: given a LIST of more than one still-open claim, centers the message on the most recent and names how many others exist, dropping none silently', () => {
+  const warning = roleClaimWarning('QA1', [
+    { sessionId: 'older', startedAt: '2026-01-01T00:00:00.000Z' }, // undeterminable (no pid) -- still counts as open
+    { sessionId: 'newest', startedAt: '2026-01-02T00:00:00.000Z' },
+  ]);
+  assert.match(warning, /2026-01-02T00:00:00\.000Z/, 'centers on the most recently recorded claim');
+  assert.match(warning, /newest/);
+  assert.match(warning, /plus 1 other earlier session/i, 'names the other still-open claim rather than dropping it');
+});
+
+test('roleClaimWarning: an empty list (every prior claim pruned already) is treated exactly like no previous claim -- null', () => {
+  assert.strictEqual(roleClaimWarning('QA1', []), null);
 });
 
 function withTmpHome(fn) {
@@ -2869,8 +2927,12 @@ test('run-role CLI (real subprocess, Req 1): a role\'s first launch writes a cla
     assert.strictEqual(stripPermissionRecordLine(first.stderr), '', 'a role\'s first launch in a tree has nothing to warn about');
     assert.ok(fs.existsSync(claimsPath), 'the claim must actually be written to disk');
     const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
-    assert.ok(claims.qa1 && claims.qa1.startedAt, 'the claim must record qa1 with a start time');
-    assert.ok(Number.isInteger(claims.qa1.pid) && claims.qa1.pid > 0, 'sprint 38, Req 1: the claim must record a real pid');
+    // Sprint 38, second fix round: a role's claims are now a list (see
+    // role-claims.js's own comment on normalizeClaimList) -- a first
+    // launch writes a one-element list, not a bare object.
+    assert.strictEqual(claims.qa1.length, 1);
+    assert.ok(claims.qa1[0].startedAt, 'the claim must record qa1 with a start time');
+    assert.ok(Number.isInteger(claims.qa1[0].pid) && claims.qa1[0].pid > 0, 'sprint 38, Req 1: the claim must record a real pid');
   });
 });
 
@@ -2898,7 +2960,10 @@ test('run-role CLI (real subprocess, sprint 38 Req 1): a SEQUENTIAL second launc
       'the previous launcher process has genuinely exited by now -- no NOTE should fire (sprint 38, Req 1)'
     );
     const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
-    assert.ok(Number.isInteger(claims.qa1.pid), 'the claim must still be updated to the new (second) launch\'s own pid');
+    // The first launcher is confirmed exited by now, so it's pruned --
+    // exactly one entry, the second launch's own.
+    assert.strictEqual(claims.qa1.length, 1, 'the confirmed-dead first claim must not be carried forward');
+    assert.ok(Number.isInteger(claims.qa1[0].pid), 'the claim must still be updated to the new (second) launch\'s own pid');
   });
 });
 
@@ -2957,6 +3022,68 @@ test('run-role CLI (real subprocess, sprint 38 Req 1): a second launch WHILE the
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('run-role CLI (real subprocess, sprint 38 second fix round): the exact QA1 live-loop A/B/C repro -- A still running, B claims then exits, C must still be warned about A', () => {
+  // QA1's own live-loop finding, end to end with real launches: launch A
+  // (stays running); launch B while A is up (correctly warns, then B
+  // itself exits); launch C, with A still genuinely running and B now
+  // confirmed dead. Before this fix round, C saw nothing -- B's own claim,
+  // once it became a dead pid, had already silently overwritten A's still-
+  // live one the moment B launched, so a role whose record simply hadn't
+  // been the LATEST one anymore was invisible to every later launch, no
+  // matter how alive it still genuinely was.
+  const slowDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-fake-claude-slow-'));
+  const slowScript = [
+    '#!/bin/sh',
+    'if [ "$1" = "--version" ]; then exit 0; fi',
+    'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then echo \'{"loggedIn": true}\'; exit 0; fi',
+    'sleep 6', // long enough to still be running through the whole B+C sequence below
+    `printf '%s' '${FAKE_JSON_RESULT}'`,
+    'exit 0',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(slowDir, 'claude'), slowScript);
+  fs.chmodSync(path.join(slowDir, 'claude'), 0o755);
+  try {
+    withFakeClaude(true, ({ dir: fastDir }) => {
+      const claimsPath = freshRoleClaimsPathOverride();
+      const slowEnv = { ...process.env, PATH: slowDir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath };
+      const fastEnv = { ...process.env, PATH: fastDir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath };
+
+      // A: launched async, stays alive (blocked on its own 6-second child)
+      // for the rest of this test.
+      const childA = spawn(process.execPath, [RUN_ROLE_PATH, '--headless', '--agent', 'qa1', '--sprint', '4'], { cwd: REPO_ROOT, env: slowEnv });
+      try {
+        const deadline = Date.now() + 5000;
+        while (!fs.existsSync(claimsPath) && Date.now() < deadline) execFileSync('sleep', ['0.05']);
+        assert.ok(fs.existsSync(claimsPath), 'A should have recorded its claim by now');
+
+        // B: launched and runs to completion (fast fake claude, spawnSync)
+        // while A is still up. Must warn about A, then B itself is fully
+        // exited by construction once this call returns.
+        const b = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], fastEnv);
+        assert.strictEqual(b.status, 0);
+        assert.match(stripPermissionRecordLine(b.stderr), /NOTE: another QA1 session was recorded starting at/, 'B must be warned -- A is genuinely running');
+
+        // C: launched after B has exited, with A still genuinely running.
+        // This is QA1's exact repro step -- C must still see A.
+        const c = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], fastEnv);
+        assert.strictEqual(c.status, 0);
+        assert.match(
+          stripPermissionRecordLine(c.stderr), /NOTE: another QA1 session was recorded starting at/,
+          'C must still be warned about A -- A never exited, and B being newer (and now dead) must not have silently erased A\'s own still-open record'
+        );
+
+        const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
+        assert.strictEqual(claims.qa1.length, 2, 'A (still alive) and C (the newest launch) both on record; B was pruned once confirmed dead');
+      } finally {
+        childA.kill('SIGKILL');
+      }
+    });
+  } finally {
+    fs.rmSync(slowDir, { recursive: true, force: true });
   }
 });
 
@@ -3059,7 +3186,11 @@ test('run-role CLI (real subprocess, sprint 38 fix round): FC: Start All -- all 
     const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
     for (const roleId of roleIds) {
       assert.ok(claims[roleId], `${roleId}'s own claim record must have survived the concurrent launch -- got keys: ${Object.keys(claims).join(', ')}`);
-      assert.ok(Number.isInteger(claims[roleId].pid) && claims[roleId].pid > 0, `${roleId}'s record must have a real pid`);
+      // Sprint 38, second fix round: a role's claims are now a list -- a
+      // first, uncontested launch (every role's own case here) writes a
+      // one-element list.
+      assert.strictEqual(claims[roleId].length, 1, `${roleId}'s record should have exactly one entry -- its own single launch`);
+      assert.ok(Number.isInteger(claims[roleId][0].pid) && claims[roleId][0].pid > 0, `${roleId}'s record must have a real pid`);
     }
     assert.strictEqual(Object.keys(claims).length, roleIds.length, 'no extra or duplicate keys -- exactly the six roles');
   });

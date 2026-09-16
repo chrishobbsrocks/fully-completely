@@ -15,36 +15,58 @@ had already gone out by the time it was ready. It was corrected to
 
 ## 0.2.13 — Sprint 38 (Corrects 0.2.12, live-loop fix)
 
-Found by LiveQA's own live test of 0.2.12: `FC: Start All` launches all
-six roles' launcher processes within the same instant, and every one of
-them independently read-modify-writes the same `.claude/role-claims.json`
-with no coordination at all. Confirmed live and in scratch installs: a
-real six-way launch lost 3-5 of the 6 claim records on both 0.2.11 and
-0.2.12 — cosmetic on 0.2.11 (a lost record only ever meant a missing
-warning), but dangerous starting with 0.2.12's own Req 1: a role whose
-record was clobbered by another writer now reads back someone else's
-(possibly dead) pid, silencing the relaunch NOTE for a role whose own
-session is genuinely still running. LiveQA's own live criterion (launch a
-role, then launch it again while the first is still up — the NOTE should
-appear) failed live for pipeman, dev-team-2, and qa1 for exactly this
-reason.
+Two defects in `.claude/role-claims.json`'s own bookkeeping, found across
+LiveQA's live test of 0.2.12 and QA1's own live-loop audit of the first
+fix, both in the same dangerous direction: a role whose session is
+genuinely still running gets its relaunch NOTE silenced anyway.
 
-- **Corrects:** `recordRoleClaim` (`scripts/launcher/role-claims.js`) now
-  guards its whole read-modify-write with an exclusive, atomic file lock
-  (`fs.openSync(lockPath, 'wx')` — `O_CREAT|O_EXCL` on POSIX, `CREATE_NEW`
-  on Windows), with staleness detection so a lock left behind by a
-  crashed or killed holder doesn't block every future launch forever, and
-  a bounded overall wait so a launch this can't lock (permissions, an
-  unsupported filesystem) still proceeds unlocked rather than hanging —
-  no worse than every launch already was before this fix, never a new way
-  to block one.
-- Added a concurrent-launch test (`scripts/launcher_test.js`) that starts
-  all six roles' real launcher processes at essentially the same instant
-  and asserts all six claim records survive — the shape the previous test
-  suite didn't cover (every existing case launched one role at a time).
-  Confirmed as a real regression test, not just a passing one: run
-  against the lock disabled, it reliably fails, losing 4-5 of the 6
-  records, matching LiveQA's own live findings.
+- **Corrects (LiveQA, round 1):** `FC: Start All` launches all six roles'
+  launcher processes within the same instant, and every one of them
+  independently read-modify-writes the same role-claims file with no
+  coordination at all. Confirmed live and in scratch installs: a real
+  six-way launch lost 3-5 of the 6 claim records on both 0.2.11 and
+  0.2.12 — cosmetic on 0.2.11 (a lost record only ever meant a missing
+  warning), but dangerous starting with 0.2.12's own Req 1: a role whose
+  record was clobbered by another writer now reads back someone else's
+  (possibly dead) pid, silencing the relaunch NOTE for a role whose own
+  session is genuinely still running. LiveQA's own live criterion (launch
+  a role, then launch it again while the first is still up — the NOTE
+  should appear) failed live for pipeman, dev-team-2, and qa1 for exactly
+  this reason. Fixed: `recordRoleClaim` now guards its whole read-modify-
+  write with an exclusive, atomic file lock (`fs.openSync(lockPath,
+  'wx')` — `O_CREAT|O_EXCL` on POSIX, `CREATE_NEW` on Windows), with
+  staleness detection so a lock left behind by a crashed or killed holder
+  doesn't block every future launch forever, and a bounded overall wait so
+  a launch that can't lock (permissions, an unsupported filesystem) still
+  proceeds unlocked rather than hanging — no worse than every launch
+  already was before this fix, never a new way to block one.
+- **Corrects (QA1, live-loop audit of the fix above):** even with the lock
+  in place, a role's claims file still kept only its single MOST RECENT
+  launch, unconditionally overwritten every time — a second way to reach
+  the identical silencing. Real repro: launch A (still running); launch B
+  while A is up (correctly warns, then B itself exits); launch C, with A
+  still genuinely alive — no warning, because B's own now-dead pid had
+  already replaced A's still-live record the moment B launched. An
+  ordinary duplicate-tab-then-relaunch sequence, not a contrived edge
+  case. Fixed: a role's claims are now a list, not a single record — every
+  launch prunes only the entries POSITIVELY confirmed gone (the same bar
+  already used for whether to warn) and appends its own, so a still-
+  running earlier launch's record survives a later launch's own claim
+  being written, and is only ever dropped once IT is confirmed to have
+  exited. A pre-0.2.13 single-record file, and every existing single-
+  object caller, are read as a one-element list, unchanged.
+- Also closes a related TOCTOU race in the lock's own stale-lock recovery
+  (QA1, minor): two processes racing to steal the same abandoned lock
+  could both succeed, one unlinking the other's freshly re-acquired lock
+  out from under it. Fixed with an atomic `renameSync`-based claim instead
+  of a blind `unlinkSync` — only one racing process's rename can ever
+  succeed against the same source path.
+- Added a concurrent-launch test that starts all six roles' real launcher
+  processes at essentially the same instant and asserts all six claim
+  records survive, and an end-to-end real-subprocess test reproducing the
+  exact A/B/C sequence above. Both confirmed as real regression tests, not
+  just passing ones: run against the fix disabled, each reliably fails,
+  matching the live findings that motivated it.
 - Windows was not covered by LiveQA's round-1 live test and needs
   covering in the retest, including whether `claude` itself outlives the
   launcher there — the orphan guard 0.2.12 added is POSIX-only.
