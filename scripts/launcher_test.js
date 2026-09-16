@@ -2960,6 +2960,111 @@ test('run-role CLI (real subprocess, sprint 38 Req 1): a second launch WHILE the
   }
 });
 
+// Single-quotes a string for safe embedding in a POSIX `sh` script (the
+// values passed through here -- REPO_ROOT, RUN_ROLE_PATH, process.execPath,
+// role ids, temp-file paths -- are all this project's own real paths and
+// id strings, never external input, but quoted properly regardless rather
+// than assumed safe).
+function shQuote(str) {
+  return `'${String(str).replace(/'/g, `'\\''`)}'`;
+}
+
+test('run-role CLI (real subprocess, sprint 38 fix round): FC: Start All -- all six roles launched at essentially the same instant all keep their own claim record (LiveQA round 1 finding)', () => {
+  // The real-world shape LiveQA found losing records: "FC: Start All"
+  // launches all six roles' own launcher processes within the same
+  // instant, ALL writing to the SAME .claude/role-claims.json with no
+  // coordination -- confirmed live and in scratch installs to lose 3-5 of
+  // 6 records before the lock fix. This test reproduces exactly that
+  // shape: six real `run-role.js` subprocesses, all sharing ONE claims-
+  // file override -- and asserts every single one survives with its OWN
+  // correct pid, not another role's or a partial write.
+  //
+  // WHY THIS SPAWNS THROUGH A SHELL WRAPPER, NOT SIX Node `spawn()` CALLS
+  // POLLED DIRECTLY -- found by running it, not assumed: an earlier
+  // version of this test used `spawn()` six times and then busy-polled
+  // each child's own `exitCode`/`signalCode` in a loop sleeping via
+  // `execFileSync('sleep', ...)` between checks. That version hung
+  // (every child stuck reading `null` for exitCode) whether or not
+  // role-claims.js's own lock was involved at all -- confirmed by an
+  // isolated probe with no role-claims.js code in the loop whatsoever:
+  // spawn one trivial child, then busy-poll its `exitCode` from a tight
+  // synchronous loop (`execFileSync`, and separately `Atomics.wait`, tried
+  // independently) -- over 2,000+ iterations across 3 real seconds,
+  // `exitCode` never once left `null`, even though the child had long
+  // since exited (confirmed separately: the same child, left alone with
+  // no polling loop at all, exits and is reaped normally in well under a
+  // second). The cause is a genuine Node.js constraint, not a bug in this
+  // project's own code: Node only runs the internal callback that sets a
+  // ChildProcess's `exitCode` and fires its `'exit'` event when the
+  // JS call stack returns control to the event loop -- and a synchronous
+  // while-loop, no matter what it sleeps with in between iterations, never
+  // does that. This test file's own `test()` harness has no async/await
+  // support anywhere in it (by design), so there was never going to be a
+  // correct way to `await` six `spawn()`ed children from inside it.
+  //
+  // THE FIX: push both "start all six at once" and "wait for all six" into
+  // ONE real `/bin/sh` child, started via the ordinary, already-proven
+  // `spawnSync` path this file uses everywhere else. The wrapper script
+  // backgrounds all six real `run-role.js` invocations with `&` -- which
+  // is what actually gives this test its "essentially the same instant"
+  // property, at the OS level, not at the Node event-loop level -- then
+  // waits on each one individually with POSIX `wait $pid`, which reports
+  // that job's own real exit status without needing any other job to have
+  // finished first. None of this depends on Node ever being told about
+  // the six inner processes at all; `spawnSync` only ever has to wait on
+  // its own ONE direct child (the wrapper shell), the same shape every
+  // other real-subprocess test in this file already uses successfully.
+  withFakeClaude(true, ({ dir }) => {
+    const claimsPath = freshRoleClaimsPathOverride();
+    const env = {
+      ...process.env,
+      PATH: dir,
+      FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath,
+    };
+    const roleIds = RUN_ROLE_ROLES.map((r) => r.id);
+    const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-start-all-output-'));
+    const lines = [];
+    roleIds.forEach((roleId, i) => {
+      lines.push(
+        `${shQuote(process.execPath)} ${shQuote(RUN_ROLE_PATH)} --headless --agent ${shQuote(roleId)} --sprint 4 ` +
+        `>${shQuote(path.join(outputDir, `${i}.stdout`))} 2>${shQuote(path.join(outputDir, `${i}.stderr`))} &`
+      );
+      lines.push(`pid${i}=$!`);
+    });
+    roleIds.forEach((roleId, i) => {
+      lines.push(`wait $pid${i}`);
+      lines.push(`echo ${shQuote(roleId)} $?`);
+    });
+    const script = lines.join('\n') + '\n';
+    const wrapperResult = spawnSync('/bin/sh', ['-c', script], { cwd: REPO_ROOT, env, encoding: 'utf8', timeout: 20000 });
+    assert.ok(!wrapperResult.error, `the wrapper shell itself must run cleanly -- ${wrapperResult.error && wrapperResult.error.message}`);
+    const exitCodes = {};
+    for (const line of wrapperResult.stdout.trim().split('\n')) {
+      const [roleId, code] = line.trim().split(/\s+/);
+      exitCodes[roleId] = Number(code);
+    }
+    for (let i = 0; i < roleIds.length; i++) {
+      const roleId = roleIds[i];
+      if (exitCodes[roleId] !== 0) {
+        // Surfaced only on an actual failure, to save whoever's debugging
+        // it a second run -- each role's own real stdout/stderr from this
+        // exact failing run, not a re-run's (which could easily not
+        // reproduce the same race).
+        console.error(`${roleId} stdout: ${fs.existsSync(path.join(outputDir, `${i}.stdout`)) ? fs.readFileSync(path.join(outputDir, `${i}.stdout`), 'utf8') : '(missing)'}`);
+        console.error(`${roleId} stderr: ${fs.existsSync(path.join(outputDir, `${i}.stderr`)) ? fs.readFileSync(path.join(outputDir, `${i}.stderr`), 'utf8') : '(missing)'}`);
+      }
+      assert.strictEqual(exitCodes[roleId], 0, `${roleId}'s launch must have succeeded (all six reported: ${JSON.stringify(exitCodes)})`);
+    }
+    fs.rmSync(outputDir, { recursive: true, force: true });
+    const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
+    for (const roleId of roleIds) {
+      assert.ok(claims[roleId], `${roleId}'s own claim record must have survived the concurrent launch -- got keys: ${Object.keys(claims).join(', ')}`);
+      assert.ok(Number.isInteger(claims[roleId].pid) && claims[roleId].pid > 0, `${roleId}'s record must have a real pid`);
+    }
+    assert.strictEqual(Object.keys(claims).length, roleIds.length, 'no extra or duplicate keys -- exactly the six roles');
+  });
+});
+
 test('run-role CLI (real subprocess, Req 1): a DIFFERENT role launching after qa1 is a first launch for IT -- no warning', () => {
   withFakeClaude(true, ({ dir }) => {
     const claimsPath = freshRoleClaimsPathOverride();

@@ -62,6 +62,105 @@ function claimsFilePath(repoRoot) {
   return path.join(repoRoot, CLAIMS_RELATIVE_PATH);
 }
 
+// Sprint 38 fix round (LiveQA round 1 finding): FC: Start All launches
+// all six roles at essentially the same instant, each independently
+// read-modify-writing the SAME .claude/role-claims.json with no
+// coordination at all. Confirmed live and in scratch installs: launching
+// six roles concurrently loses 3-5 of the 6 claim records on both 0.2.11
+// and 0.2.12 (the last writer's own full read-then-write silently
+// discards whatever any OTHER concurrent writer had already saved,
+// classic lost-update). On 0.2.11 this was cosmetic (a surviving STALE
+// record still fired the NOTE unconditionally, so losing records only
+// ever produced FEWER warnings, never a wrong one). Sprint 38's own Req 1
+// changed that: a record now gets read for pid liveness, so a role whose
+// record was overwritten with someone ELSE's now-dead pid (or simply
+// missing) reads as "the previous session has ended" even while THAT
+// role's own current session is genuinely running -- exactly the
+// dangerous silencing direction Req 1a exists to forbid, now reachable
+// through ordinary concurrent use, not a contrived edge case.
+//
+// FIX: an exclusive, atomic file lock around the whole read-modify-write,
+// using `fs.openSync(lockPath, 'wx')` -- O_CREAT|O_EXCL on POSIX,
+// CREATE_NEW on Windows -- a well-established, dependency-free,
+// genuinely cross-platform mutual-exclusion primitive (no native addon,
+// no new package; this project's own established preference). A holder
+// that crashes or is killed before releasing leaves the lock file behind
+// forever otherwise, so a lock older than LOCK_STALE_MS is treated as
+// abandoned and stolen -- generous compared to how fast the actual
+// critical section runs (read one small JSON file, mutate one key,
+// write it back), short enough that a genuinely crashed holder never
+// blocks the others for long. Bounded overall wait (LOCK_MAX_WAIT_MS):
+// this function must never hang a launch indefinitely -- Sprint 25's own
+// "it warns; it never gates" extends to blocking, not only to write
+// failure, so giving up and proceeding UNLOCKED (same risk as before this
+// fix, not a new one) is the correct failure mode over hanging forever.
+// `Atomics.wait` on a throwaway SharedArrayBuffer is a genuine, CPU-idle
+// synchronous sleep -- confirmed directly, no native dependency -- used
+// instead of a busy-spin while retrying, since this function's own
+// call site (run-role.js's synchronous preflight, before any async work
+// begins) has no access to `await`.
+const LOCK_SUFFIX = '.lock';
+const LOCK_STALE_MS = 10000;
+const LOCK_MAX_WAIT_MS = 3000;
+const LOCK_RETRY_INTERVAL_MS = 20;
+
+function syncSleep(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch (_) {
+    // Atomics.wait can refuse to run on the main thread in some
+    // embeddings -- if so, fall through immediately rather than throw;
+    // the retry loop above still bounds total wait time either way.
+  }
+}
+
+// Returns the lock path on success (pass it to releaseClaimsLock when
+// done), or null if the lock could not be acquired within
+// LOCK_MAX_WAIT_MS or for any other reason (permissions, a filesystem
+// that doesn't support exclusive create, etc.) -- callers proceed
+// WITHOUT the lock in that case, exactly as unprotected as this file was
+// before this fix, never blocking or failing the launch over it.
+function acquireClaimsLock(repoRoot) {
+  const lockPath = claimsFilePath(repoRoot) + LOCK_SUFFIX;
+  const deadline = Date.now() + LOCK_MAX_WAIT_MS;
+  for (;;) {
+    try {
+      fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+      const fd = fs.openSync(lockPath, 'wx');
+      fs.closeSync(fd);
+      return lockPath;
+    } catch (err) {
+      if (!err || err.code !== 'EEXIST') return null; // some other failure -- don't block on it
+      try {
+        const age = Date.now() - fs.statSync(lockPath).mtimeMs;
+        if (age > LOCK_STALE_MS) {
+          try {
+            fs.unlinkSync(lockPath);
+          } catch (_) {
+            // Someone else already cleared it, or a race in removing it --
+            // either way, loop around and try to acquire again.
+          }
+          continue;
+        }
+      } catch (_) {
+        continue; // the lock vanished between EEXIST and stat -- try again
+      }
+      if (Date.now() >= deadline) return null;
+      syncSleep(LOCK_RETRY_INTERVAL_MS);
+    }
+  }
+}
+
+function releaseClaimsLock(lockPath) {
+  if (!lockPath) return;
+  try {
+    fs.unlinkSync(lockPath);
+  } catch (_) {
+    // Already gone (e.g. raced with a staleness steal from another
+    // process) -- nothing left to clean up.
+  }
+}
+
 function readClaims(repoRoot) {
   try {
     const raw = fs.readFileSync(claimsFilePath(repoRoot), 'utf8');
@@ -93,20 +192,32 @@ function readClaims(repoRoot) {
 // can record an already-known, controlled pid instead of this process's
 // own.
 function recordRoleClaim(roleId, repoRoot, { sessionId, now = () => new Date(), pid = process.pid } = {}) {
-  const claims = readClaims(repoRoot);
-  const previous = Object.prototype.hasOwnProperty.call(claims, roleId) ? claims[roleId] : null;
-  claims[roleId] = { sessionId: sessionId || null, startedAt: now().toISOString(), pid };
+  // Sprint 38 fix round: the read-modify-write below is now guarded by
+  // acquireClaimsLock()/releaseClaimsLock() -- see their own comment for
+  // the concurrent-launch data-loss finding this closes. Falls through
+  // and proceeds UNLOCKED if the lock can't be acquired at all (permission
+  // failure, no space for the lock file, etc.) -- no worse than this
+  // function's own behavior before this fix, never a reason to fail the
+  // launch.
+  const lockPath = acquireClaimsLock(repoRoot);
   try {
-    const file = claimsFilePath(repoRoot);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(claims, null, 2) + '\n');
-  } catch (_) {
-    // Sprint 25, Req 1's own "it warns; it never gates" -- a write
-    // failure (read-only filesystem, permissions, disk full) must never
-    // block a launch. The launch proceeds either way; only the record of
-    // it may be missing this once.
+    const claims = readClaims(repoRoot);
+    const previous = Object.prototype.hasOwnProperty.call(claims, roleId) ? claims[roleId] : null;
+    claims[roleId] = { sessionId: sessionId || null, startedAt: now().toISOString(), pid };
+    try {
+      const file = claimsFilePath(repoRoot);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(claims, null, 2) + '\n');
+    } catch (_) {
+      // Sprint 25, Req 1's own "it warns; it never gates" -- a write
+      // failure (read-only filesystem, permissions, disk full) must never
+      // block a launch. The launch proceeds either way; only the record of
+      // it may be missing this once.
+    }
+    return previous;
+  } finally {
+    releaseClaimsLock(lockPath);
   }
-  return previous;
 }
 
 // Sprint 38, Req 1/1a/1b: whether `pid` demonstrably still refers to a
@@ -277,4 +388,6 @@ module.exports = {
   recordRoleClaim,
   roleClaimWarning,
   isPidAlive,
+  acquireClaimsLock,
+  releaseClaimsLock,
 };

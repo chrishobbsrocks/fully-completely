@@ -13,6 +13,42 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.13 — Sprint 38 (Corrects 0.2.12, live-loop fix)
+
+Found by LiveQA's own live test of 0.2.12: `FC: Start All` launches all
+six roles' launcher processes within the same instant, and every one of
+them independently read-modify-writes the same `.claude/role-claims.json`
+with no coordination at all. Confirmed live and in scratch installs: a
+real six-way launch lost 3-5 of the 6 claim records on both 0.2.11 and
+0.2.12 — cosmetic on 0.2.11 (a lost record only ever meant a missing
+warning), but dangerous starting with 0.2.12's own Req 1: a role whose
+record was clobbered by another writer now reads back someone else's
+(possibly dead) pid, silencing the relaunch NOTE for a role whose own
+session is genuinely still running. LiveQA's own live criterion (launch a
+role, then launch it again while the first is still up — the NOTE should
+appear) failed live for pipeman, dev-team-2, and qa1 for exactly this
+reason.
+
+- **Corrects:** `recordRoleClaim` (`scripts/launcher/role-claims.js`) now
+  guards its whole read-modify-write with an exclusive, atomic file lock
+  (`fs.openSync(lockPath, 'wx')` — `O_CREAT|O_EXCL` on POSIX, `CREATE_NEW`
+  on Windows), with staleness detection so a lock left behind by a
+  crashed or killed holder doesn't block every future launch forever, and
+  a bounded overall wait so a launch this can't lock (permissions, an
+  unsupported filesystem) still proceeds unlocked rather than hanging —
+  no worse than every launch already was before this fix, never a new way
+  to block one.
+- Added a concurrent-launch test (`scripts/launcher_test.js`) that starts
+  all six roles' real launcher processes at essentially the same instant
+  and asserts all six claim records survive — the shape the previous test
+  suite didn't cover (every existing case launched one role at a time).
+  Confirmed as a real regression test, not just a passing one: run
+  against the lock disabled, it reliably fails, losing 4-5 of the 6
+  records, matching LiveQA's own live findings.
+- Windows was not covered by LiveQA's round-1 live test and needs
+  covering in the retest, including whether `claude` itself outlives the
+  launcher there — the orphan guard 0.2.12 added is POSIX-only.
+
 ## 0.2.12 — Sprint 38
 
 Workshop readiness: stop a clean relaunch warning about a session that
