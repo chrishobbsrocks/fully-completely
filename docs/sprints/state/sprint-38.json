@@ -5,7 +5,7 @@
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "716a9616f882c13e396a0d4abbdc054b625d1d1c115e4c77db737763d57bed7d",
   "qa1_audited_tree_hash": "1aa3be632029b0bd4336fbece82b168233c371b79efba94cf3bd5f778fce265c",
-  "last_shipped_commit": "a21fcbd1627ac7c7429e54ae629f4f976da781b3",
+  "last_shipped_commit": "30507ce2e30db5e0e951fb78f64093e02a91d5ad",
   "groundtruth_result": "FAIL",
   "live_loop_audit_trees": [
     {
@@ -85,11 +85,17 @@
       "actor": "qa1",
       "event": "live_loop_audit",
       "detail": "PASS: QA1 live-loop audit, sprint 38, commit 30507ce. Verdict: PASS for reship of this exact tree, with one named residual (item 3).\n\nWHAT THIS COVERS. The tree delta from 07a4b9c (QA1 CONDITIONAL at 52d5988) to 30507ce, outside bookkeeping: scripts/launcher/role-claims.js, scripts/launcher_test.js and CHANGELOG.md. The sprint file was re-read and is unchanged since e573e96.\n\n1. Pid-less claims warning forever on upgrade (HIGH): FIXED, and demonstrated fixed.\n - recordRoleClaim returns notConfirmedDead (warns, including pid-less entries, per Req 1a) but writes back only the entries with a trackable pid.\n - Real run-role.js repro (headless, stand-in claude, claims override), with the planted 0.2.11-shape file {\"qa1\": {\"sessionId\": \"old-0-2-11-session\", \"startedAt\": \"2026-09-10T09:00:00.000Z\"}}: three sequential relaunches gave NOTE lines 1, 0, 0. The file afterward holds only the latest pid-bearing claim. Same result as 7f71f41, and 07a4b9c's 1/1/1 is gone.\n - A modern entry whose liveness is momentarily undeterminable is still retained, which is correct.\n\n2. The A/B/C path at 30507ce: still correct, with real run-role.js processes.\n - A runs a 20 s session. B launches during A and prints the claims NOTE. C launches with A confirmed alive (kill -0) and prints the claims NOTE. After A is killed, D prints no claims NOTE.\n - The second NOTE line in each output is the unrelated CLI-version staleness notice (claude 2.1.273).\n\n3. Stale-lock steal: the two-process race QA1 demonstrated last round is CLOSED; a narrower three-process race is a named residual (LOW, accepted, not blocking).\n - Re-ran last round's exact interleaving at 30507ce. A holds the lock. B's rename catches A's fresh lock, the inode and mtime identity check detects the mismatch, and B restores it and keeps retrying (it timed out only because the demo's A never releases). \"BOTH hold at once: false\".\n - Residual, demonstrated: POSIX renameSync REPLACES an existing destination. So if a third contender C creates a lock in the microsecond window between B's rename-away and B's rename-back, B's restore overwrites C's lock file and both A and C believe they hold it. Interleaving shown with the real acquireClaimsLock via a statSync hook (C runs its full acquire at B's post-rename stat): \"A and C both believe they hold the lock: true\".\n - Reachability: a crashed holder must have left a lock at least 10 s old, AND three contenders must hit that window. Consequence: the pre-lock lost-update this round's lock exists to prevent, never a hang or a launch failure.\n - The CHANGELOG's claim is accurate for the race it names (the one QA1 confirmed). The code comment's parenthetical \"(Couldn't restore it ... the path is now occupied by yet another fresh lock)\" is wrong about rename semantics, because rename does not fail on an occupied destination.\n - Recommended follow-up, not required here: restore with fs.linkSync(stolen, lockPath), which fails with EEXIST instead of clobbering, then unlink the stolen path. Or accept the residual and correct that comment. Routed to Master Controller for a post-workshop sprint.\n\n4. Negative control, run by QA1: with 07a4b9c's role-claims.js under 30507ce's tests, exactly the three new tests FAIL:\n - \"warns about a planted pid-less claim once, then drops it\"\n - \"a lock recreated between this attempt's own staleness check and its rename must not be stolen\"\n - the real-subprocess pre-0.2.13 pid-less test\n With 30507ce restored, all pass.\n\n5. Tests at 30507ce in a clean clone. node scripts/launcher_test.js: ALL LAUNCHER TESTS PASSED, 3 of 3 runs. bash scripts/smoke_test.sh: ALL SMOKE TESTS PASSED, exit 0.\n\n6. CHANGELOG 0.2.13 describes all three corrections as they actually landed. package.json stays 0.2.13 against published 0.2.12.\n\nADVISORY FOR LIVEQA, Windows. The list design retains any entry whose recorded pid is alive. Windows recycles PIDs quickly, so a dead launcher's pid reused by an unrelated long-lived process would keep an entry and fire a false NOTE for as long as that process lives. This is the safe direction and the same exposure 0.2.12 already had for a single record, but it is worth watching during the Windows relaunch checks. Carried items: run Windows fully; after the trash can or Terminate All, confirm claude itself is gone via Get-Process; do the real 0.2.11 to fix-version upgrade relaunch check (NOTE at most once); and include the duplicate-then-close-then-relaunch sequence. | commit=30507ce2e30db5e0e951fb78f64093e02a91d5ad"
+    },
+    {
+      "ts": "2026-09-16T17:52:08+00:00",
+      "actor": "pipeman",
+      "event": "reshipped",
+      "detail": "commit=30507ce2e30db5e0e951fb78f64093e02a91d5ad | ci=green: 1 CI run(s) for 30507ce2e30db5e0e951fb78f64093e02a91d5ad all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-16T17:46:38+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-16T17:52:08+00:00"
   }
 }
