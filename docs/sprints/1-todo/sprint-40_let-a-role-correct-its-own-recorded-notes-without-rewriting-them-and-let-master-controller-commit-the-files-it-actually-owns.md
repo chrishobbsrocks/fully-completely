@@ -94,17 +94,32 @@ escape hatch.
    including `..` traversal, symlinks out, and prefix lookalikes like
    `docs/sprints-evil/x`. The allowlist is a named constant with a comment
    stating why each entry is Master Controller-owned. The additions are:
-   `CLAUDE.md`, and a Master Controller decisions log. Resolve both through the
+   `CLAUDE.md` (a fixed entry — every project has one, in the same place), and
+   a Master Controller decisions log (declared per project, Req 2b). Resolve both through the
    same real-path check the existing boundary uses — an entry is a specific path,
    never a directory wildcard that swallows a subtree.
 
-   **2b. The decisions-log path must be discoverable, not guessed.** A downstream
-   project chooses where its decisions log lives (ShowOffTest used
-   `docs/rebuild/mc-decisions.md`). Either standardise one path and document it,
-   or read it from the project's own declared configuration the way sprint 17
-   reads the declared test command — pick one, state the choice and its reasoning
-   in a comment, and do not accept a caller-supplied path that bypasses the
-   allowlist.
+   **2b. The decisions-log path is read from the project's own declared
+   configuration, with a standard default, and is validated rather than
+   trusted.** Settled with FMC's Master Controller (18 September), whose
+   reasoning stands: the path belongs to the project, not the framework —
+   ShowOffTest keeps its decisions with its rebuild material
+   (`docs/rebuild/mc-decisions.md`) and another project will want
+   `docs/decisions.md` — so standardising one path would make downstream Master
+   Controllers move files to suit the tool. Read the declaration the way sprint
+   17 reads the project's declared test command, and fall back to a documented
+   standard default so a project that declares nothing still works with no
+   config at all.
+
+   **Validate the declared value at the point of use, every time, never trust
+   it:** it must resolve to exactly one file (not a directory, not a glob, not a
+   list), inside the repository, not under `.git/`, and not any path the install
+   manifest owns. A declaration failing any of those is refused with a message
+   naming which check failed — it does not silently fall back to the default,
+   because a project that declared something and got a different file committed
+   is worse than a refusal. This is what keeps Req 2c's property intact: the
+   widening is one operator-declared, use-time-validated file, not a run-time
+   escape hatch.
 
    **2c. No escape hatch.** No flag, environment variable or argument may widen
    the allowlist at run time. Sprint 36's measurement is the reason: the boundary
@@ -144,8 +159,11 @@ escape hatch.
   `liveqa.md` all say it is not a verdict change and name the re-run route.
 - **Req 2** — **2a** the allowlist is a constant with per-entry reasoning;
   traversal, symlink-out and prefix-lookalike refusals are unchanged and tested.
-  **2b** the chosen approach is stated in a comment; a caller-supplied path
-  cannot bypass the list. **2c** grep the diff for any run-time widening —
+  **2b** the declaration is read like sprint 17's test command, with a
+  documented default; each validation (single file, inside the repo, not under
+  `.git/`, not an install-manifest path, not a directory) is enforced in code
+  and tested, and a failing declaration refuses with the reason rather than
+  falling back to the default; a caller-supplied path cannot bypass the list. **2c** grep the diff for any run-time widening —
   finding one is a FAIL. **2d** docs updated.
 - **Req 3** — version is published+1 at build time; CHANGELOG present.
 - **Req 4** — QA1 runs both suites itself.
@@ -216,5 +234,9 @@ escape hatch.
   real-path check and every existing refusal; 2c forbids run-time widening; QA1
   FAILs on finding one; LiveQA re-tests each refusal live.
 - **The decisions-log path is guessed wrong and downstream projects still can't
-  commit theirs.** — Req 2b forces an explicit choice: standardise and document,
-  or read the project's own declaration.
+  commit theirs.** — Req 2b reads the project's own declaration with a standard
+  default, settled with FMC.
+- **A bad or hostile declaration turns Req 2b into the escape hatch Req 2c
+  forbids.** — The declared value is validated at every use (single file, inside
+  the repo, not `.git/`, not install-manifest-owned, not a directory) and
+  refused with the reason rather than silently defaulting.
