@@ -2,7 +2,7 @@
 id: 38
 title: "Stop a clean relaunch warning about a session that isn't running, and name the branch on a fresh repository"
 epic: "Workshop readiness: a new attendee's first launch reads correctly"
-status: in_progress
+status: done
 created: 2026-09-15T05:48:19+00:00
 ---
 
