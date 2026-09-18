@@ -2,7 +2,7 @@
 id: 39
 title: "Give a blocked sprint a way back that keeps its gates, let headless LiveQA run node, and stop a named failing test standing in for a decision"
 epic: "Downstream findings: FMC ShowOffTest run"
-status: todo
+status: in_progress
 created: 2026-09-15T14:44:31+00:00
 ---
 
