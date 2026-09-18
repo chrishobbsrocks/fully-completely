@@ -1,5 +1,5 @@
 {
-  "next_id": 40,
+  "next_id": 41,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -235,6 +235,12 @@
       "epic": "Downstream findings: FMC ShowOffTest run",
       "status": "in_progress",
       "file": "docs/sprints/2-in-progress/sprint-39_give-a-blocked-sprint-a-way-back-that-keeps-its-gates-let-headless-liveqa-run-node-and-stop-a-named-failing-test-standing-in-for-a-decision.md"
+    },
+    "40": {
+      "title": "Let a role correct its own recorded notes without rewriting them, and let Master Controller commit the files it actually owns",
+      "epic": "Downstream findings: FMC ShowOffTest run",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-40_let-a-role-correct-its-own-recorded-notes-without-rewriting-them-and-let-master-controller-commit-the-files-it-actually-owns.md"
     }
   }
 }
