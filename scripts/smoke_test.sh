@@ -1965,6 +1965,222 @@ assert after.get('live_loop_audit_trees') == [], f'live_loop_audit_trees must be
 assert after['phase'] == 'dev_build'
 "
 
+echo "== sprint 39, Req 1: the audited-file hash ignores a status: rewrite, but still changes on a body or title edit =="
+SPRINT_HASH_DIRECT=$(new_sprint "Hash exclusion sprint")
+$SCRIPT start "$SPRINT_HASH_DIRECT" > /dev/null
+HASH_DIRECT_FILE=$(find docs/sprints/2-in-progress -name "sprint-${SPRINT_HASH_DIRECT}_*.md")
+python3 -c "
+import sys
+sys.path.insert(0, 'scripts')
+from sprint_lifecycle import audited_file_hash, update_frontmatter_status, file_hash
+from pathlib import Path
+
+p = Path('$HASH_DIRECT_FILE')
+before = audited_file_hash(p)
+before_whole = file_hash(p)
+
+# A pure lifecycle bookkeeping write -- exactly what start/block/complete/
+# abort do -- must not change the new-scheme hash, even though it DOES
+# change the raw file bytes (so the OLD whole-file scheme WOULD see it).
+update_frontmatter_status(p, 'blocked')
+after_status_only = audited_file_hash(p)
+after_status_only_whole = file_hash(p)
+assert after_status_only == before, 'a pure status: rewrite must not change the audited-file hash (Req 1)'
+assert after_status_only_whole != before_whole, 'test setup sanity check failed: the status rewrite must actually change the raw bytes, or this test proves nothing'
+update_frontmatter_status(p, 'in_progress')  # restore
+
+# A body edit still changes the hash.
+with open(p, 'a') as f:
+    f.write('\nA genuinely new body line.\n')
+after_body = audited_file_hash(p)
+assert after_body != before, 'a body edit must still change the audited-file hash'
+"
+# A title: edit still changes the hash -- Req 1 deliberately does NOT
+# exclude title/original_title (a rename must keep forcing a fresh audit).
+python3 -c "
+import sys, re
+sys.path.insert(0, 'scripts')
+from sprint_lifecycle import audited_file_hash
+from pathlib import Path
+p = Path('$HASH_DIRECT_FILE')
+before = audited_file_hash(p)
+text = p.read_text()
+text2 = re.sub(r'(?m)^title:.*\$', 'title: \"A changed title\"', text, count=1)
+assert text2 != text, 'test setup: title: line must actually exist and be replaceable'
+p.write_text(text2)
+after = audited_file_hash(p)
+assert after != before, 'a title: edit must still change the audited-file hash -- Req 1 deliberately does not exclude title'
+"
+
+echo "== sprint 39, Req 1a: an old (pre-39), whole-file-scheme hash on record compares correctly for a genuinely unchanged file =="
+SPRINT_OLD_SCHEME_OK=$(new_sprint "Old scheme unchanged sprint")
+$SCRIPT start "$SPRINT_OLD_SCHEME_OK" > /dev/null
+$SCRIPT qa1 "$SPRINT_OLD_SCHEME_OK" --verdict PASS --notes "will be downgraded to simulate a pre-39 record" > /dev/null
+OLD_OK_STATE="docs/sprints/state/sprint-${SPRINT_OLD_SCHEME_OK}.json"
+OLD_OK_FILE=$(find docs/sprints/2-in-progress -name "sprint-${SPRINT_OLD_SCHEME_OK}_*.md")
+python3 -c "
+import sys, json
+sys.path.insert(0, 'scripts')
+from sprint_lifecycle import file_hash
+from pathlib import Path
+p = '$OLD_OK_STATE'
+s = json.load(open(p))
+del s['qa1_audit_hash_scheme']
+s['qa1_audit_file_hash'] = file_hash(Path('$OLD_OK_FILE'))
+json.dump(s, open(p, 'w'), indent=2)
+"
+$SCRIPT dev-done "$SPRINT_OLD_SCHEME_OK" > /tmp/out.txt 2>&1 || \
+  fail "dev-done wrongly refused a genuinely unchanged file under a simulated pre-39 hash -- Req 1a regression -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 39, Req 1a: an old (pre-39), whole-file-scheme hash on record still catches a real edit =="
+SPRINT_OLD_SCHEME_EDIT=$(new_sprint "Old scheme edited sprint")
+$SCRIPT start "$SPRINT_OLD_SCHEME_EDIT" > /dev/null
+$SCRIPT qa1 "$SPRINT_OLD_SCHEME_EDIT" --verdict PASS --notes "will be downgraded to simulate a pre-39 record" > /dev/null
+OLD_EDIT_STATE="docs/sprints/state/sprint-${SPRINT_OLD_SCHEME_EDIT}.json"
+OLD_EDIT_FILE=$(find docs/sprints/2-in-progress -name "sprint-${SPRINT_OLD_SCHEME_EDIT}_*.md")
+python3 -c "
+import sys, json
+sys.path.insert(0, 'scripts')
+from sprint_lifecycle import file_hash
+from pathlib import Path
+p = '$OLD_EDIT_STATE'
+s = json.load(open(p))
+del s['qa1_audit_hash_scheme']
+s['qa1_audit_file_hash'] = file_hash(Path('$OLD_EDIT_FILE'))
+json.dump(s, open(p, 'w'), indent=2)
+"
+echo "### A real edit after the simulated pre-39 audit" >> "$OLD_EDIT_FILE"
+$SCRIPT dev-done "$SPRINT_OLD_SCHEME_EDIT" > /tmp/out.txt 2>&1 && \
+  fail "dev-done wrongly passed an EDITED file under a simulated pre-39 hash -- Req 1a regression: a silent pass-through" || true
+grep -q "has changed since QA1's PASS" /tmp/out.txt || fail "old-scheme edit-detection refusal message missing -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 39, Req 2a/2b: a sprint blocked AFTER a QA1 PASS, with its file unchanged, returns to its exact pre-block phase with every gate field kept =="
+SPRINT_KEEP=$(new_sprint "Gate-preserving restart sprint")
+$SCRIPT start "$SPRINT_KEEP" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_KEEP work"
+$SCRIPT qa1 "$SPRINT_KEEP" --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done "$SPRINT_KEEP" > /dev/null
+KEEP_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_KEEP" --commit "$KEEP_COMMIT" > /dev/null
+# Now sitting in liveqa_live -- an undecided question comes up (a
+# workshop-shaped scenario) and Dev Team blocks it, nothing about the
+# code itself in question.
+KEEP_STATE_BEFORE=$(cat "docs/sprints/state/sprint-${SPRINT_KEEP}.json")
+$SCRIPT block "$SPRINT_KEEP" --reason "waiting on a decision, nothing about the shipped code needs to change" > /dev/null
+
+KEEP_START_OUT=$($SCRIPT start "$SPRINT_KEEP" 2>&1)
+echo "$KEEP_START_OUT" | grep -qi "Gates KEPT" || \
+  fail "re-filing an unchanged, PASSed, blocked sprint should say gates were KEPT -- output: $KEEP_START_OUT"
+echo "$KEEP_START_OUT" | grep -qF "liveqa_live" || \
+  fail "the restart output should name the restored pre-block phase -- output: $KEEP_START_OUT"
+
+python3 -c "
+import json
+before = json.loads('''$KEEP_STATE_BEFORE''')
+after = json.load(open('docs/sprints/state/sprint-${SPRINT_KEEP}.json'))
+assert after['phase'] == 'liveqa_live', f\"phase must be restored to its pre-block phase: {after['phase']}\"
+assert after['qa1_audit_result'] == before['qa1_audit_result'] == 'PASS'
+assert after['qa1_audit_file_hash'] == before['qa1_audit_file_hash']
+assert after['qa1_audit_hash_scheme'] == before['qa1_audit_hash_scheme']
+assert after['qa1_audited_tree_hash'] == before['qa1_audited_tree_hash']
+assert after['last_shipped_commit'] == before['last_shipped_commit']
+assert after['groundtruth_result'] == before['groundtruth_result']
+assert after['live_loop_audit_trees'] == before['live_loop_audit_trees']
+assert after['audit_rounds'] == before['audit_rounds']
+assert after['live_test_rounds'] == before['live_test_rounds']
+assert after['pre_block_phase'] is None, 'pre_block_phase should be cleared once restored'
+assert len(after['history']) == len(before['history']) + 2, 'exactly two new events (blocked, sprint_restarted), nothing replaced'
+assert after['history'][-1]['event'] == 'sprint_restarted'
+assert 'KEPT' in after['history'][-1]['detail'], f\"restart event should say gates were kept: {after['history'][-1]}\"
+"
+
+echo "== sprint 39, Req 2d: code committed while blocked is still refused at ship -- restoring the phase does not bypass the tree-content checks =="
+SPRINT_KEEP_SHIP=$(new_sprint "Gate-preserving restart before ship sprint")
+$SCRIPT start "$SPRINT_KEEP_SHIP" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_KEEP_SHIP work"
+$SCRIPT qa1 "$SPRINT_KEEP_SHIP" --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done "$SPRINT_KEEP_SHIP" > /dev/null
+# Blocked BEFORE ever shipping -- a real "waiting on a decision before
+# Pipeman pushes" scenario.
+$SCRIPT block "$SPRINT_KEEP_SHIP" --reason "waiting on a go/no-go decision before shipping" > /dev/null
+KEEP_SHIP_OUT=$($SCRIPT start "$SPRINT_KEEP_SHIP" 2>&1)
+echo "$KEEP_SHIP_OUT" | grep -qi "Gates KEPT" || \
+  fail "re-filing an unchanged, dev_agreed_done, blocked sprint should say gates were KEPT -- output: $KEEP_SHIP_OUT"
+python3 -c "
+import json
+after = json.load(open('docs/sprints/state/sprint-${SPRINT_KEEP_SHIP}.json'))
+assert after['phase'] == 'dev_agreed_done', f\"phase must be restored to dev_agreed_done: {after['phase']}\"
+"
+# Now an unaudited commit lands (simulating a change made while it sat
+# blocked) -- ship must still refuse it, exactly as it would have before
+# this sprint, because qa1_audited_tree_hash was never touched by the
+# gate-preserving restart.
+echo "sneaky change before first ship" > "sneaky-ship-${SPRINT_KEEP_SHIP}.txt"
+git add "sneaky-ship-${SPRINT_KEEP_SHIP}.txt"
+git commit -q -m "unaudited change landing after the gate-preserving restart of sprint $SPRINT_KEEP_SHIP"
+SNEAKY_SHIP_COMMIT=$(git rev-parse HEAD)
+$SCRIPT ship "$SPRINT_KEEP_SHIP" --commit "$SNEAKY_SHIP_COMMIT" > /tmp/out.txt 2>&1 && \
+  fail "ship succeeded on a commit that was never audited -- Req 2d regression: gate-preserving restart must not let unaudited code through" || true
+grep -q "doesn't match what QA1 audited" /tmp/out.txt || \
+  fail "ship's refusal for the unaudited commit is missing or reworded -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 39, Req 2d: code committed while blocked is still refused at reship -- restoring the phase does not bypass the tree-content checks =="
+echo "sneaky change while blocked" > "sneaky-${SPRINT_KEEP}.txt"
+git add "sneaky-${SPRINT_KEEP}.txt"
+git commit -q -m "unaudited change landing after the gate-preserving restart of sprint $SPRINT_KEEP"
+SNEAKY_COMMIT=$(git rev-parse HEAD)
+$SCRIPT reship "$SPRINT_KEEP" --commit "$SNEAKY_COMMIT" > /tmp/out.txt 2>&1 && \
+  fail "reship succeeded on a commit that was never audited -- Req 2d regression: gate-preserving restart must not let unaudited code through" || true
+grep -q "has no QA1 PASS currently on record for it" /tmp/out.txt || \
+  fail "reship's refusal for the unaudited commit is missing or reworded -- output: $(cat /tmp/out.txt)"
+rm -f /tmp/out.txt
+
+echo "== sprint 39, Req 2c: a sprint blocked BEFORE any QA1 PASS resets gates, and says why =="
+SPRINT_RESET_NOPASS=$(new_sprint "No-PASS block reset sprint")
+$SCRIPT start "$SPRINT_RESET_NOPASS" > /dev/null
+$SCRIPT block "$SPRINT_RESET_NOPASS" --reason "requirements aren't real yet" > /dev/null
+RESET_NOPASS_OUT=$($SCRIPT start "$SPRINT_RESET_NOPASS" 2>&1)
+echo "$RESET_NOPASS_OUT" | grep -qi "Gates RESET" || fail "a never-PASSed blocked sprint should say gates were RESET -- output: $RESET_NOPASS_OUT"
+echo "$RESET_NOPASS_OUT" | grep -q "no QA1 PASS is on record" || fail "the reset reason should name the missing PASS -- output: $RESET_NOPASS_OUT"
+
+echo "== sprint 39, Req 2c: a sprint blocked AFTER a QA1 PASS, but edited while blocked, resets gates and says the file changed =="
+SPRINT_RESET_EDITED=$(new_sprint "Edited-while-blocked reset sprint")
+$SCRIPT start "$SPRINT_RESET_EDITED" > /dev/null
+$SCRIPT qa1 "$SPRINT_RESET_EDITED" --verdict PASS --notes ok > /dev/null
+$SCRIPT block "$SPRINT_RESET_EDITED" --reason "a real requirements question came up" > /dev/null
+RESET_EDITED_FILE=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_RESET_EDITED}']['file'])")
+echo "### Master Controller's repair, changing the requirement" >> "$RESET_EDITED_FILE"
+RESET_EDITED_OUT=$($SCRIPT start "$SPRINT_RESET_EDITED" 2>&1)
+echo "$RESET_EDITED_OUT" | grep -qi "Gates RESET" || fail "an edited-while-blocked sprint should say gates were RESET -- output: $RESET_EDITED_OUT"
+echo "$RESET_EDITED_OUT" | grep -q "the sprint file has changed since QA1's PASS" || \
+  fail "the reset reason should name the file change -- output: $RESET_EDITED_OUT"
+python3 -c "
+import json
+after = json.load(open('docs/sprints/state/sprint-${SPRINT_RESET_EDITED}.json'))
+assert after['phase'] == 'dev_build'
+assert after['qa1_audit_result'] is None
+"
+
+echo "== sprint 39, Req 2c: a sprint blocked by a version before Req 2a (no pre_block_phase on record) resets gates and says so =="
+SPRINT_RESET_UNKNOWN=$(new_sprint "Unknown pre-block phase reset sprint")
+$SCRIPT start "$SPRINT_RESET_UNKNOWN" > /dev/null
+$SCRIPT qa1 "$SPRINT_RESET_UNKNOWN" --verdict PASS --notes ok > /dev/null
+$SCRIPT block "$SPRINT_RESET_UNKNOWN" --reason "simulating a pre-Req-2a block" > /dev/null
+python3 -c "
+import json
+p = 'docs/sprints/state/sprint-${SPRINT_RESET_UNKNOWN}.json'
+s = json.load(open(p))
+del s['pre_block_phase']
+json.dump(s, open(p, 'w'), indent=2)
+"
+RESET_UNKNOWN_OUT=$($SCRIPT start "$SPRINT_RESET_UNKNOWN" 2>&1)
+echo "$RESET_UNKNOWN_OUT" | grep -qi "Gates RESET" || fail "an unknown-pre-block-phase sprint should say gates were RESET -- output: $RESET_UNKNOWN_OUT"
+echo "$RESET_UNKNOWN_OUT" | grep -q "no pre-block phase is on record" || \
+  fail "the reset reason should name the missing pre-block phase -- output: $RESET_UNKNOWN_OUT"
+
 echo "== sprint 36, Req 1: /sprint-start refuses a sprint already in dev_build (not never-started, not blocked), with nothing changed =="
 BLOCK_FILE_BEFORE_REFUSAL=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_BLOCK}']['file'])")
 BLOCK_STATE_BEFORE_REFUSAL=$(cat "docs/sprints/state/sprint-${SPRINT_BLOCK}.json")
@@ -2057,8 +2273,9 @@ python3 -c "
 import json
 state = json.load(open('docs/sprints/state/sprint-${SPRINT_NEVER_STARTED_2}.json'))
 expected_keys = {'id', 'title', 'phase', 'qa1_audit_result', 'qa1_audit_file_hash',
-                  'qa1_audited_tree_hash', 'last_shipped_commit', 'groundtruth_result',
-                  'live_loop_audit_trees', 'audit_rounds', 'live_test_rounds', 'started',
+                  'qa1_audit_hash_scheme', 'qa1_audited_tree_hash', 'last_shipped_commit',
+                  'groundtruth_result', 'live_loop_audit_trees', 'pre_block_phase',
+                  'audit_rounds', 'live_test_rounds', 'started',
                   'completed', 'history', 'last_claim'}
 assert set(state.keys()) == expected_keys, f'fresh-start schema drifted: {sorted(state.keys())}'
 assert state['phase'] == 'dev_build'
@@ -2067,6 +2284,8 @@ assert state['live_loop_audit_trees'] == []
 assert state['audit_rounds'] == 0
 assert state['live_test_rounds'] == 0
 assert state['completed'] is None
+assert state['qa1_audit_hash_scheme'] is None
+assert state['pre_block_phase'] is None
 assert len(state['history']) == 1 and state['history'][0]['event'] == 'sprint_started'
 "
 

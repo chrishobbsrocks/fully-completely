@@ -2335,6 +2335,20 @@ test('run-role: liveqa is allowlisted npm install (narrow) and npx (deliberately
   assert.ok(liveqaArgs.some((a) => a.includes('Bash(npx *)')), 'liveqa missing npx');
 });
 
+test('run-role: liveqa is allowlisted exactly Bash(node *), unscoped (no -e/--eval/-p carve-out) -- the sprint 39, Req 3 grant', () => {
+  const liveqaArgs = HEADLESS_PERMISSION_PROFILES.liveqa.allowedTools;
+  // Sprint 39, Req 3: measured live (see run-role.js's own "MEASURED,
+  // sprint 39" comment above HEADLESS_PERMISSION_PROFILES) that the
+  // EXISTING npx * grant already reaches arbitrary program-mediated
+  // writes, inside and outside the working directory, with zero
+  // confinement -- so node * is granted unscoped, deliberately not
+  // narrowed to exclude -e/--eval/-p, since that would buy no measured
+  // safety over what npx * already permits.
+  assert.ok(liveqaArgs.includes('Bash(node *)'), 'liveqa missing the node grant (sprint 39, Req 3)');
+  assert.ok(!liveqaArgs.some((a) => a.includes('--eval')), 'the node grant must not be narrowed to exclude --eval -- measured not to reduce real risk');
+  assert.ok(!liveqaArgs.some((a) => a.includes(' -e ') || a.endsWith(' -e')), 'the node grant must not be narrowed to exclude -e -- measured not to reduce real risk');
+});
+
 test('run-role: liveqa is allowlisted the full confirmed Playwright MCP tool set, minus the one named "unsafe" (Sprint 23, Req 1)', () => {
   const liveqaArgs = HEADLESS_PERMISSION_PROFILES.liveqa.allowedTools;
   for (const tool of LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS) {

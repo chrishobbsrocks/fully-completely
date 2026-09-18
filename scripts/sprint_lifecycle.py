@@ -742,9 +742,90 @@ def tree_description() -> str:
 
 
 def file_hash(path: Path) -> Optional[str]:
+    """The OLD, whole-file hashing scheme (HASH_SCHEME_WHOLE_FILE below) --
+    every byte of the file, unconditionally. Kept, unchanged, forever: Req
+    1a's own backward-compatibility requirement needs to be able to
+    reproduce EXACTLY what a hash recorded under this scheme, before sprint
+    39, actually hashed -- see compute_audit_hash() below, which dispatches
+    to this function for any state file whose qa1_audit_hash_scheme reads
+    (or defaults to) HASH_SCHEME_WHOLE_FILE."""
     if not path.exists():
         return None
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+# Sprint 39, Req 1: two named hashing schemes for the sprint-file hash
+# recorded as state["qa1_audit_file_hash"] -- WHOLE_FILE is what this
+# script always used before this sprint (file_hash() above, every byte);
+# EXCLUDES_LIFECYCLE_LINES (this sprint's own fix) additionally strips out
+# frontmatter lines THIS SCRIPT ITSELF rewrites as pure bookkeeping (see
+# LIFECYCLE_OWNED_FRONTMATTER_PATTERNS below) before hashing, so its own
+# write of e.g. `status:` on start/block/complete/abort never registers as
+# "the file changed since QA1's audit." Every sprint audited from this
+# release forward gets HASH_SCHEME_EXCLUDES_LIFECYCLE_LINES; a state file
+# already on disk before this release, with a hash recorded under the old
+# scheme, has no qa1_audit_hash_scheme key at all -- .get()'d with
+# HASH_SCHEME_WHOLE_FILE as the default everywhere this is read, per
+# CLAUDE.md's state-field convention for a field younger than some sprint
+# still in flight could be. Named as strings, not booleans or version
+# numbers, so a reader of a raw state file understands what they mean
+# without cross-referencing this script's own history.
+HASH_SCHEME_WHOLE_FILE = "whole-file"
+HASH_SCHEME_EXCLUDES_LIFECYCLE_LINES = "excludes-lifecycle-lines"
+
+# Sprint 39, Req 1: frontmatter lines this script itself rewrites as pure
+# bookkeeping, never a human decision about the sprint's own content --
+# excluded from HASH_SCHEME_EXCLUDES_LIFECYCLE_LINES so a lifecycle
+# command's own write never registers as "the file changed since QA1's
+# audit." Deliberately NOT a blanket "any frontmatter line", and deliber-
+# ately NOT including title:/original_title: -- CLAUDE.md documents that a
+# rename forces a fresh audit, and that must keep holding (see this
+# sprint's own Out of Scope). Each pattern here is the EXACT regex the
+# function that actually performs that rewrite uses, reused verbatim
+# rather than approximated a second time, so what's excluded from the hash
+# can never silently drift from what's actually lifecycle-owned:
+LIFECYCLE_OWNED_FRONTMATTER_PATTERNS = (
+    # update_frontmatter_status() above -- rewrites this exact line on
+    # start, block, complete, and abort (see its own call sites). Records
+    # workflow phase, which the registry (not this file) is the real
+    # source of truth for; the frontmatter copy exists so a human reading
+    # the sprint file directly sees a status that agrees with the
+    # registry, not so a hash comparison should treat it as content.
+    r"(?m)^status:\s*\S+\s*$",
+)
+
+
+def audited_file_hash(path: Path) -> Optional[str]:
+    """The NEW hashing scheme (HASH_SCHEME_EXCLUDES_LIFECYCLE_LINES) --
+    every byte of the file EXCEPT the lines LIFECYCLE_OWNED_FRONTMATTER_
+    PATTERNS names, stripped out (replaced with nothing, leaving the
+    newline in place so line numbers elsewhere in the file are otherwise
+    undisturbed) before hashing. What the line's own CONTENT was doesn't
+    matter -- only that it's excluded entirely, so this function's output
+    is identical regardless of what status the file happened to record at
+    the moment this ran."""
+    if not path.exists():
+        return None
+    text = path.read_text()
+    for pattern in LIFECYCLE_OWNED_FRONTMATTER_PATTERNS:
+        text = re.sub(pattern, "", text, count=1)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def compute_audit_hash(path: Path, scheme: str) -> Optional[str]:
+    """Req 1a: replays whichever scheme a RECORDED hash actually used, so
+    comparing "the file today" against "what was recorded at audit time"
+    is always an apples-to-apples comparison -- an in-flight sprint
+    audited before this sprint under the whole-file scheme must keep
+    comparing that way (its own audited hash cannot be reproduced any
+    other way), never silently switched to the new scheme just because the
+    script itself was upgraded. Callers pass state.get("qa1_audit_hash_
+    scheme", HASH_SCHEME_WHOLE_FILE) -- the .get() default lives at each
+    call site, not here, so this function stays a pure dispatch with no
+    state-shape knowledge of its own."""
+    if scheme == HASH_SCHEME_WHOLE_FILE:
+        return file_hash(path)
+    return audited_file_hash(path)
 
 
 def registry_sprint_file(sprint_id: int) -> Optional[Path]:
@@ -1286,12 +1367,29 @@ def cmd_start(args) -> None:
           to it, see that Req's own field).
       (b) a state file exists and its phase is exactly "blocked" --
           re-filing after Master Controller has read `/sprint-block`'s
-          recorded analysis and repaired the sprint file (Req 1a): history
-          is KEPT and a new event is appended (log_event never replaces),
-          `audit_rounds`/`live_test_rounds`/the original `started`
-          timestamp are all kept, and every gate-result field is reset,
-          because a repaired file must clear both gates again from
-          scratch.
+          recorded analysis. History is always KEPT and a new event is
+          appended (log_event never replaces); `audit_rounds`/
+          `live_test_rounds`/the original `started` timestamp are always
+          kept too. What happens to the GATE-RESULT fields now splits in
+          two, per sprint 39's own Req 2 (extending sprint 36's Req 1a,
+          not replacing it):
+            (b-i)  KEEP gates (Req 2b) -- only when a QA1 PASS is on
+                   record, `cmd_block` recorded which phase this sprint
+                   was blocked FROM (Req 2a), AND the sprint file hashes
+                   equal, right now, to what QA1 actually audited (Req 1a
+                   replays whichever scheme that audit used). The sprint
+                   returns to that exact pre-block phase with every
+                   gate-result field and both round counts untouched --
+                   nothing about the sprint FILE changed while it sat
+                   blocked, so nothing about what was already verified
+                   needs re-verifying.
+            (b-ii) RESET gates (Req 2c) -- every other case: the file
+                   differs, no PASS is on record, or the pre-block phase
+                   is unknown (a sprint blocked by a version before Req
+                   2a existed). Exactly sprint 36's own Req 1a behaviour,
+                   unchanged: phase back to `dev_build`, every gate-result
+                   field cleared. The printed output always says which of
+                   (b-i)/(b-ii) ran, and for (b-ii), why.
     Every other case refuses outright -- no override. The one legitimate
     re-entry is (b); anything else already has a documented path (block,
     then start).
@@ -1385,28 +1483,96 @@ def cmd_start(args) -> None:
         save_registry(reg)
 
         if existing_state is not None:
-            # Req 1a: re-filing a blocked sprint. `state` IS
-            # `existing_state` -- mutated in place so every field this
-            # Req doesn't name (id, title refreshed below, audit_rounds,
+            # Sprint 36, Req 1a: re-filing a blocked sprint. `state` IS
+            # `existing_state` -- mutated in place so every field neither
+            # branch below names (id, title refreshed below, audit_rounds,
             # live_test_rounds, started, history, last_claim) survives by
             # construction, not by being individually copied over.
             state = existing_state
             state["title"] = entry["title"]  # in case the repair included a rename
-            state["phase"] = "dev_build"
-            state["qa1_audit_result"] = None
-            state["qa1_audit_file_hash"] = None
-            state["qa1_audited_tree_hash"] = None
-            state["last_shipped_commit"] = None
-            state["groundtruth_result"] = None
-            # Req 3's own new field: a live-loop audit's PASS against the
-            # sprint file being replaced means nothing once that file is
-            # repaired and must clear both gates again -- reset alongside
-            # every other gate-result field named above, per Req 1a's own
-            # "whatever field Req 3 adds."
-            state["live_loop_audit_trees"] = []
-            log_event(state, "system", "sprint_restarted",
-                      "re-filed from blocked; history preserved, gate results reset")
-            save_state(sprint_id, state)
+
+            # Sprint 39, Req 2: a sprint blocked purely over an unmade
+            # decision -- nothing about the sprint FILE itself changed --
+            # should not have to pay a full re-audit/re-ship/re-live-test
+            # just to resume where it left off. ALL THREE conditions below
+            # are required for that; sprint 36's own full-reset behaviour
+            # (Req 2c) is preserved EXACTLY as the fallback for every
+            # other case -- this is additive, never a loosening of it.
+            #   (i)   a QA1 PASS is actually on record for this sprint;
+            #   (ii)  cmd_block (Req 2a) recorded which phase it was
+            #         blocked FROM -- absent for a sprint blocked by a
+            #         version of this script before that Req existed;
+            #   (iii) the sprint file, right now, hashes equal to what
+            #         QA1 actually audited, replayed under whichever
+            #         scheme that audit used (Req 1a) -- not merely
+            #         "close", byte-for-byte under Req 1's own scheme.
+            has_pass = state.get("qa1_audit_result") == "PASS"
+            pre_block_phase = state.get("pre_block_phase")
+            audited_hash = state.get("qa1_audit_file_hash")
+            hash_scheme = state.get("qa1_audit_hash_scheme", HASH_SCHEME_WHOLE_FILE)
+            current_hash = compute_audit_hash(dest, hash_scheme)
+            file_unchanged = (
+                audited_hash is not None and current_hash is not None and current_hash == audited_hash
+            )
+
+            if has_pass and pre_block_phase is not None and file_unchanged:
+                # Req 2b: KEEP gates. Touches nothing but phase,
+                # pre_block_phase (cleared -- this restart episode is
+                # over, and a stale value here would misdescribe the NEXT
+                # block/restart cycle), and title above. Every gate-result
+                # field and both round counts survive untouched, by
+                # simply never being assigned in this branch.
+                state["phase"] = pre_block_phase
+                state["pre_block_phase"] = None
+                log_event(
+                    state, "system", "sprint_restarted",
+                    f"re-filed from blocked to '{pre_block_phase}'; history preserved, gates KEPT "
+                    "(QA1 PASS on record, pre-block phase known, sprint file unchanged since audit)"
+                )
+                save_state(sprint_id, state)
+                print(f"Sprint {sprint_id} re-filed from blocked. Gates KEPT: the sprint file is "
+                      f"unchanged since QA1's PASS (round {state['audit_rounds']}), so the sprint "
+                      f"returns directly to its pre-block phase, '{pre_block_phase}', rather than "
+                      "restarting both gates from scratch.")
+                if pre_block_phase == "dev_build":
+                    print("Dev Team: build the sprint, then run /sprint-qa1 when ready for audit.")
+                else:
+                    print(f"Sprint {sprint_id} is back in phase '{pre_block_phase}' -- pick up "
+                          "exactly where it left off; whichever role owns that phase acts next.")
+            else:
+                # Req 2c: exactly sprint 36's own Req 1a reset. The
+                # printed reason names which condition above actually
+                # failed, so a reader isn't left guessing why gates didn't
+                # carry over.
+                reasons = []
+                if not has_pass:
+                    reasons.append("no QA1 PASS is on record for this sprint")
+                if pre_block_phase is None:
+                    reasons.append("no pre-block phase is on record (this sprint was blocked by a "
+                                    "version of this script before that was tracked)")
+                if has_pass and pre_block_phase is not None and not file_unchanged:
+                    reasons.append("the sprint file has changed since QA1's PASS")
+                reason_text = "; ".join(reasons) if reasons else "gates reset"
+                state["phase"] = "dev_build"
+                state["qa1_audit_result"] = None
+                state["qa1_audit_file_hash"] = None
+                state["qa1_audit_hash_scheme"] = None
+                state["qa1_audited_tree_hash"] = None
+                state["last_shipped_commit"] = None
+                state["groundtruth_result"] = None
+                # Req 3 (sprint 36)'s own field: a live-loop audit's PASS
+                # against the sprint file being replaced means nothing
+                # once that file is repaired and must clear both gates
+                # again -- reset alongside every other gate-result field
+                # named above.
+                state["live_loop_audit_trees"] = []
+                state["pre_block_phase"] = None
+                log_event(state, "system", "sprint_restarted",
+                          f"re-filed from blocked; history preserved, gate results reset ({reason_text})")
+                save_state(sprint_id, state)
+                print(f"Sprint {sprint_id} re-filed from blocked. Gates RESET: {reason_text}. "
+                      "Both gates must be cleared again from dev_build.")
+                print("Dev Team: build the sprint, then run /sprint-qa1 when ready for audit.")
         else:
             state = {
                 "id": sprint_id,
@@ -1414,10 +1580,12 @@ def cmd_start(args) -> None:
                 "phase": "dev_build",
                 "qa1_audit_result": None,
                 "qa1_audit_file_hash": None,
+                "qa1_audit_hash_scheme": None,
                 "qa1_audited_tree_hash": None,
                 "last_shipped_commit": None,
                 "groundtruth_result": None,
                 "live_loop_audit_trees": [],
+                "pre_block_phase": None,
                 "audit_rounds": 0,
                 "live_test_rounds": 0,
                 "started": now(),
@@ -1426,8 +1594,8 @@ def cmd_start(args) -> None:
             }
             log_event(state, "system", "sprint_started")
             save_state(sprint_id, state)
-    print(f"Sprint {sprint_id} started. Phase: dev_build.")
-    print("Dev Team: build the sprint, then run /sprint-qa1 when ready for audit.")
+            print(f"Sprint {sprint_id} started. Phase: dev_build.")
+            print("Dev Team: build the sprint, then run /sprint-qa1 when ready for audit.")
 
 
 def cmd_status(args) -> None:
@@ -1695,7 +1863,13 @@ def cmd_qa1(args) -> None:
 
         if verdict == "PASS":
             state["phase"] = "qa1_audit"
-            state["qa1_audit_file_hash"] = file_hash(registry_sprint_file(args.id))
+            # Sprint 39, Req 1: every PASS recorded from this release
+            # forward uses the new, lifecycle-line-excluding scheme —
+            # recorded alongside the hash itself so every later reader
+            # knows which scheme to replay (compute_audit_hash()'s own
+            # docstring).
+            state["qa1_audit_file_hash"] = audited_file_hash(registry_sprint_file(args.id))
+            state["qa1_audit_hash_scheme"] = HASH_SCHEME_EXCLUDES_LIFECYCLE_LINES
             state["qa1_audited_tree_hash"] = git_tree_hash_excluding("HEAD", SHIP_HASH_EXCLUDE_PATTERNS)
             print(f"QA1 audit PASSED (round {state['audit_rounds']}).")
             if state["qa1_audited_tree_hash"] is None and not is_git_repository():
@@ -1713,6 +1887,7 @@ def cmd_qa1(args) -> None:
         else:
             state["phase"] = "dev_build"
             state["qa1_audit_file_hash"] = None
+            state["qa1_audit_hash_scheme"] = None
             state["qa1_audited_tree_hash"] = None
             print(f"QA1 audit {verdict} (round {state['audit_rounds']}). Back to Dev Team for fixes.")
 
@@ -1727,7 +1902,15 @@ def cmd_dev_done(args) -> None:
                 f"marked agreed-done. Current phase: {state['phase']}, "
                 f"QA1 result: {state['qa1_audit_result']}.")
 
-        current_hash = file_hash(registry_sprint_file(args.id))
+        # Sprint 39, Req 1a: replays whichever scheme the RECORDED hash
+        # actually used — a sprint audited before this sprint (no
+        # qa1_audit_hash_scheme key at all) must keep comparing the OLD,
+        # whole-file way, since that's the only way its own recorded hash
+        # can ever match again; one audited under this sprint's own new
+        # scheme compares the new way. Never assume every hash on disk was
+        # written by the current version of this script.
+        scheme = state.get("qa1_audit_hash_scheme", HASH_SCHEME_WHOLE_FILE)
+        current_hash = compute_audit_hash(registry_sprint_file(args.id), scheme)
         audited_hash = state.get("qa1_audit_file_hash")
         if audited_hash is None:
             # Same distinction as cmd_ship's tree-hash check: a sprint that
@@ -2644,7 +2827,14 @@ def cmd_liveqa(args) -> None:
         sprint_file_drift = None
         audited_hash = state.get("qa1_audit_file_hash")
         if audited_hash is not None:
-            current_hash = file_hash(registry_sprint_file(args.id))
+            # Sprint 39, Req 1a: same scheme-replay as cmd_dev_done — see
+            # its own comment. Without this, a sprint that reached
+            # liveqa_live via a block/restart cycle after this sprint
+            # would spuriously report drift here on nothing but the
+            # framework's own status: rewrite, exactly what Req 1 exists
+            # to stop.
+            scheme = state.get("qa1_audit_hash_scheme", HASH_SCHEME_WHOLE_FILE)
+            current_hash = compute_audit_hash(registry_sprint_file(args.id), scheme)
             if current_hash is not None and current_hash != audited_hash:
                 sprint_file_drift = (
                     f"NOTE: sprint {args.id}'s file has changed since QA1's PASS "
@@ -2959,8 +3149,16 @@ def cmd_block(args) -> None:
         entry["status"] = "blocked"
         save_registry(reg)
 
+        # Sprint 39, Req 2a: recorded BEFORE state["phase"] is overwritten
+        # below -- cmd_start's own Req 2b reads this back to decide
+        # whether a gate-preserving re-file is even eligible (the pre-
+        # block phase must be known). Both a post-hoc field (.get()'d
+        # elsewhere, per CLAUDE.md's state-field convention) and named in
+        # the history event itself, so it's visible either way.
+        pre_block_phase = state["phase"]
+        state["pre_block_phase"] = pre_block_phase
         state["phase"] = "blocked"
-        log_event(state, actor, "blocked", reason)
+        log_event(state, actor, "blocked", f"{reason} | blocked from phase={pre_block_phase}")
         save_state(args.id, state)
     print(f"Sprint {args.id} blocked, returned to the planner. Sprint id and analysis preserved, "
           "nothing moved to 5-abandoned.")
@@ -3005,11 +3203,14 @@ def cmd_rename(args) -> None:
     and decide whether that is right"). Confirmed directly, against a real
     scratch sprint (see scripts/smoke_test.sh's own sprint-25 rename
     tests): renaming a sprint that already has a QA1 PASS on record DOES
-    cause the next /sprint-dev-done to refuse, because file_hash() (see
-    cmd_qa1's own qa1_audit_file_hash) hashes the sprint file's raw bytes,
-    and this command's own frontmatter rewrite (new title line, plus an
-    inserted original_title line on a first rename) changes those bytes --
-    the same way any other edit to an audited sprint file does.
+    cause the next /sprint-dev-done to refuse, because the audited-hash
+    function (see cmd_qa1's own qa1_audit_file_hash) hashes the sprint
+    file's title line -- sprint 39, Req 1 excludes only the lifecycle-
+    owned status: line, title:/original_title: deliberately stay in the
+    hash under either scheme -- and this command's own frontmatter rewrite
+    (new title line, plus an inserted original_title line on a first
+    rename) changes those bytes, the same way any other edit to an audited
+    sprint file does.
 
     THE DECISION: this is correct, not a bug to work around, and no
     special-case exemption is carved out here. Every other content change
@@ -3258,13 +3459,21 @@ def cmd_override(args) -> None:
                     "dev-done-hash only re-stamps the sprint-file hash /sprint-dev-done "
                     "checks, and only makes sense before that command has run. If you're "
                     "trying to unstick a mismatch at ship time instead, use --gate ship-hash.")
-            current_hash = file_hash(registry_sprint_file(args.id))
+            # Req 1b: re-stamps using the SAME (new) scheme cmd_qa1 itself
+            # now records on a real PASS — a re-stamp is, in effect, a
+            # human manually vouching for the current file exactly as if
+            # QA1 had just re-PASSed it, so it should end up in the
+            # identical state a fresh PASS would.
+            current_hash = audited_file_hash(registry_sprint_file(args.id))
             if current_hash is None:
                 die(f"Sprint {args.id}'s sprint file could not be read, nothing to stamp.")
             old_hash = state.get("qa1_audit_file_hash")
+            old_scheme = state.get("qa1_audit_hash_scheme", HASH_SCHEME_WHOLE_FILE)
             state["qa1_audit_file_hash"] = current_hash
+            state["qa1_audit_hash_scheme"] = HASH_SCHEME_EXCLUDES_LIFECYCLE_LINES
             log_event(state, "human-override", "dev_done_hash_override",
-                      f"reason={reason} | old_hash={old_hash} | new_hash={current_hash}")
+                      f"reason={reason} | old_hash={old_hash} (scheme={old_scheme}) | "
+                      f"new_hash={current_hash} (scheme={HASH_SCHEME_EXCLUDES_LIFECYCLE_LINES})")
             save_state(args.id, state)
             print(f"Sprint {args.id}: sprint-file hash re-stamped to current content.")
             print("/sprint-dev-done will now proceed normally. This override is "

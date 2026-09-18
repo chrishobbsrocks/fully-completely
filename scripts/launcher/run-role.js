@@ -834,6 +834,55 @@ const LIVEQA_API_ALLOWED_TOOLS = [
 // scripts/permission-gate-repro.js against the claude version they
 // actually have before trusting either list as a real boundary.
 
+// MEASURED, sprint 39, `claude 2.1.276`: the `sprint 19 demonstrated ...`
+// sentence two paragraphs up was the justification the `node *` grant
+// below originally rested on, without a fresh measurement of its own --
+// exactly the shape Req 3a's own instruction ("measure before building on
+// it") exists to catch. Re-measured directly, live, against THIS profile
+// (never inferred from the old sprint-19 finding, or from another role's):
+// four real headless `liveqa` launches, twice each (this project's own
+// sprint-26 reproducibility bar -- every probe below reproduced 2/2,
+// verdict decided only from the structured `permission_denials` array and
+// an independently-checked filesystem side effect, per
+// permission-gate-repro.js's own established method, never the model's
+// own narration).
+//   (i)   `node <script.js>`, THIS profile as it stood before this
+//         sprint (no `node *` entry) -- DENIED, 2/2. Confirms the gap
+//         Req 3 exists to close was real, not assumed.
+//   (ii)  `npx <local script.js>` (a real script, run via a path, no
+//         registry dependency), THIS profile's own EXISTING `npx *`
+//         grant, writing a marker file INSIDE the working directory --
+//         ALLOWED, 2/2, zero denials, file written, content confirmed.
+//   (iii) `node -e "...writeFileSync(...)..."`, a CANDIDATE profile with
+//         `Bash(node *)` added, writing a marker BOTH inside cwd and
+//         (a second, separate probe) outside it via the OS temp
+//         directory -- ALLOWED, 2/2 each, zero denials.
+//   Bonus (not in Req 3a's own enumeration, run anyway for a fair
+//         comparison): does the EXISTING `npx *` grant reach OUTSIDE cwd
+//         too, the same way `node -e` does? Real writes outside cwd via
+//         `npx` succeeded with zero denials whenever the launch actually
+//         attempted the probed command; graded WEAK rather than CONFIRMED
+//         only because two of four launches investigated the probe
+//         script with `ls`/`git log`/`git status` instead of running it
+//         (liveqa's own documented forced-probing suspicion, permission-
+//         gate-repro.js's limitation #1 -- not a CLI signal either time).
+// CONCLUSION (Req 3b): `node *` does NOT genuinely widen what this
+// profile can already do -- `npx *`, already granted, already reaches
+// arbitrary program-mediated writes both inside and outside the working
+// directory, confirmed fresh at THIS version, not carried over from
+// sprint 19's own finding at a different one. No escalation to Master
+// Controller under Req 3b's own branching. Narrowing `Bash(node *)` to
+// exclude `-e`/`--eval`/`-p` was considered and rejected for the same
+// reason: (iii) confirms `node -e` itself succeeds under the grant, and
+// since `npx` already provides an equally arbitrary execution/write
+// surface, excluding `-e` here would buy no measured safety, only
+// inconsistency with a capability this profile already has. Raw
+// harness/log output from this round was not preserved (a repo-root
+// scratch harness and its own probe files, deleted after use, never
+// committed) -- this comment IS the record of what was measured; re-run
+// permission-gate-repro.js's own method against a `node *` candidate
+// grant to reproduce it rather than trusting this prose alone.
+
 const HEADLESS_PERMISSION_PROFILES = {
   'master-controller': {
     // Sprint 36, Req 6, CORRECTED in the fix round after QA1's round-1
@@ -930,6 +979,18 @@ const HEADLESS_PERMISSION_PROFILES = {
       'Bash(python3 scripts/sprint_lifecycle.py *)',
       'Bash(npm install *)',
       'Bash(npx *)',
+      // Sprint 39, Req 3: `node <script>` was denied before this grant --
+      // confirmed live (see the "MEASURED, sprint 39" comment above this
+      // profile) -- and a target whose live surface is a Node script left
+      // headless LiveQA unable to run its own check, returning CONDITIONAL
+      // for want of a tool grant rather than a real finding. Not narrowed
+      // to exclude `-e`/`--eval`/`-p`: confirmed live that `npx *`, already
+      // granted above, already permits arbitrary program-mediated writes
+      // both inside AND outside the working directory with zero
+      // confinement, so excluding `node -e` specifically here would buy no
+      // real safety, only inconsistency with a capability this profile
+      // already has via `npx`.
+      'Bash(node *)',
       ...LIVEQA_PLAYWRIGHT_MCP_ALLOWED_TOOLS,
       ...LIVEQA_API_ALLOWED_TOOLS,
     ],

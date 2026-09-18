@@ -13,6 +13,54 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.14 — Sprint 39
+
+Three downstream findings from FMC's own use of this framework, routed
+upstream (`~/Programming/Fifty_Mission_Cap/docs/proposals/fully-completely-findings-2026-09-13.md`,
+outside this repo): a blocked sprint's own bookkeeping write was
+indistinguishable from a real edit, headless LiveQA couldn't run a
+Node-based live check, and a failing test named repeatedly across
+verdicts was mistaken for a real decision to accept it.
+
+- The sprint-file hash used for `qa1_audit_file_hash` now excludes only
+  the one frontmatter line this script itself rewrites as bookkeeping
+  (`status:`, on start/block/complete/abort) — title/original_title stay
+  in the hash, a rename still forces a fresh audit. A hash recorded
+  before this release (the old, whole-file scheme) is replayed under
+  that same scheme wherever it's compared, so an in-flight sprint
+  upgrading mid-build neither false-fails nor silently passes an edited
+  file.
+- **A sprint blocked purely over an unmade decision, with its file
+  otherwise unchanged, now returns to its exact pre-block phase with
+  every gate-result field and both round counts intact on re-filing** —
+  only when a QA1 PASS is on record, `/sprint-block` recorded which
+  phase it was blocked from, and the file hashes equal to what QA1
+  actually audited. Every other case (the file changed, no PASS existed,
+  or the pre-block phase wasn't tracked) falls back to exactly the prior
+  release's behavior: phase back to `dev_build`, every gate cleared. The
+  printed output always says which path ran, and for a reset, why.
+  Restoring the phase never loosens `/sprint-ship`'s, `/sprint-reship`'s,
+  or `/sprint-liveqa`'s own tree/commit-content checks.
+- Headless LiveQA is now granted `node *`, so a target whose live check
+  is a Node script can actually be run instead of reported CONDITIONAL
+  for want of a tool grant. Measured live before adding it (`claude
+  2.1.276`, full record in `docs/sprint-12-permission-scope-findings.md`):
+  the `npx *` grant LiveQA already had reaches arbitrary
+  program-mediated writes, inside and outside its working directory,
+  with zero confinement — `node *` is convenience for a reach it already
+  had, not a new capability, and isn't narrowed to exclude `node -e`
+  since that measurement showed narrowing would buy no real safety.
+  LiveQA's own instruction not to write source is unchanged and remains
+  an instruction, not something the tool profile enforces on its own.
+- QA1's and Dev Team's own agent files now say plainly: a failing test
+  may be reported as "known" or "pre-existing" only by citing a specific
+  recorded decision to accept it — a commit, a sprint, or Master
+  Controller's own recorded call. Without one, the first report names it
+  and routes it to Master Controller as unowned, and every later report
+  says it is still unowned, rather than letting repeated naming stand in
+  for an actual decision — the exact gap that let a real downstream
+  finding go unowned for five sprints.
+
 ## 0.2.13 — Sprint 38 (Corrects 0.2.12, live-loop fix)
 
 Three defects in `.claude/role-claims.json`'s own bookkeeping, found

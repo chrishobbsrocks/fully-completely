@@ -383,7 +383,7 @@ naming the return path explicitly:
 
 `/sprint-abort` isn't attributed to a role anywhere else in this file (it's absent from the lifecycle diagram above); "Dev Team 1/2" here is inferred from the "Command ownership" note further up — lifecycle transition commands belong to whichever Dev Team owns the sprint, not Master Controller — not a direct quote like the other eleven labels are. Sprint 33 gave it a second required argument, `--user-said`, the same non-overridable shape as `/sprint-complete`'s own — abort is this lifecycle's most destructive action (it burns the sprint id and makes re-filing a human act) and used to require strictly less than closing a sprint does.
 
-`/sprint-block` (sprint 33) is the non-destructive alternative abort was missing: a role that correctly determines a sprint isn't currently buildable (real content doesn't exist, a required decision is unmade) returns it to the planner instead of abandoning it. The sprint id is preserved, the file moves to `docs/sprints/4-blocked/` rather than `5-abandoned/`, and the role's own stated analysis is recorded in history for Master Controller to read and repair the file. No `--user-said` — blocking isn't destructive — but `--reason` is required and non-empty, same as abort's. Unlike every other command here, it has no single owning role: every headless profile's `Bash(python3 scripts/sprint_lifecycle.py *)` grant reaches every subcommand, so `cmd_abort` and `cmd_block` both derive the actor they log from `CLAUDE_CODE_AGENT` rather than a hardcoded string. Re-filing a blocked sprint is just `/sprint-start <N>` again, once the file's been repaired.
+`/sprint-block` (sprint 33) is the non-destructive alternative abort was missing: a role that correctly determines a sprint isn't currently buildable (real content doesn't exist, a required decision is unmade) returns it to the planner instead of abandoning it. The sprint id is preserved, the file moves to `docs/sprints/4-blocked/` rather than `5-abandoned/`, and the role's own stated analysis is recorded in history for Master Controller to read and repair the file. No `--user-said` — blocking isn't destructive — but `--reason` is required and non-empty, same as abort's. Unlike every other command here, it has no single owning role: every headless profile's `Bash(python3 scripts/sprint_lifecycle.py *)` grant reaches every subcommand, so `cmd_abort` and `cmd_block` both derive the actor they log from `CLAUDE_CODE_AGENT` rather than a hardcoded string. Re-filing a blocked sprint is just `/sprint-start <N>` again, once the file's been repaired (or, since sprint 39, once the decision that unblocked it has been made with no file edit needed at all — see the paragraph below for the two paths that can take).
 
 **`/sprint-start` and `/sprint-block` both now gate on phase (sprint 36,
 Reqs 1–2), closing a two-command path that could erase a closed sprint's
@@ -398,15 +398,42 @@ Both are fixed now, narrowly: `/sprint-start` proceeds only when a sprint
 has no state file yet (never started) or sits at `blocked` — every other
 phase, including every phase in between and `complete`/`aborted`
 themselves, refuses outright, no override. Re-filing from `blocked`
-preserves history (appending a restart event, never replacing it — the
-whole point of `/sprint-block` is recording an analysis worth keeping),
-`audit_rounds`, `live_test_rounds`, and the original `started` timestamp,
-and resets every gate-result field, because a repaired file has to clear
-both gates again. `/sprint-block` refuses only the closed-sprint half —
+always preserves history (appending a restart event, never replacing it —
+the whole point of `/sprint-block` is recording an analysis worth
+keeping), `audit_rounds`, `live_test_rounds`, and the original `started`
+timestamp. `/sprint-block` refuses only the closed-sprint half —
 `complete` or `aborted` — leaving which *in-flight* phases may legitimately
 be blocked (including mid-LiveQA-loop) as the still-open design question
-it always was; see the current sprint's own Out of Scope for why the two
+it always was; see sprint 36's Out of Scope for why the two
 questions were kept apart.
+
+**What happens to the GATE-RESULT fields on re-filing now splits in two
+(sprint 39, Req 2), extending sprint 36's own always-reset behaviour
+rather than replacing it.** The problem sprint 36 left standing: a sprint
+blocked over a real but unmade *decision* — nothing about the sprint FILE
+itself needed to change — still paid a full re-audit, re-ship, and
+re-live-test on every re-file, because `cmd_start` reset every gate-result
+field unconditionally. That in turn exposed a second, underlying defect:
+`sprint_lifecycle.py`'s own bookkeeping write of the `status:` frontmatter
+line (on start, block, complete, and abort) was indistinguishable, to the
+audited-file hash, from a real human edit — so "the file is unchanged
+since QA1's audit" could never even be expressed for a sprint that had
+been through a block/restart cycle. Sprint 39 fixed the hash first (the
+sprint-file hash excludes only that one lifecycle-owned line, never
+`title:`/`original_title:` — a rename still forces a fresh audit) and
+built the gate-preserving path on top of it: re-filing from `blocked` now
+keeps every gate-result field and both round counts, returning straight to
+the sprint's exact pre-block phase, **only** when a QA1 PASS is on record,
+`/sprint-block` recorded which phase it was blocked from, and the sprint
+file hashes equal, right now, to what QA1 actually audited. Every other
+case — the file actually changed, no PASS existed yet, or the pre-block
+phase wasn't tracked (a sprint blocked before this existed) — falls back
+to exactly sprint 36's own behaviour: phase back to `dev_build`, every
+gate-result field reset. The printed output always says which path ran,
+and for a reset, why. Restoring the phase never bypasses `/sprint-ship`'s,
+`/sprint-reship`'s, or `/sprint-liveqa`'s own tree/commit-content checks —
+those still compare what's actually being shipped or tested against what
+was actually audited, regardless of which path a re-file took.
 
 `/sprint-rename` (sprint 25) isn't a lifecycle-phase transition at all — it doesn't move a sprint between phases, it corrects a title that's stopped describing the sprint's current scope, the same kind of correction `/sprint-new` makes at creation. Master Controller here follows that same ownership, not the Dev Team pattern `/sprint-abort` uses. It updates the registry entry, the sprint file's own frontmatter, and the filename together, and preserves the original title. It never touches phase, verdicts, hashes, or history — but it does edit the sprint file itself, so renaming a sprint that already has a QA1 PASS on record will correctly require a fresh `/sprint-qa1` audit before `/sprint-dev-done` proceeds, the same as any other post-PASS edit to that file.
 

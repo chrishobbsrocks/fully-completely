@@ -719,3 +719,70 @@ bound. That is not the same as "the profiles don't work" — it is "the
 profiles' own justification document overstated what had been shown,"
 which is a narrower and more honest claim, and the distinction is this
 whole sprint's point.
+
+## Sprint 39, Req 3: the liveqa `node *` grant — measured directly, not read from sprint 19
+
+**Version anchor: `claude 2.1.276`.** Headless `liveqa` could run `npm
+install *` and `npx *` but had no `node *` entry at all, so a target
+whose live check is a Node script (rather than a browser flow or an
+`npx` install) could only be reported CONDITIONAL, for want of a tool
+grant. Before adding one, this sprint's own Req 3a required measuring
+three things live, on the current CLI version, rather than reasoning
+from this document's own sprint-19 finding ("`curl -o`, `node -e` and
+`bash -c` all write outside the working directory with zero denials") or
+from run-role.js's own "POSTURE, STATED HONESTLY" comment, which had
+been asserting that finding's conclusion without a fresh measurement of
+its own.
+
+**Method, matching this document's own DIRECT (not model-narration)
+standard**: real headless `liveqa` launches via this repo's own
+`headlessLaunchArgs()`/`ROLES` (never a hand-built approximation of the
+launch argv), `--output-format json`, verdict decided ONLY from the
+structured `permission_denials` array plus an independently-checked
+filesystem side effect — the model's own narration was printed for
+context only, never used to decide a verdict, the same discipline
+`scripts/permission-gate-repro.js` established. Every probe run TWICE,
+minimum (this document's own sprint-26 bar), and every verdict below
+reproduced identically on both runs.
+
+| # | Probe | Verdict (2/2) | Grade |
+|---|---|---|---|
+| (i) | `node writer.js <marker>` inside cwd, profile as it stood BEFORE this grant | DENIED — real `Bash` denial, zero side effect | CONFIRMED |
+| (ii) | `npx writer.js <marker>` (a real local script, run by path — no registry dependency) inside cwd, the EXISTING `npx *` grant | ALLOWED — zero denials, file written, content matched | CONFIRMED |
+| (iii)-inside | `node -e "...writeFileSync(<marker in cwd>)..."`, a CANDIDATE profile with `Bash(node *)` spliced into the real argv | ALLOWED — zero denials | CONFIRMED |
+| (iii)-outside | same, marker path under `os.tmpdir()` | ALLOWED — zero denials | CONFIRMED |
+| bonus (not in Req 3a's own enumeration, run for a fair Req 3b comparison) | does the EXISTING `npx *` grant ALSO reach outside cwd, the way `node -e` does? | ALLOWED whenever the launch actually attempted the probed command; 2 of 4 launches instead investigated the probe script with `ls`/`git log`/`git status` — liveqa's own documented forced-probing suspicion (this document's "Explicitly untested" section and `permission-gate-repro.js`'s own limitation #1), not a CLI signal either time | WEAK — real, consistent whenever exercised; the verdict *classifier* didn't reproduce cleanly because of incidental model-added investigation, not because the underlying write behaviour differed |
+
+**Round 1 of this measurement (discarded, not counted above)**: the
+probe harness initially lived outside the repo (`/tmp`), so simply
+reading/exploring it tripped Claude Code's own separate working-
+directory sandbox and produced false DENIED verdicts unrelated to the
+`allowedTools` question under test — a harness-placement mistake, not a
+CLI finding. Moved inside `REPO_ROOT` and re-run for the round recorded
+above.
+
+**Req 3b conclusion:** `node *` does **not** genuinely widen what this
+profile can already do. `npx *`, already granted, already reaches
+arbitrary program-mediated writes both inside and outside the working
+directory with zero observed confinement, confirmed fresh at this
+version — not carried forward from sprint 19's own finding at a
+different one. No escalation to Master Controller under Req 3b's own
+branching ("if (ii) shows `npx *` already permits equivalent writes, say
+so and state that `node *` does not widen what LiveQA can do"). A
+narrower grant (excluding `-e`/`--eval`/`-p`) was considered and
+rejected: (iii) confirms `node -e` itself succeeds under the candidate
+grant, and since `npx` already provides an equally arbitrary execution/
+write surface, excluding `-e` specifically would buy no measured safety,
+only inconsistency with a capability this profile already has. See
+`run-role.js`'s own "MEASURED, sprint 39" comment, directly above
+`HEADLESS_PERMISSION_PROFILES`, for the grant itself and this same
+reasoning stated at the point it's applied.
+
+**A real limitation, named rather than hidden**: the raw harness output
+(exact argv, full `permission_denials` JSON, side-effect file contents)
+for this round was not preserved on disk — the harness and its probe
+files lived under `/tmp` and in repo-root scratch files, all deleted
+after use, never committed. This entry is the record of what was
+measured, not a pointer to preserved transcripts; reproducing it means
+re-running `permission-gate-repro.js`'s own method against a `node *`
+candidate grant, not reading a saved log this document links to.
