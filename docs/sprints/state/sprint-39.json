@@ -1,11 +1,11 @@
 {
   "id": 39,
   "title": "Give a blocked sprint a way back that keeps its gates, let headless LiveQA run node, and stop a named failing test standing in for a decision",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "05c117f2a035d5b8157c5d0462b57cb81bad799bfc08bdf31a860d4d38347d5c",
   "qa1_audited_tree_hash": "21d1c7ce729be5f987844fb58ca90a888fa3f88739b7ef746eebaea7184f48ae",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "c49185b8d55cd7e8ea3879c73c490ef6f1881816",
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "audit_rounds": 2,
@@ -36,12 +36,18 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-21T17:41:52+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=c49185b8d55cd7e8ea3879c73c490ef6f1881816 | ci=green: 1 CI run(s) for c49185b8d55cd7e8ea3879c73c490ef6f1881816 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-21T17:30:36+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-21T17:41:52+00:00"
   },
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines"
 }
