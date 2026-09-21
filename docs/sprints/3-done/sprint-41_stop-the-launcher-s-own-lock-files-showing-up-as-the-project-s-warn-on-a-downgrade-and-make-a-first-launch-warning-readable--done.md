@@ -2,7 +2,7 @@
 id: 41
 title: "Stop the launcher's own lock files showing up as the project's, warn on a downgrade, and make a first-launch warning readable"
 epic: "Workshop readiness: a new attendee's first launch reads correctly"
-status: in_progress
+status: done
 created: 2026-09-21T00:00:00+00:00
 ---
 
