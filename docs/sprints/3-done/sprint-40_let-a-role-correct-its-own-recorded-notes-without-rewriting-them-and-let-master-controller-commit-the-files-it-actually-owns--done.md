@@ -2,7 +2,7 @@
 id: 40
 title: "Let a role correct its own recorded notes without rewriting them, and let Master Controller commit the files it actually owns"
 epic: "Downstream findings: FMC ShowOffTest run"
-status: in_progress
+status: done
 created: 2026-09-18T05:05:39+00:00
 ---
 
