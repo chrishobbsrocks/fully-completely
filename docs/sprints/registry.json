@@ -245,8 +245,8 @@
     "41": {
       "title": "Stop the launcher's own lock files showing up as the project's, warn on a downgrade, and make a first-launch warning readable",
       "epic": "Workshop readiness: a new attendee's first launch reads correctly",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-41_stop-the-launcher-s-own-lock-files-showing-up-as-the-project-s-warn-on-a-downgrade-and-make-a-first-launch-warning-readable.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-41_stop-the-launcher-s-own-lock-files-showing-up-as-the-project-s-warn-on-a-downgrade-and-make-a-first-launch-warning-readable.md"
     }
   }
 }
