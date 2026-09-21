@@ -1,12 +1,12 @@
 {
   "id": 40,
   "title": "Let a role correct its own recorded notes without rewriting them, and let Master Controller commit the files it actually owns",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "b9764264ecfe5e5204dd1d48b009159c051eed5be0ddd09453cecf2ca724e118",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "a41fc61570c35c90ecdebba5fd1e93722592ae20616a6c543b48fd1951100987",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "05739f838ae26e76d5eb184873dd204491143216",
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
@@ -38,11 +38,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-21T19:08:43+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=05739f838ae26e76d5eb184873dd204491143216 | ci=green: 1 CI run(s) for 05739f838ae26e76d5eb184873dd204491143216 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-21T19:01:19+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-21T19:08:43+00:00"
   }
 }
