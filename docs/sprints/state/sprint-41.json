@@ -1,12 +1,12 @@
 {
   "id": 41,
   "title": "Stop the launcher's own lock files showing up as the project's, warn on a downgrade, and make a first-launch warning readable",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "0073e812f49b8a644c454f3d8575b164905aca62e8e814db10feff88d7a1e2f3",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "f458ea93b0bdccf5ad5e3bd5513d9a1e96b13020af2c10773e99027fb0fda5fc",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "d72255a48a282090259bc740c3883ac248ff96eb",
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
@@ -44,11 +44,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-21T20:23:01+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=d72255a48a282090259bc740c3883ac248ff96eb | ci=green: 1 CI run(s) for d72255a48a282090259bc740c3883ac248ff96eb all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-21T20:18:14+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-21T20:23:01+00:00"
   }
 }
