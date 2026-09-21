@@ -153,11 +153,24 @@ before. The sprint file is where it belongs, before anyone builds.
    imply more than holds.
 
    **6b.** `git status` ran in a headless `liveqa` session although no git entry
-   is in that profile's grant. Establish why: a broader grant than the file
-   suggests, a default, or something else. If the profile is effectively wider
-   than documented, that is a real finding about every headless profile, not only
-   LiveQA's — report it to Master Controller with the measurements before
-   changing any grant.
+   is in that profile's grant — while, in sprint 40's live test, a headless QA1's
+   bookkeeping `git commit` hit "This command requires approval" and left the
+   state file uncommitted. Both observations are about the same two profiles, and
+   they do not fit one story: establish what a headless gate profile can actually
+   do with git today — which operations pass, which prompt, and why any pass at
+   all when no git entry exists. Measure `status`, `log`, `diff`, `add`, and the
+   exact pathspec commit CLAUDE.md's sprint 32 rule prescribes, for both `qa1`
+   and `liveqa`, recording the CLI version.
+
+   **This has a live consequence, which is why it is measured here and fixed
+   next:** CLAUDE.md requires each gate role to commit its own verdict
+   bookkeeping before handing off, and headless that rule is currently
+   unfollowable — the verdict is recorded in the state file and left uncommitted,
+   which is the exact durability gap sprints 27 and 32 exist to close. Report the
+   measurements to Master Controller, who will file the fix as its own sprint. Do
+   not design or ship that fix here, and note that the obvious narrow pattern is
+   already known to leak: sprint 36 measured `Bash(git commit -m *)` admitting
+   `git commit -m "msg" scripts/tool.js` with zero denials.
 
    **6c.** Neither 6a nor 6b changes a permission grant in this sprint. The
    deliverable is measurement, the recorded finding, and documentation that
@@ -228,7 +241,8 @@ obtained at gate time, record what was attempted and what failed.
 - **Req 5 live:** read the installed template and agent files in the target.
 - **Req 6 live:** in a headless `liveqa` session on the published version,
   re-confirm 6a (a write out while `ls` of the same path is blocked) and 6b
-  (`git status`), recording the CLI version at gate time — it has moved twice
+  (each named git operation, for both gate profiles, including the sprint 32
+  pathspec commit), recording the CLI version at gate time — it has moved twice
   during this epic.
 - Per `liveqa.md` step 7: run every runnable check before recording.
 
