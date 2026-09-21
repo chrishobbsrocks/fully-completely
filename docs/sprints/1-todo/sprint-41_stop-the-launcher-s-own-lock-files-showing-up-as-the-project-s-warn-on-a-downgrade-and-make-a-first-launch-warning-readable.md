@@ -137,12 +137,38 @@ before. The sprint file is where it belongs, before anyone builds.
    **5c.** Update `.claude/agents/master-controller.md` so the section is filled
    in at planning time rather than after a failure.
 
-6. **Version bump to one above the currently published version**, with a
-   CHANGELOG entry covering Reqs 1–5. Authorized by the user for this sprint.
+6. **Two measured gaps between the documented permission model and what it
+   actually does.** Both were observed by LiveQA during sprint 39's live test, on
+   CLI 2.1.278, and neither is yet known to be a defect — this requirement is to
+   find out, not to fix.
+
+   **6a.** A write outside the launch working directory succeeds through
+   `node`/`npx` while an `ls` of that same path is blocked by Claude Code's own
+   guard. Sprints 12 and 19 documented the confinement of shell redirects and the
+   Write tool, and 19 found program-mediated writes escape it; this adds that
+   reads and writes of the same outside path are treated differently. Re-measure
+   deliberately, record it in `docs/sprint-12-permission-scope-findings.md`
+   against the CLI version, and state plainly in `liveqa.md` and `qa1.md` what a
+   scoped profile does and does not actually confine — those files currently
+   imply more than holds.
+
+   **6b.** `git status` ran in a headless `liveqa` session although no git entry
+   is in that profile's grant. Establish why: a broader grant than the file
+   suggests, a default, or something else. If the profile is effectively wider
+   than documented, that is a real finding about every headless profile, not only
+   LiveQA's — report it to Master Controller with the measurements before
+   changing any grant.
+
+   **6c.** Neither 6a nor 6b changes a permission grant in this sprint. The
+   deliverable is measurement, the recorded finding, and documentation that
+   matches what was measured.
+
+7. **Version bump to one above the currently published version**, with a
+   CHANGELOG entry covering Reqs 1–6. Authorized by the user for this sprint.
    Confirm with `npm view fully-completely version` at build time — 0.2.13 when
    this file was written; sprints 39 and 40 both publish before this one.
 
-7. **Tests.** `node scripts/launcher_test.js` and the Python lifecycle tests both
+8. **Tests.** `node scripts/launcher_test.js` and the Python lifecycle tests both
    pass, with new tests for: the managed block containing the lock patterns and
    an upgrade adding them to an existing `.gitignore` while preserving unrelated
    lines; the pattern/constant divergence guard from Req 1; downgrade, upgrade and
@@ -171,8 +197,12 @@ before. The sprint file is where it belongs, before anyone builds.
   history assertion exists. **4c** `cmd_complete` is byte-unchanged.
 - **Req 5** — the template section and all three agent files carry the wording;
   the guidance says routed-to-Master-Controller, not warning-in-notes.
-- **Req 6** — version is published+1 at build time; CHANGELOG present.
-- **Req 7** — QA1 runs both suites itself.
+- **Req 6** — the measurements exist for both 6a and 6b with CLI version and
+  conditions, from real runs; the findings doc and the agent files say what was
+  actually measured, no more. **6c** — grep the diff: no permission grant
+  changed. A conclusion reasoned rather than run is a FAIL.
+- **Req 7** — version is published+1 at build time; CHANGELOG present.
+- **Req 8** — QA1 runs both suites itself.
 
 **LiveQA verifies live, after Pipeman publishes (with the user's own go-ahead):**
 
@@ -196,6 +226,10 @@ obtained at gate time, record what was attempted and what failed.
   appears and no launch is delayed. If Req 3c applied, confirm the measurements
   shipped and nothing changed.
 - **Req 5 live:** read the installed template and agent files in the target.
+- **Req 6 live:** in a headless `liveqa` session on the published version,
+  re-confirm 6a (a write out while `ls` of the same path is blocked) and 6b
+  (`git status`), recording the CLI version at gate time — it has moved twice
+  during this epic.
 - Per `liveqa.md` step 7: run every runnable check before recording.
 
 ### Out of Scope
@@ -242,5 +276,7 @@ obtained at gate time, record what was attempted and what failed.
   "measured, nothing shipped, recorded" a legitimate outcome.
 - **Req 4a passes while proving nothing.** — QA1 plants a violation and confirms
   the test fails.
+- **Req 6 turns into a grant change mid-sprint.** — Req 6c forbids it; a real
+  finding routes to Master Controller for its own sprint.
 - **Req 5 becomes paperwork.** — "None" is explicitly a normal answer; the
   requirement is the routing rule in QA1's guidance, not the section being full.
