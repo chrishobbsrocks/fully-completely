@@ -239,8 +239,8 @@
     "40": {
       "title": "Let a role correct its own recorded notes without rewriting them, and let Master Controller commit the files it actually owns",
       "epic": "Downstream findings: FMC ShowOffTest run",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-40_let-a-role-correct-its-own-recorded-notes-without-rewriting-them-and-let-master-controller-commit-the-files-it-actually-owns.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-40_let-a-role-correct-its-own-recorded-notes-without-rewriting-them-and-let-master-controller-commit-the-files-it-actually-owns.md"
     },
     "41": {
       "title": "Stop the launcher's own lock files showing up as the project's, warn on a downgrade, and make a first-launch warning readable",
