@@ -1,5 +1,5 @@
 {
-  "next_id": 41,
+  "next_id": 42,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -241,6 +241,12 @@
       "epic": "Downstream findings: FMC ShowOffTest run",
       "status": "todo",
       "file": "docs/sprints/1-todo/sprint-40_let-a-role-correct-its-own-recorded-notes-without-rewriting-them-and-let-master-controller-commit-the-files-it-actually-owns.md"
+    },
+    "41": {
+      "title": "Stop the launcher's own lock files showing up as the project's, warn on a downgrade, and make a first-launch warning readable",
+      "epic": "Workshop readiness: a new attendee's first launch reads correctly",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-41_stop-the-launcher-s-own-lock-files-showing-up-as-the-project-s-warn-on-a-downgrade-and-make-a-first-launch-warning-readable.md"
     }
   }
 }
