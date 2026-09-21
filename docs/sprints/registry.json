@@ -251,8 +251,8 @@
     "42": {
       "title": "Let a headless gate role commit its own verdict, and carry the collision warning into a headless session",
       "epic": "Headless parity: a role running headless can follow the same rules as one at a keyboard",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-42_let-a-headless-gate-role-commit-its-own-verdict-and-carry-the-collision-warning-into-a-headless-session.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-42_let-a-headless-gate-role-commit-its-own-verdict-and-carry-the-collision-warning-into-a-headless-session.md"
     }
   }
 }

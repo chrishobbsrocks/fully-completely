@@ -2,7 +2,7 @@
 id: 42
 title: "Let a headless gate role commit its own verdict, and carry the collision warning into a headless session"
 epic: "Headless parity: a role running headless can follow the same rules as one at a keyboard"
-status: todo
+status: in_progress
 created: 2026-09-22T00:00:00+00:00
 ---
 
