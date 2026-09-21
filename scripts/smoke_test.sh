@@ -2096,6 +2096,37 @@ assert after['history'][-1]['event'] == 'sprint_restarted'
 assert 'KEPT' in after['history'][-1]['detail'], f\"restart event should say gates were kept: {after['history'][-1]}\"
 "
 
+echo "== sprint 39, Req 2a (QA1 round 1 finding): blocking an already-blocked sprint must not overwrite its real pre-block phase with 'blocked' itself =="
+SPRINT_DOUBLE_BLOCK=$(new_sprint "Double block sprint")
+$SCRIPT start "$SPRINT_DOUBLE_BLOCK" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_DOUBLE_BLOCK work"
+$SCRIPT qa1 "$SPRINT_DOUBLE_BLOCK" --verdict PASS --notes "looked good" > /dev/null
+$SCRIPT dev-done "$SPRINT_DOUBLE_BLOCK" > /dev/null
+DOUBLE_BLOCK_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_DOUBLE_BLOCK" --commit "$DOUBLE_BLOCK_COMMIT" > /dev/null
+$SCRIPT block "$SPRINT_DOUBLE_BLOCK" --reason "first block, waiting on a decision" > /dev/null
+# Block it a SECOND time, before ever re-filing -- the exact QA1 repro:
+# the second block used to overwrite pre_block_phase with "blocked"
+# itself.
+$SCRIPT block "$SPRINT_DOUBLE_BLOCK" --reason "still waiting, blocking again" > /dev/null
+python3 -c "
+import json
+s = json.load(open('docs/sprints/state/sprint-${SPRINT_DOUBLE_BLOCK}.json'))
+assert s['pre_block_phase'] == 'liveqa_live', f\"a second block must not overwrite the real pre-block phase with 'blocked' itself: {s['pre_block_phase']}\"
+"
+DOUBLE_BLOCK_START_OUT=$($SCRIPT start "$SPRINT_DOUBLE_BLOCK" 2>&1)
+echo "$DOUBLE_BLOCK_START_OUT" | grep -qi "Gates KEPT" || \
+  fail "re-filing a twice-blocked, unchanged, PASSed sprint should still say gates were KEPT -- output: $DOUBLE_BLOCK_START_OUT"
+DOUBLE_BLOCK_ENTRY_STATUS=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_DOUBLE_BLOCK}']['status'])")
+python3 -c "
+import json
+s = json.load(open('docs/sprints/state/sprint-${SPRINT_DOUBLE_BLOCK}.json'))
+assert s['phase'] == 'liveqa_live', f\"a twice-blocked sprint must come back to its real pre-block phase, not 'blocked': {s['phase']}\"
+assert s['phase'] != 'blocked', 'the exact wedge QA1 found -- state stuck at blocked while the registry/file already moved'
+"
+[ "$DOUBLE_BLOCK_ENTRY_STATUS" = "in_progress" ] || \
+  fail "registry status must agree with the restored phase, not disagree (the exact wedge QA1 found) -- got: $DOUBLE_BLOCK_ENTRY_STATUS"
+
 echo "== sprint 39, Req 2d: code committed while blocked is still refused at ship -- restoring the phase does not bypass the tree-content checks =="
 SPRINT_KEEP_SHIP=$(new_sprint "Gate-preserving restart before ship sprint")
 $SCRIPT start "$SPRINT_KEEP_SHIP" > /dev/null

@@ -3155,10 +3155,33 @@ def cmd_block(args) -> None:
         # block phase must be known). Both a post-hoc field (.get()'d
         # elsewhere, per CLAUDE.md's state-field convention) and named in
         # the history event itself, so it's visible either way.
-        pre_block_phase = state["phase"]
-        state["pre_block_phase"] = pre_block_phase
+        #
+        # QA1 round 1 FINDING, FIXED HERE: blocking a sprint that is
+        # ALREADY blocked used to overwrite state["pre_block_phase"] with
+        # "blocked" itself -- this function's own phase gate only refuses
+        # complete/aborted (sprint 36's own deliberate, still-open design
+        # choice, unchanged by this fix -- see this sprint's own Out of
+        # Scope), so a second /sprint-block on an already-blocked sprint
+        # was always syntactically allowed. The bug: capturing
+        # state["phase"] unconditionally meant the SECOND block recorded
+        # "blocked" as the phase to return to, not the sprint's real
+        # pre-block phase from the FIRST block. cmd_start's own Req 2b
+        # then genuinely restored phase to "blocked" while the file/
+        # registry had already moved to 2-in-progress/in_progress -- a
+        # self-contradictory, wedged state nothing could act on, and the
+        # NEXT re-file attempt (pre_block_phase now cleared to None by
+        # that wedge-producing restart) silently fell through to a full
+        # gate reset, losing exactly the preservation this sprint adds.
+        # FIX: only capture the CURRENT phase as pre_block_phase when the
+        # sprint isn't already blocked; every subsequent block while still
+        # blocked leaves the ORIGINAL pre-block phase (from the real,
+        # first block) untouched, so no number of repeated blocks can ever
+        # overwrite it with "blocked" itself.
+        current_phase = state["phase"]
+        if current_phase != "blocked":
+            state["pre_block_phase"] = current_phase
         state["phase"] = "blocked"
-        log_event(state, actor, "blocked", f"{reason} | blocked from phase={pre_block_phase}")
+        log_event(state, actor, "blocked", f"{reason} | blocked from phase={current_phase}")
         save_state(args.id, state)
     print(f"Sprint {args.id} blocked, returned to the planner. Sprint id and analysis preserved, "
           "nothing moved to 5-abandoned.")
