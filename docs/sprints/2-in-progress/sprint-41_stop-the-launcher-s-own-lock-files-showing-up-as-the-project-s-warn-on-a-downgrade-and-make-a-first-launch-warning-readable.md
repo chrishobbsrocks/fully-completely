@@ -162,11 +162,26 @@ before. The sprint file is where it belongs, before anyone builds.
    exact pathspec commit CLAUDE.md's sprint 32 rule prescribes, for both `qa1`
    and `liveqa`, recording the CLI version.
 
+   **The first hypothesis to rule out, supplied by FMC's Master Controller (21
+   September):** Claude Code's own built-in safe-read allowlist may cover some
+   read-only git commands independently of a profile's `allowedTools`. FMC hit
+   exactly this on day one — `git status` succeeded while `git add` was refused,
+   under a profile granting neither. If that is what is happening here, the
+   measurement will show reads passing and writes refused, which is a different
+   shape from a grant and means our profiles are NOT wider than documented. Test
+   it directly and say which shape the evidence shows; do not report "the profile
+   is wider than documented" without ruling this out first.
+
    **This has a live consequence, which is why it is measured here and fixed
    next:** CLAUDE.md requires each gate role to commit its own verdict
    bookkeeping before handing off, and headless that rule is currently
    unfollowable — the verdict is recorded in the state file and left uncommitted,
-   which is the exact durability gap sprints 27 and 32 exist to close. Report the
+   which is the exact durability gap sprints 27 and 32 exist to close. It has already
+   happened in a real run: FMC reports that in their live Show Off run, a
+   headless LiveQA round-3 PASS sat uncommitted in
+   `docs/sprints/state/sprint-2.json` until Dev Team happened to sweep it into
+   the close commit, so anything reading git alone would have seen a sprint
+   closing with no live verdict on record. Report the
    measurements to Master Controller, who will file the fix as its own sprint. Do
    not design or ship that fix here, and note that the obvious narrow pattern is
    already known to leak: sprint 36 measured `Bash(git commit -m *)` admitting
