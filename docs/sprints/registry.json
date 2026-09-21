@@ -1,5 +1,5 @@
 {
-  "next_id": 42,
+  "next_id": 43,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -247,6 +247,12 @@
       "epic": "Workshop readiness: a new attendee's first launch reads correctly",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-41_stop-the-launcher-s-own-lock-files-showing-up-as-the-project-s-warn-on-a-downgrade-and-make-a-first-launch-warning-readable--done.md"
+    },
+    "42": {
+      "title": "Let a headless gate role commit its own verdict, and carry the collision warning into a headless session",
+      "epic": "Headless parity: a role running headless can follow the same rules as one at a keyboard",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-42_let-a-headless-gate-role-commit-its-own-verdict-and-carry-the-collision-warning-into-a-headless-session.md"
     }
   }
 }
