@@ -1,7 +1,7 @@
 {
   "id": 39,
   "title": "Give a blocked sprint a way back that keeps its gates, let headless LiveQA run node, and stop a named failing test standing in for a decision",
-  "phase": "qa1_audit",
+  "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "05c117f2a035d5b8157c5d0462b57cb81bad799bfc08bdf31a860d4d38347d5c",
   "qa1_audited_tree_hash": "21d1c7ce729be5f987844fb58ca90a888fa3f88739b7ef746eebaea7184f48ae",
@@ -30,12 +30,18 @@
       "actor": "qa1",
       "event": "audit",
       "detail": "PASS: QA1 gate-1 audit, sprint 39, round 2. Audited commit c49185b. The sprint file was re-read and is unchanged since bdbce89, so the requirements have not moved. Verdict: PASS.\n\nSCOPE. The delta dd690a6..c49185b outside bookkeeping is scripts/sprint_lifecycle.py (cmd_block) and scripts/smoke_test.sh. The other changed paths are sprint 41's definition file and the registry, both excluded from the audited tree hash. HEAD is c49185b.\n\n1. Round-1 finding (double-block wedge): FIXED, and demonstrated fixed.\n - cmd_block now captures pre_block_phase only when the current phase isn't already \"blocked\", so a repeat block leaves the real pre-block phase intact. The history event still records the phase the command was actually run from. cmd_block's own phase gate is untouched, which is right: which in-flight phases may be blocked stays sprint 36's open question and this sprint's Out of Scope.\n - Re-ran QA1's round-1 repro in a scratch install built from c49185b's own scripts, going further than the original (three blocks, not two):\n   - Sprint taken to liveqa_live (start, commit, PASS, dev-done, ship).\n   - /sprint-block three times: phase blocked, pre_block_phase liveqa_live (not \"blocked\"), registry blocked.\n   - /sprint-start: prints \"Gates KEPT ... returns directly to its pre-block phase, 'liveqa_live'\", lands at liveqa_live with the PASS intact, pre_block_phase cleared, registry in_progress. Phase, registry and folder all agree. The round-1 wedge is gone.\n   - Block once more after the restore and re-file again: pre_block_phase is liveqa_live again, and the sprint returns to liveqa_live. The new guard does not break a legitimate second block/restart cycle.\n - Negative control, run by QA1: with dd690a6's cmd_block restored under c49185b's tests, smoke_test.sh exits 1 on \"a second block must not overwrite the real pre-block phase with 'blocked' itself: blocked\", which is exactly QA1's round-1 repro. With the fix restored it passes. So the new test is a real regression test.\n\n2. Everything verified in round 1 still holds at c49185b, unchanged by this diff: the Req 1 hash scheme and its excluded-lines constant, Req 1a's legacy-hash replay, Req 1b's override re-stamp, Req 2a/2b/2c's three conditions and printed paths, Req 2d (code committed while blocked still refused at ship/reship), Req 2e's docs, Req 3's measured node grant record, Req 4's citation rule in all three agent files, and Req 5's version bump with CHANGELOG. See round 1's notes for the evidence behind each.\n\n3. Req 6: QA1 ran both suites at c49185b in a clean clone. node scripts/launcher_test.js: ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh: ALL SMOKE TESTS PASSED, exit 0. pyflakes is clean.\n\nADVISORY, carried from round 1, not blocking. Req 3's permission measurements are anchored at claude 2.1.276 and this machine is now on 2.1.278. warnIfPermissionFindingsStale exists for exactly this; LiveQA re-confirms the denials at gate time and should record the version it saw.\n\nFOR LIVEQA. In addition to the sprint's own criteria, block a sprint twice (or more) before re-filing and confirm it returns to its real pre-block phase, with registry status and the sprint file's folder agreeing."
+    },
+    {
+      "ts": "2026-09-21T17:30:36+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-21T17:30:10+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-21T17:30:36+00:00"
   },
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines"
 }
