@@ -42,6 +42,15 @@ value never share a line in that formatting):
       f-string/template. Flagged unless the value is the doc convention's
       own "..." placeholder.
 
+Both shapes accept any of the three quote-delimiter forms this
+codebase's own languages actually use (QA1's round-2 audit demonstrated
+the first two gaps here): a plain `'...'`/`"..."` literal, a JS template
+literal (`` `...` ``, backtick-delimited -- also the shape a JS
+interpolated string takes), and a Python string with a one- or
+two-letter prefix immediately before the quote (`f"..."`, `rb'...'`,
+etc. -- an f-string's own `f` sits between the separator and the quote,
+which an earlier version of this pattern didn't allow for).
+
 argparse's own flag DEFINITION in sprint_lifecycle.py (`add_argument`) is
 checked separately and held to a stricter rule: its `default=` must be
 the empty string, always -- a non-empty default here is itself exactly
@@ -49,23 +58,26 @@ the violation this guard exists to catch (a missing --user-said would
 then silently succeed instead of refusing).
 
 KNOWN LIMIT, stated rather than implied (QA1's round-1 audit asked for
-this explicitly): this is a literal-value scan, not a data-flow analysis.
-A value passed through a variable or built from string concatenation --
+this explicitly, and round 2 confirmed the boundary is now drawn in the
+right place): this is a literal-value scan, not a data-flow analysis. A
+value passed through a variable or built from string concatenation --
 `const said = buildText(); args.push('--user-said', said)` -- is
 invisible to it; no purely lexical scan can see through that without
 becoming a real static analyzer. This guard defends against a literal
-appearing in the source, which is the shape every real drift this project
-has actually seen has taken (sprint 9's publish-ordering prose, a doc's
-own worked example) -- it is not a substitute for a human reviewer
-reading a diff that introduces a --user-said-shaped variable at all.
+appearing in the source, in any of the quote forms this codebase's
+languages actually use (plain, template-literal, or prefixed), which is
+the shape every real drift this project has actually seen has taken
+(sprint 9's publish-ordering prose, a doc's own worked example) -- it is
+not a substitute for a human reviewer reading a diff that introduces a
+--user-said-shaped variable at all.
 
 This is a static scan, not an execution -- it never runs any of the code
-it reads. Verified by negative control (this sprint, both the original
-round and QA1's round-1 audit): a JS argv-builder call (single-line and
-reformatted across multiple lines), a non-empty argparse default, a doc
-example with real text instead of "...", and an `=`-separated CLI example
-each independently made this script exit non-zero; the real, unmodified
-repository tree scans clean.
+it reads. Verified by negative control across two QA1 audit rounds: a JS
+argv-builder call (single-line, reformatted across multiple lines, and
+as a template literal), a Python f-string value, a non-empty argparse
+default, a doc example with real text instead of "...", and an
+`=`-separated CLI example each independently made this script exit
+non-zero; the real, unmodified repository tree scans clean throughout.
 """
 import re
 import sys
@@ -93,17 +105,27 @@ SAFE_VALUES = {"", "..."}
 DEFINITION_RE = re.compile(
     r'add_argument\(\s*["\']--user-said(?:-file)?["\']\s*,\s*default\s*=\s*(?P<q>["\'])(?P<val>.*?)(?P=q)'
 )
+# Every quote-delimiter form this codebase's languages actually use:
+# plain single/double quotes, and a JS template literal's backtick.
+# QUOTE_PREFIX (QA1's round-2 finding) allows a Python string prefix --
+# f"...", rb'...', etc. -- to sit between a separator/comma and the
+# opening quote; it's optional (matches zero letters) so every case that
+# never had a prefix works exactly as before.
+_QUOTE = """['"`]"""
+_QUOTE_PREFIX = r"[a-zA-Z]{0,2}"
 # (a) CODE-ARRAY shape. \s* already matches newlines (no re.DOTALL needed
 # for that -- only `.` requires it, and this pattern uses none between the
 # tokens themselves), which is what lets this match a call reformatted
 # across multiple lines.
 PATTERN_ARRAY = re.compile(
-    r"""(?P<fq>['"])--user-said(?:-file)?(?P=fq)\s*,\s*(?P<vq>['"])(?P<val>.*?)(?P=vq)"""
+    r"(?P<fq>" + _QUOTE + r")--user-said(?:-file)?(?P=fq)\s*,\s*" +
+    _QUOTE_PREFIX + r"(?P<vq>" + _QUOTE + r")(?P<val>.*?)(?P=vq)"
 )
 # (b) CLI-EXAMPLE shape. Separator is whitespace OR a literal `=`
 # (argparse's own `--flag=value` form), not whitespace alone.
 PATTERN_CLI = re.compile(
-    r"""--user-said(?:-file)?(?:\s+|=)\s*(?P<vq>['"])(?P<val>.*?)(?P=vq)"""
+    r"--user-said(?:-file)?(?:\s+|=)\s*" +
+    _QUOTE_PREFIX + r"(?P<vq>" + _QUOTE + r")(?P<val>.*?)(?P=vq)"
 )
 
 
@@ -200,6 +222,18 @@ _SELFTEST_CASES = [
     (
         "= -separated CLI example (QA1 round 1 finding)",
         'Example: `/sprint-complete 41 --user-said="yes, close it"`\n',
+        True,
+    ),
+    (
+        "JS template literal value (QA1 round 2 finding)",
+        "function evil(a) {\n"
+        "  a.push('--user-said', `Approved by the user`);\n"
+        "  return a;\n}\n",
+        True,
+    ),
+    (
+        "Python f-string value (QA1 round 2 finding)",
+        'args += ["--user-said", f"Approved by {who}"]\n',
         True,
     ),
     (
