@@ -13,6 +13,44 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.17 — Sprint 42
+
+Two items, both measured facts rather than hypotheses, both established by
+LiveQA during sprints 40 and 41: a headless gate role (QA1, LiveQA) could
+not commit its own verdict bookkeeping at all, and a headless role had no
+way to see a role-collision warning in its own transcript, only on a stderr
+stream nothing reads.
+
+- **A headless gate role can now commit exactly its own verdict, and
+  nothing else.** `scripts/gate-commit.js` is a new wrapper — a sibling to
+  `mc-commit.js`, not an extension of it, since the two enforce genuinely
+  different boundaries (no staging at all, vs. mc-commit.js's own
+  unconditional `git add`; a single path matching
+  `docs/sprints/state/sprint-<N>.json` for a real, registered sprint id,
+  not a directory-prefix allowlist). Enforced in real code, not a
+  permission pattern: refuses any other path, more than one path, `..`
+  traversal, a symlink whose target leaves the directory (real targets,
+  not dangling-link false positives), prefix lookalikes, absolute paths
+  outside the repo, a nonexistent sprint id, and any unrecognized
+  argument — no environment variable or flag widens it. QA1's and
+  LiveQA's headless profiles are granted `Bash(node scripts/gate-commit.js
+  *)` and nothing else git-shaped — no raw `git` pattern was added to
+  either, closing exactly the gap sprint 41's Req 6b measured (`claude
+  2.1.278`: this exact pathspec commit was denied outright for both roles
+  headless, "This command requires approval," even with the broader
+  owned-repository grant set). An operator-launched gate role keeps
+  committing the documented raw `git commit` form, unchanged — this is an
+  additional route, headless only, never a replacement.
+- **A headless role now receives the collision warning in its own opening
+  prompt**, the headless counterpart to sprint 41's interactive fix — both
+  the built-in prompt and a `--prompt-file` override. Framed in explicit
+  `=== FRAMEWORK NOTICE ===` markers rather than a bare join, since a
+  `--prompt-file`'s content is the operator's own and a bare join could be
+  mistaken for part of it. Still also goes to stderr, unconditionally —
+  additive, not a replacement. A clean launch (no warning) produces
+  byte-identical prompt text to before this release; nothing is delayed or
+  gated.
+
 ## 0.2.16 — Sprint 41
 
 Four items, all found by running the framework rather than reading it: the

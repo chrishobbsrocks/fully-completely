@@ -2012,6 +2012,7 @@ const {
   initialPrompt: RR_initialPrompt,
   devTeam2ResumePrompt: RR_devTeam2ResumePrompt,
   headlessPrompt,
+  headlessCollisionNotice,
 } = require('./launcher/prompts');
 const {
   freshLaunchArgs,
@@ -2231,6 +2232,46 @@ test('run-role: headlessLaunchArgs (Req 1) prepends the instruction for every re
   }
 });
 
+// Sprint 42, Req 2: the headless counterpart to sprint 41's interactive
+// collision-warning fix. Before this sprint, roleWarning was computed in
+// main() (unconditionally, both paths), printed to stderr, and then
+// simply never reached runHeadless()/headlessLaunchArgs() at all -- a
+// headless role had no way to see it in its own transcript.
+test('run-role: headlessLaunchArgs prepends the collision notice (wrapped, not a bare join) when a roleWarning is given, ahead of the task prompt', () => {
+  const warning = 'NOTE: another QA1 session was recorded starting at 2026-01-01T00:00:00.000Z in this same tree.';
+  const args = headlessLaunchArgs(QA1_ROLE, 'THE TASK PROMPT', { roleWarning: warning });
+  const finalPrompt = args.slice(-1)[0];
+  assert.ok(finalPrompt.includes('=== FRAMEWORK NOTICE (not part of your task) ==='), 'the wrapped notice markers must be present');
+  assert.ok(finalPrompt.includes(warning), 'the warning text itself must be present verbatim');
+  assert.ok(finalPrompt.includes('=== END NOTICE ==='), 'the closing marker must be present');
+  assert.ok(finalPrompt.endsWith('THE TASK PROMPT'), 'the original task prompt must still be present, untouched, at the end');
+  // Ordering: QA1 holds a script-invocation grant, so grantedFormsInstruction
+  // fires too -- it must still come first (Req 2a: its own existing
+  // behavior/position is unchanged), the collision notice sits between it
+  // and the task.
+  const permInstructionIdx = finalPrompt.indexOf('PERMISSION GRANT');
+  const noticeIdx = finalPrompt.indexOf('=== FRAMEWORK NOTICE');
+  const taskIdx = finalPrompt.indexOf('THE TASK PROMPT');
+  assert.ok(permInstructionIdx !== -1 && permInstructionIdx < noticeIdx, 'permission-grant instruction must precede the collision notice');
+  assert.ok(noticeIdx < taskIdx, 'collision notice must precede the task prompt');
+});
+
+test('run-role: headlessLaunchArgs with no roleWarning is byte-identical to omitting the option entirely (Req 2a)', () => {
+  const withUndefined = headlessLaunchArgs(QA1_ROLE, 'THE TASK PROMPT', { roleWarning: undefined });
+  const omitted = headlessLaunchArgs(QA1_ROLE, 'THE TASK PROMPT', {});
+  assert.deepStrictEqual(withUndefined, omitted);
+  assert.ok(!withUndefined.slice(-1)[0].includes('FRAMEWORK NOTICE'), 'no notice text should appear when there is no warning');
+});
+
+test('run-role: headlessCollisionNotice (prompts.js) wraps the warning with clear framework-inserted markers, never a bare join', () => {
+  const warning = 'NOTE: a collision warning with some content.';
+  const notice = headlessCollisionNotice(warning);
+  assert.notStrictEqual(notice, warning, 'must be more than the bare warning text -- a bare join is exactly the shape Req 2b forbids');
+  assert.ok(notice.startsWith('=== FRAMEWORK NOTICE'));
+  assert.ok(notice.endsWith('=== END NOTICE ==='));
+  assert.doesNotMatch(notice, /"/, 'no literal double-quote character, same discipline as devTeam2ResumePrompt() and initialPrompt()');
+});
+
 test('run-role: headlessLaunchArgs supplies the persona via --agents JSON (--bare cannot read .claude/agents/*.md)', () => {
   const args = headlessLaunchArgs(QA1_ROLE, 'do the audit');
   const meta = readAgentMeta('qa1');
@@ -2373,6 +2414,25 @@ test('run-role: headlessPermissionArgs grants master-controller ONLY the mc-comm
   // wrapper.
   assert.ok(!HEADLESS_PERMISSION_PROFILES['master-controller'].eligibleForOwnedRepositoryGrant,
     'master-controller must not be eligible for the broad owned-repository grant');
+});
+
+test('run-role: headlessPermissionArgs grants qa1 and liveqa ONLY the gate-commit.js wrapper for git -- exactly one new grant each, no raw git pattern at all (sprint 42, Req 1d)', () => {
+  // The gate-role counterpart to the master-controller test above --
+  // sprint 41's Req 6b measured that this exact CLAUDE.md-required
+  // pathspec commit was DENIED headless for both these roles (see
+  // docs/sprint-12-permission-scope-findings.md's "Sprint 41, Req 6"
+  // section), and scripts/gate-commit.js is the fix (a sibling to
+  // mc-commit.js, not an extension of it -- see that script's own header
+  // comment for why).
+  for (const roleId of ['qa1', 'liveqa']) {
+    const role = RUN_ROLE_ROLES.find((r) => r.id === roleId);
+    const args = headlessPermissionArgs(role);
+    const allowedIdx = args.indexOf('--allowedTools');
+    assert.ok(allowedIdx !== -1, `${roleId} must pass --allowedTools`);
+    const allowed = args[allowedIdx + 1];
+    assert.ok(allowed.includes('Bash(node scripts/gate-commit.js *)'), `${roleId} must be allowed to invoke the gate-commit.js wrapper`);
+    assert.ok(!allowed.includes('git'), `${roleId} must not have ANY raw git pattern in allowedTools -- the wrapper script is the only path to git`);
+  }
 });
 
 test('run-role: headlessPermissionArgs grants pipeman its narrow npm subcommands and nothing about npm to qa1', () => {
@@ -2571,9 +2631,19 @@ test('run-role: sprint 23 touched only the liveqa profile -- every other role\'s
     needsTestCommand: true,
     eligibleForOwnedRepositoryGrant: true,
   });
+  // Sprint 42, Req 1d: qa1's OWN profile legitimately changed here too --
+  // the second deliberate exception to "byte-identical since sprint 23"
+  // this test's own name claims. Gains exactly one new grant
+  // (scripts/gate-commit.js, the sibling wrapper to mc-commit.js above --
+  // see that script's own header comment for why it is a sibling and not
+  // an extension), no raw `git` pattern.
   assert.deepStrictEqual(HEADLESS_PERMISSION_PROFILES.qa1, {
     disallowedTools: ['Edit', 'Write'],
-    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    allowedTools: [
+      'Bash(node scripts/run-lifecycle.js *)',
+      'Bash(python3 scripts/sprint_lifecycle.py *)',
+      'Bash(node scripts/gate-commit.js *)',
+    ],
     needsTestCommand: true,
     eligibleForOwnedRepositoryGrant: true,
   });
@@ -3353,6 +3423,53 @@ test('run-role CLI (real subprocess, sprint 38 third fix round): a planted pre-0
     const claims = JSON.parse(fs.readFileSync(claimsPath, 'utf8'));
     assert.strictEqual(claims.qa1.length, 1, 'the untrackable pre-0.2.13 entry must be gone -- only the second launch\'s own trackable claim remains');
     assert.notStrictEqual(claims.qa1[0].sessionId, 'pre-0.2.13-session', 'the surviving entry must be the second launch\'s own, not the old planted one');
+  });
+});
+
+test('run-role CLI (real subprocess, sprint 42 Req 2): a headless launch that fires a collision warning actually carries it in the prompt reaching claude, not only on stderr', () => {
+  // Before this sprint, roleWarning was computed in main() and printed to
+  // stderr (still true, asserted below), but never threaded into
+  // runHeadless()/headlessLaunchArgs() at all -- a headless session had
+  // no way to see it in its own transcript. readArgv() below inspects
+  // the EXACT argv the fake claude binary actually received, so this
+  // asserts the real end-to-end wiring, not just the pure-function unit
+  // tests above.
+  withFakeClaude(true, ({ dir, readArgv }) => {
+    const claimsPath = freshRoleClaimsPathOverride();
+    fs.mkdirSync(path.dirname(claimsPath), { recursive: true });
+    // An undeterminable (pid-less) record always warns (Req 1a, sprint
+    // 38) -- the simplest reliable way to force a real warning without
+    // needing a genuinely-still-alive process for this end-to-end check.
+    fs.writeFileSync(claimsPath, JSON.stringify({
+      qa1: { sessionId: 'req-2-fixture-session', startedAt: '2026-01-01T00:00:00.000Z' },
+    }, null, 2) + '\n');
+    const env = { PATH: dir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: claimsPath };
+
+    const result = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
+    assert.strictEqual(result.status, 0);
+    assert.match(
+      stripPermissionRecordLine(result.stderr), /NOTE: another QA1 session was recorded starting at/,
+      'the stderr NOTE must still fire, unconditionally (this is additive, not a replacement)'
+    );
+
+    const argv = readArgv();
+    const finalPrompt = argv[argv.length - 1];
+    assert.ok(finalPrompt, 'the fake claude must have actually been invoked with a prompt');
+    assert.match(finalPrompt, /=== FRAMEWORK NOTICE \(not part of your task\) ===/, 'the wrapped notice must be in the ACTUAL prompt sent to claude');
+    assert.match(finalPrompt, /NOTE: another QA1 session was recorded starting at/, 'the real warning text must be in that prompt');
+    assert.match(finalPrompt, /=== END NOTICE ===/);
+  });
+});
+
+test('run-role CLI (real subprocess, sprint 42 Req 2a): a clean headless launch (no collision) never adds the notice to the prompt', () => {
+  withFakeClaude(true, ({ dir, readArgv }) => {
+    const env = { PATH: dir, FULLY_COMPLETELY_ROLE_CLAIMS_PATH_OVERRIDE: freshRoleClaimsPathOverride() };
+    const result = runRoleCli(['--headless', '--agent', 'qa1', '--sprint', '4'], env);
+    assert.strictEqual(result.status, 0);
+    const argv = readArgv();
+    const finalPrompt = argv[argv.length - 1];
+    assert.ok(finalPrompt, 'the fake claude must have actually been invoked with a prompt');
+    assert.doesNotMatch(finalPrompt, /FRAMEWORK NOTICE/, 'no collision -- no notice should appear anywhere in the prompt');
   });
 });
 
@@ -4765,6 +4882,256 @@ test('mc-commit.js: source-level check -- the only git subcommands this file eve
     for (const forbidden of ["'-a'", "'-A'", "'--all'", "'.'", "'-am'"]) {
       assert.ok(!argsSrc.includes(forbidden), `no spawnSync('git', [...]) call may ever pass ${forbidden}`);
     }
+  }
+});
+
+// -------------------------------------------------------------------------
+// gate-commit.js: sprint 42, Req 1. A sibling to mc-commit.js, not an
+// extension of it -- see gate-commit.js's own header comment for why
+// (different commit shape: no staging at all vs. mc-commit.js's own
+// unconditional `git add`; different, narrower allowlist: exactly one
+// path matching docs/sprints/state/sprint-<N>.json for a real, existing
+// sprint id, not a directory prefix). Every test below is a real
+// subprocess run against a real scratch git repo, matching mc-commit.js's
+// own established test shape exactly -- deterministic, non-model-mediated.
+// -------------------------------------------------------------------------
+const GATE_COMMIT_PATH = path.join(REPO_ROOT, 'scripts', 'gate-commit.js');
+
+function withGateCommitFixture(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-gate-commit-test-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+    fs.copyFileSync(GATE_COMMIT_PATH, path.join(dir, 'scripts', 'gate-commit.js'));
+    fs.mkdirSync(path.join(dir, 'docs', 'sprints', 'state'), { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    execFileSync('git', ['config', 'user.email', 'gate-commit-test@example.com'], { cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'Gate Commit Test'], { cwd: dir });
+    // Sprint 1 is the "real, existing sprint" fixture every test below
+    // uses -- registered AND its state file already tracked, matching the
+    // real shape a gate role's verdict file is always in by the time this
+    // script runs (created by /sprint-start, committed by Dev Team).
+    fs.writeFileSync(
+      path.join(dir, 'docs', 'sprints', 'registry.json'),
+      JSON.stringify({ next_id: 2, sprints: { 1: { file: 'docs/sprints/1-todo/sprint-1_x.md' } } }, null, 2) + '\n'
+    );
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json'), JSON.stringify({ phase: 'qa1_audit' }) + '\n');
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-q', '-m', 'baseline'], { cwd: dir });
+    fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function runGateCommit(dir, args) {
+  return spawnSync(process.execPath, [path.join(dir, 'scripts', 'gate-commit.js'), ...args], { cwd: dir, encoding: 'utf8' });
+}
+
+function gateCommitGitLog(dir) {
+  return execFileSync('git', ['log', '--oneline'], { cwd: dir, encoding: 'utf8' }).trim();
+}
+
+test('gate-commit.js: commits a real, already-tracked verdict file with NO staging step (the exact CLAUDE.md gate-role shape, unlike mc-commit.js)', () => {
+  withGateCommitFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json'), JSON.stringify({ phase: 'qa1_audit', qa1_audit_result: 'PASS' }) + '\n');
+    const result = runGateCommit(dir, ['--message', 'Record sprint 1 QA1 audit', '--', 'docs/sprints/state/sprint-1.json']);
+    assert.strictEqual(result.status, 0, `expected success, got: ${result.stderr}`);
+    assert.match(gateCommitGitLog(dir), /Record sprint 1 QA1 audit/);
+    // --name-only lists exactly the changed paths, one per line, no
+    // summary line to account for (git show --stat's own trailing "N
+    // file(s) changed..." line would otherwise make a length check like
+    // this one count the wrong thing).
+    const changedFiles = execFileSync('git', ['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    assert.strictEqual(changedFiles, 'docs/sprints/state/sprint-1.json', 'exactly one file must appear in the commit -- nothing else swept in');
+  });
+});
+
+test('gate-commit.js: refuses (git status still shows the change, nothing committed) when the target path is not actually tracked yet -- this is not a substitute for /sprint-start\'s own initial commit', () => {
+  withGateCommitFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-2.json'), '{}\n');
+    fs.writeFileSync(
+      path.join(dir, 'docs', 'sprints', 'registry.json'),
+      JSON.stringify({ next_id: 3, sprints: { 1: {}, 2: {} } }, null, 2) + '\n'
+    );
+    const result = runGateCommit(dir, ['--message', 'x', '--', 'docs/sprints/state/sprint-2.json']);
+    assert.notStrictEqual(result.status, 0, 'an untracked verdict file must not commit');
+    assert.match(result.stderr, /did not match any file/, 'git\'s own real error must surface unmodified');
+  });
+});
+
+test('gate-commit.js: refuses any path other than docs/sprints/state/sprint-<N>.json', () => {
+  withGateCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, 'scripts_other'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'scripts_other', 'tool.js'), 'x\n');
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-q', '-m', 'add tool'], { cwd: dir });
+    const before = gateCommitGitLog(dir);
+    const result = runGateCommit(dir, ['--message', 'x', '--', 'scripts_other/tool.js']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /does not resolve to a path this script is allowed to commit/);
+    assert.strictEqual(gateCommitGitLog(dir), before, 'nothing must have been committed');
+  });
+});
+
+test('gate-commit.js: refuses more than one path (Req 1a -- a gate role commits exactly its own verdict, never a batch)', () => {
+  withGateCommitFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json'), JSON.stringify({ x: 1 }) + '\n');
+    const before = gateCommitGitLog(dir);
+    const result = runGateCommit(dir, ['--message', 'x', '--', 'docs/sprints/state/sprint-1.json', 'docs/sprints/state/sprint-1.json']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /Exactly one path is required, got 2/);
+    assert.strictEqual(gateCommitGitLog(dir), before);
+  });
+});
+
+test('gate-commit.js: refuses a `..` traversal path', () => {
+  withGateCommitFixture((dir) => {
+    const before = gateCommitGitLog(dir);
+    const result = runGateCommit(dir, ['--message', 'x', '--', 'docs/sprints/state/../../../etc/passwd']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /does not resolve to a path this script is allowed to commit/);
+    assert.strictEqual(gateCommitGitLog(dir), before);
+  });
+});
+
+test('gate-commit.js: refuses a string-prefix trick (docs/sprints/state-evil/ is not docs/sprints/state/)', () => {
+  withGateCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, 'docs', 'sprints', 'state-evil'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state-evil', 'sprint-1.json'), '{}\n');
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-q', '-m', 'add lookalike'], { cwd: dir });
+    const before = gateCommitGitLog(dir);
+    const result = runGateCommit(dir, ['--message', 'x', '--', 'docs/sprints/state-evil/sprint-1.json']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /does not resolve to a path this script is allowed to commit/);
+    assert.strictEqual(gateCommitGitLog(dir), before);
+  });
+});
+
+test('gate-commit.js: refuses an absolute path outside the repository', () => {
+  withGateCommitFixture((dir) => {
+    const before = gateCommitGitLog(dir);
+    const result = runGateCommit(dir, ['--message', 'x', '--', '/etc/hostname']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /does not resolve to a path this script is allowed to commit/);
+    assert.strictEqual(gateCommitGitLog(dir), before);
+  });
+});
+
+test('gate-commit.js: refuses a nonexistent sprint id -- the filename pattern alone is not enough, it must be a real, registered sprint', () => {
+  withGateCommitFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-99.json'), '{}\n');
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-q', '-m', 'add fake sprint state'], { cwd: dir });
+    const before = gateCommitGitLog(dir);
+    const result = runGateCommit(dir, ['--message', 'x', '--', 'docs/sprints/state/sprint-99.json']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /has no entry in docs\/sprints\/registry\.json/);
+    assert.strictEqual(gateCommitGitLog(dir), before);
+  });
+});
+
+// Sprint 40's LiveQA reported a FALSE symlink escape from a DANGLING
+// link (one whose target doesn't exist) -- this fixture uses a REAL
+// target, exactly the shape this sprint's own Req 4 requires tested.
+test('gate-commit.js: refuses a symlink with a REAL target outside the directory (not a dangling-link false positive)', () => {
+  withGateCommitFixture((dir) => {
+    const outsideTarget = path.join(dir, 'outside-secret.txt');
+    fs.writeFileSync(outsideTarget, 'real secret content\n');
+    const linkPath = path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json');
+    fs.rmSync(linkPath);
+    fs.symlinkSync(outsideTarget, linkPath);
+    const before = gateCommitGitLog(dir);
+    const result = runGateCommit(dir, ['--message', 'x', '--', 'docs/sprints/state/sprint-1.json']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /is a symlink \(or sits behind one\)/);
+    assert.strictEqual(gateCommitGitLog(dir), before);
+  });
+});
+
+test('gate-commit.js: refuses any attempt to pass extra/unrecognized arguments (no --amend, no -a, no way to widen the surface)', () => {
+  withGateCommitFixture((dir) => {
+    const before = gateCommitGitLog(dir);
+    for (const extra of ['--amend', '-a', '--all', '--force']) {
+      const result = runGateCommit(dir, ['--message', 'x', extra, '--', 'docs/sprints/state/sprint-1.json']);
+      assert.notStrictEqual(result.status, 0, `${extra} must be refused`);
+      assert.match(result.stderr, /Unrecognized argument/);
+    }
+    assert.strictEqual(gateCommitGitLog(dir), before);
+  });
+});
+
+test('gate-commit.js: refuses when no path is given -- there is no "commit everything" mode', () => {
+  withGateCommitFixture((dir) => {
+    const result = runGateCommit(dir, ['--message', 'x', '--']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /A path is required/);
+  });
+});
+
+test('gate-commit.js: refuses an empty commit message', () => {
+  withGateCommitFixture((dir) => {
+    const result = runGateCommit(dir, ['--message', '  ', '--', 'docs/sprints/state/sprint-1.json']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /non-empty commit message is required/);
+  });
+});
+
+test('gate-commit.js: --message-file reads the message from a file (matching mc-commit.js\'s/qa1.md\'s own established --notes-file pattern)', () => {
+  withGateCommitFixture((dir) => {
+    const msgPath = path.join(dir, 'msg.txt');
+    fs.writeFileSync(msgPath, 'Record sprint 1 LiveQA verdict\n');
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json'), JSON.stringify({ x: 2 }) + '\n');
+    const result = runGateCommit(dir, ['--message-file', msgPath, '--', 'docs/sprints/state/sprint-1.json']);
+    assert.strictEqual(result.status, 0, `expected success, got: ${result.stderr}`);
+    assert.match(gateCommitGitLog(dir), /Record sprint 1 LiveQA verdict/);
+  });
+});
+
+test('gate-commit.js: never reaches a remote -- a real bare remote receives nothing (no code path here ever constructs a git push)', () => {
+  withGateCommitFixture((dir) => {
+    const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-gate-commit-remote-'));
+    execFileSync('git', ['init', '-q', '--bare'], { cwd: remoteDir });
+    execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: dir });
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json'), JSON.stringify({ x: 3 }) + '\n');
+    const result = runGateCommit(dir, ['--message', 'local only', '--', 'docs/sprints/state/sprint-1.json']);
+    assert.strictEqual(result.status, 0);
+    const remoteRefs = execFileSync('git', ['for-each-ref'], { cwd: remoteDir, encoding: 'utf8' }).trim();
+    assert.strictEqual(remoteRefs, '', 'a real bare remote must have received nothing at all');
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+  });
+});
+
+test('gate-commit.js: no environment variable or CLI flag widens the allowlist at run time (Req 1a\'s own "no escape hatch", matching mc-commit.js\'s Req 2c precedent)', () => {
+  withGateCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, 'scripts_other'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'scripts_other', 'tool.js'), 'x\n');
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-q', '-m', 'add tool'], { cwd: dir });
+    const before = gateCommitGitLog(dir);
+    const result = spawnSync(
+      process.execPath,
+      [path.join(dir, 'scripts', 'gate-commit.js'), '--message', 'x', '--', 'scripts_other/tool.js'],
+      { cwd: dir, encoding: 'utf8', env: { ...process.env, GATE_COMMIT_ALLOW_ALL: '1', FULLY_COMPLETELY_GATE_COMMIT_UNSAFE: '1' } }
+    );
+    assert.notStrictEqual(result.status, 0);
+    assert.strictEqual(gateCommitGitLog(dir), before);
+  });
+});
+
+test('gate-commit.js: source-level check -- no code path reads process.env to build or extend the allowlist', () => {
+  const src = fs.readFileSync(GATE_COMMIT_PATH, 'utf8');
+  assert.doesNotMatch(src, /process\.env/, 'gate-commit.js must never read any environment variable');
+});
+
+test('gate-commit.js: source-level check -- the only git subcommand this file ever passes to spawnSync is "commit" (never "add", "push", "-a", "-A", "--all", or ".")', () => {
+  const src = fs.readFileSync(GATE_COMMIT_PATH, 'utf8');
+  const spawnCalls = [...src.matchAll(/spawnSync\('git',\s*\[([^\]]*)\]/g)].map((m) => m[1]);
+  assert.strictEqual(spawnCalls.length, 1, `expected exactly one spawnSync('git', [...]) call site, found ${spawnCalls.length}`);
+  const argsSrc = spawnCalls[0];
+  assert.ok(/'commit'/.test(argsSrc), 'expected the one call to pass "commit"');
+  for (const forbidden of ["'add'", "'push'", "'-a'", "'-A'", "'--all'", "'.'", "'-am'", "'--amend'"]) {
+    assert.ok(!argsSrc.includes(forbidden), `no spawnSync('git', [...]) call may ever pass ${forbidden}`);
   }
 });
 

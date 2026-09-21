@@ -220,6 +220,27 @@ recorded. And "Only Pipeman ever runs `git push`, no exceptions, ever"
 push, not the commit, and a local commit is explicitly sanctioned for
 whichever role produced it, gate roles included.
 
+**A headless gate role commits through a wrapper instead of raw `git`,
+same commit, different mechanism** (sprint 42, Req 1 — closing a gap
+sprint 41's Req 6b measured: under `claude 2.1.278`, this exact pathspec
+commit was denied outright for both QA1 and LiveQA running headless,
+"This command requires approval," even with the broader owned-repository
+grant set, while `git status`/`log`/`diff` all passed with zero denials —
+a real read/write split at the tool-permission layer, not this
+framework's profiles being wider or narrower than documented). QA1 and
+LiveQA's headless profiles are granted `Bash(node scripts/gate-commit.js
+*)` and nothing else git-shaped — no raw `git` pattern was added to
+either, matching sprint 36's own finding that a permission pattern cannot
+actually confine `git commit`/`git add` to one path. `gate-commit.js` is
+a sibling to `mc-commit.js`, not an extension of it: it enforces, in real
+code, exactly the shape this section describes — no staging, one path,
+`docs/sprints/state/sprint-<N>.json` for a real sprint id and nothing
+else — see that script's own header comment for the full boundary. This
+is an *additional* route that exists only for a headless launch; an
+operator-launched gate role keeps committing exactly the raw `git commit
+-m "..." docs/sprints/state/sprint-<N>.json` form documented two
+paragraphs up, unchanged.
+
 **QA1 audits code, not just the sprint file**: the same PASS that records
 the sprint-file hash also records the audited commit's tree hash, the
 content of the files at that commit, not its SHA. `/sprint-ship` resolves

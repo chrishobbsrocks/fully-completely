@@ -174,6 +174,13 @@ const FRAMEWORK_OWNED = [
   // list that a real installed project needs at runtime is also in
   // FRAMEWORK_OWNED").
   'scripts/mc-commit.js',
+  // Sprint 42, Req 1: the gate-role counterpart to mc-commit.js above --
+  // same lesson applies here from the start rather than being rediscovered:
+  // this MUST be listed both here and in package.json's own "files"
+  // allowlist, or a real install/upgrade never copies it while qa1/liveqa's
+  // headless profile (scripts/launcher/run-role.js) still names it as their
+  // only path to git.
+  'scripts/gate-commit.js',
   'scripts/smoke_test.sh',
   'scripts/dev2_worktree.sh',
   'scripts/worktree_test.sh',

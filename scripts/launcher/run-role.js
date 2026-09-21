@@ -63,7 +63,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 const { ROOT, ROLES, agentFilePath, readAgentMeta, agentBody } = require('./agents');
-const { initialPrompt, devTeam2ResumePrompt, headlessPrompt } = require('./prompts');
+const { initialPrompt, devTeam2ResumePrompt, headlessPrompt, headlessCollisionNotice } = require('./prompts');
 const { resolveSession } = require('./session');
 const { checkAuth } = require('./auth');
 const { parseJsonc } = require('./jsonc');
@@ -970,7 +970,19 @@ const HEADLESS_PERMISSION_PROFILES = {
   },
   qa1: {
     disallowedTools: ['Edit', 'Write'],
-    allowedTools: ['Bash(node scripts/run-lifecycle.js *)', 'Bash(python3 scripts/sprint_lifecycle.py *)'],
+    // Sprint 42, Req 1d: the one addition below is this role's entire
+    // git-shaped surface -- no raw `git` pattern is added alongside it.
+    // See scripts/gate-commit.js's own header comment for the full
+    // reasoning (a sibling to mc-commit.js, not an extension of it) and
+    // sprint 41's Req 6b measurement (docs/sprint-12-permission-scope-
+    // findings.md) for why this grant exists at all: under `claude
+    // 2.1.278`, this role's own sprint-32 pathspec bookkeeping commit was
+    // DENIED headless, with or without eligibleForOwnedRepositoryGrant.
+    allowedTools: [
+      'Bash(node scripts/run-lifecycle.js *)',
+      'Bash(python3 scripts/sprint_lifecycle.py *)',
+      'Bash(node scripts/gate-commit.js *)',
+    ],
     needsTestCommand: true,
     eligibleForOwnedRepositoryGrant: true,
   },
@@ -999,6 +1011,18 @@ const HEADLESS_PERMISSION_PROFILES = {
     allowedTools: [
       'Bash(node scripts/run-lifecycle.js *)',
       'Bash(python3 scripts/sprint_lifecycle.py *)',
+      // Sprint 42, Req 1d: listed explicitly, even though this role's
+      // own `Bash(node *)` grant a few lines down already, structurally,
+      // covers invoking this script -- the explicit form here is what
+      // extractGrantedCommandForms()/grantedFormsInstruction() (sprint
+      // 31) surface to the role as the exact, named form to use for its
+      // own bookkeeping commit, rather than leaving it to infer a correct
+      // invocation from the generic "node ..." instruction the broad
+      // grant alone would produce. See scripts/gate-commit.js's own
+      // header comment and sprint 41's Req 6b measurement
+      // (docs/sprint-12-permission-scope-findings.md) for why this grant
+      // exists at all.
+      'Bash(node scripts/gate-commit.js *)',
       'Bash(npm install *)',
       'Bash(npx *)',
       // Sprint 39, Req 3: `node <script>` was denied before this grant --
@@ -1538,7 +1562,17 @@ function grantedFormsInstruction(forms) {
   );
 }
 
-function headlessLaunchArgs(role, prompt, { bare, settings, root = ROOT } = {}) {
+// `roleWarning` (sprint 42, Req 2): the collision NOTE from
+// role-claims.js's `roleClaimWarning()`, or null/undefined on a clean
+// launch -- the headless counterpart to sprint 41's interactive fix.
+// Prepended to `prompt` (wrapped in headlessCollisionNotice()'s own
+// framework-notice markers, never a bare join -- see that function's own
+// comment for why) BEFORE grantedFormsInstruction below, so the final
+// order when both apply is: permission-grant instruction, then the
+// collision notice, then the actual task prompt -- grantedFormsInstruction
+// keeps its existing position exactly (Req 2a: nothing about its own
+// behavior changes), the collision notice is the only new insertion.
+function headlessLaunchArgs(role, prompt, { bare, settings, root = ROOT, roleWarning } = {}) {
   const meta = readAgentMeta(role.id);
   const body = agentBody(role.id);
   const definition = { description: (meta && meta.description) || role.label, prompt: body };
@@ -1619,10 +1653,16 @@ function headlessLaunchArgs(role, prompt, { bare, settings, root = ROOT } = {}) 
     const i = base.indexOf('--allowedTools');
     return i === -1 ? null : base[i + 1];
   })();
+  // Sprint 42, Req 2: applied to `prompt` before grantedFormsInstruction
+  // below wraps the result -- see this function's own header comment for
+  // the ordering and headlessCollisionNotice()'s own comment (prompts.js)
+  // for why this is never a bare join. No-op (byte-identical `prompt`)
+  // when roleWarning is falsy -- Req 2a.
+  const promptWithWarning = roleWarning ? `${headlessCollisionNotice(roleWarning)}\n\n${prompt}` : prompt;
   const grantedForms = extractGrantedCommandForms(allowedToolsValue);
   const promptWithInstruction = grantedForms.length
-    ? `${grantedFormsInstruction(grantedForms)}\n\n${prompt}`
-    : prompt;
+    ? `${grantedFormsInstruction(grantedForms)}\n\n${promptWithWarning}`
+    : promptWithWarning;
 
   const finalArgs = bare
     ? [...base, '--bare', ...(settings ? ['--settings', settings] : []), promptWithInstruction]
@@ -1712,7 +1752,7 @@ function emitPermissionRecord(role, finalArgs, root) {
   console.error(`PERMISSION_RECORD: ${JSON.stringify(record)}`);
 }
 
-async function runHeadless(role, { sprintId, promptFilePath, bare, settings }) {
+async function runHeadless(role, { sprintId, promptFilePath, bare, settings, roleWarning }) {
   // Sprint 21, Req 3: warn, never gate, before anything else in this
   // function can fail() and exit early -- a stale-evidence warning that
   // only ever printed on the runs that happened to succeed would miss
@@ -1808,7 +1848,7 @@ async function runHeadless(role, { sprintId, promptFilePath, bare, settings }) {
   }
   let result;
   try {
-    result = await spawnClaude(headlessLaunchArgs(role, prompt, { bare, settings }));
+    result = await spawnClaude(headlessLaunchArgs(role, prompt, { bare, settings, roleWarning }));
   } finally {
     if (protectedEnvFiles.length > 0) unprotectEnvFiles(protectedEnvFiles);
   }
@@ -1911,7 +1951,7 @@ async function main() {
           'override, read from a path, never passed as prompt text on a command line).'
       );
     }
-    await runHeadless(role, { sprintId, promptFilePath, bare, settings });
+    await runHeadless(role, { sprintId, promptFilePath, bare, settings, roleWarning });
     return;
   }
 

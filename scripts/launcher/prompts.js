@@ -143,4 +143,27 @@ function headlessPrompt(role, sprintId) {
   return `${headlessScaffold(role.label, sprintId)}\n\n${pointer.replace('{sprintId}', sprintId)}`;
 }
 
-module.exports = { initialPrompt, devTeam2ResumePrompt, headlessPrompt };
+// Sprint 42, Req 2: a headless role's own opening prompt can be one of
+// two things -- this framework's own built-in template (headlessPrompt()
+// above), or content read verbatim from an operator-supplied
+// --prompt-file. initialPrompt()'s own warning-prepend (sprint 41) gets
+// away with a bare `${warning}\n\n${body}` join because its own body is
+// always this framework's fixed wording; that join is NOT safe to reuse
+// here, because the headless body can be the OPERATOR'S OWN content, and
+// a bare join gives no visible boundary telling a reader (human or model)
+// where the framework's own inserted text ends and the operator's begins
+// (Req 2b's own explicit requirement). This wraps the warning in plain
+// ASCII markers instead, so it reads unambiguously as framework-inserted
+// on either platform -- and, same discipline as devTeam2ResumePrompt()
+// above, no literal " character anywhere in it, since this can reach a
+// headless launch's own single argv element the same way an interactive
+// one does.
+function headlessCollisionNotice(warning) {
+  return (
+    `=== FRAMEWORK NOTICE (not part of your task) ===\n` +
+    `${warning}\n` +
+    `=== END NOTICE ===`
+  );
+}
+
+module.exports = { initialPrompt, devTeam2ResumePrompt, headlessPrompt, headlessCollisionNotice };
