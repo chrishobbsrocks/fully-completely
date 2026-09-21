@@ -233,8 +233,8 @@
     "39": {
       "title": "Give a blocked sprint a way back that keeps its gates, let headless LiveQA run node, and stop a named failing test standing in for a decision",
       "epic": "Downstream findings: FMC ShowOffTest run",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-39_give-a-blocked-sprint-a-way-back-that-keeps-its-gates-let-headless-liveqa-run-node-and-stop-a-named-failing-test-standing-in-for-a-decision.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-39_give-a-blocked-sprint-a-way-back-that-keeps-its-gates-let-headless-liveqa-run-node-and-stop-a-named-failing-test-standing-in-for-a-decision--done.md"
     },
     "40": {
       "title": "Let a role correct its own recorded notes without rewriting them, and let Master Controller commit the files it actually owns",
