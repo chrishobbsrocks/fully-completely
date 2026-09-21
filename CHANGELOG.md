@@ -13,6 +13,48 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.15 — Sprint 40
+
+Two more downstream findings from FMC's own use of this framework, routed
+upstream: a role had no way to correct a factual error in its own
+recorded notes without also reopening the verdict, and Master Controller
+had no sanctioned way to commit files it legitimately owns outside
+`docs/sprints/`.
+
+- **New command, `/sprint-correct <N> --event-index <N> --correction "..."`.**
+  An append-only correction to a role's own recorded notes — never a
+  verdict, gate, or phase change. Closes a real gap: LiveQA once recorded
+  a sound verdict whose notes contained a factual error of its own making
+  (a claim about a check that had silently failed, and the wrong branch
+  name), verified the claim properly afterward, and had nowhere to put
+  the correction because the sprint had already moved phase — the
+  original record still carried the wrong claim. The new command appends
+  exactly one history event and touches nothing else (diffed and tested:
+  every gate-result field, both audit hashes, `last_shipped_commit`,
+  round counts, and phase are all provably unchanged), with no phase
+  restriction — it works on a `complete` sprint too. Only the role that
+  recorded the target event may correct it: the correcting actor is
+  compared against the target event's own recorded actor and refused on
+  any mismatch, naming both, and refused outright if `CLAUDE_CODE_AGENT`
+  isn't set at all. `/sprint-status --verbose` shows the correction
+  attached to (immediately after) the event it corrects, and the plain
+  summary names that a correction exists even without `--verbose`.
+- **`mc-commit.js` now also accepts `CLAUDE.md` itself and a project's own
+  decisions log**, alongside the unchanged `docs/sprints/` default — each
+  an exact single-file match, never a directory. The decisions-log path
+  is read from the project's own declared configuration
+  (`.vscode/settings.json`'s `"fullyCompletely.mcDecisionsLog"`, the same
+  way this framework already reads a project's declared test command),
+  falling back to a documented default (`docs/decisions.md`) when nothing
+  is declared. Validated fresh on every run, never trusted: a declared
+  path that resolves outside the repository, inside `.git/`, inside a
+  path this framework's own installer manages, to a directory rather than
+  a file, or in a glob/list shape is refused with the specific reason —
+  it never silently falls back to the default. No escape hatch: no
+  environment variable or flag can widen the allowlist at run time,
+  confirmed by both a source-level check and a real subprocess test.
+  Full measurement record: `docs/sprint-36-mc-commit-permission-findings.md`.
+
 ## 0.2.14 — Sprint 39
 
 Three downstream findings from FMC's own use of this framework, routed

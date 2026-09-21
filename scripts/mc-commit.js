@@ -59,12 +59,18 @@
 //
 // Behavior: resolves each given <path> against the repository root and
 // refuses (exit 1, prints why, runs no git command at all) if ANY path
-// does not resolve strictly inside docs/sprints/ — a `..` segment, an
-// absolute path elsewhere, a symlink pointing outside, or a path that
-// merely shares "docs/sprints" as a string prefix without being a real
-// path inside it (e.g. `docs/sprints-evil/x`) are all refused. Requires
-// at least one path — there is no "commit everything" mode. If every
-// path validates: stages exactly those paths (`git add -- <paths>`,
+// does not resolve to exactly one of three allowlisted things (sprint 40,
+// Req 2 widened this from docs/sprints/ alone): strictly inside
+// docs/sprints/ (unchanged default — a `..` segment, an absolute path
+// elsewhere, a symlink pointing outside, or a path that merely shares
+// "docs/sprints" as a string prefix without being a real path inside it,
+// e.g. `docs/sprints-evil/x`, are all still refused); CLAUDE.md itself,
+// an exact single-file match, never a directory; or the project's own
+// declared-or-default decisions log (also an exact single-file match,
+// validated fresh on every run — see validateDecisionsLogDeclaration()
+// below for exactly what that checks and refuses). Requires at least one
+// path — there is no "commit everything" mode. If every path validates:
+// stages exactly those paths (`git add -- <paths>`,
 // needed because a brand-new sprint file is untracked and a pathspec
 // commit alone does not stage an untracked path — confirmed directly:
 // `git commit <new-path> -m msg` fails with "pathspec ... did not match
@@ -75,9 +81,56 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { parseJsonc } = require('./launcher/jsonc');
 
 const ROOT = path.resolve(__dirname, '..');
 const SPRINTS_ROOT = path.join(ROOT, 'docs', 'sprints');
+
+// Sprint 40, Req 2: two additional single-file paths Master Controller may
+// commit, outside docs/sprints/ -- CLAUDE.md's own real content, sprint 36
+// established, and a project's own decisions log (Finding 10: ShowOffTest's
+// mc-decisions.md sat uncommitted after mc-commit.js correctly refused it,
+// exactly the state this whole wrapper exists to prevent). Each is checked
+// by EXACT match against a resolved single file, never a directory prefix
+// the way docs/sprints/ is -- Req 2a's own explicit instruction.
+const CLAUDE_MD_REL = 'CLAUDE.md';
+
+// Sprint 40, Req 2b: the standard default when a project declares nothing
+// -- settled with FMC's own Master Controller (see this sprint's own
+// Context): the path belongs to the PROJECT, not this framework, so this
+// is a fallback, never something Req 2c's "no escape hatch" rule treats as
+// authoritative over a real declaration.
+const DEFAULT_DECISIONS_LOG_PATH = 'docs/decisions.md';
+
+// Sprint 40, Req 2b: copied from install.js's own FRAMEWORK_OWNED list --
+// paths this framework's installer itself writes and manages on every
+// upgrade. A project declaring one of these AS its decisions log would
+// have that log silently overwritten or removed the next time it upgrades,
+// which is exactly the failure Req 2b's "not any path the install
+// manifest owns" check exists to refuse before it happens. NOT required
+// (or safe) to `require('./install.js')` directly for this list: that
+// file runs real, cwd-comparing side-effecting code at module load time
+// (it exits immediately if invoked from inside this repo's own source
+// checkout, which mc-commit.js legitimately is when this repo's own
+// Master Controller uses it) -- so this is a deliberate, named duplicate,
+// kept in sync by hand, the same established shape
+// SHIP_HASH_EXCLUDE_PATTERNS in sprint_lifecycle.py already uses for an
+// analogous "can't safely import the real list, so copy it with a comment
+// saying so" case. If install.js's own FRAMEWORK_OWNED list changes, this
+// one has to change with it by hand, and nothing will warn if it doesn't.
+const INSTALL_FRAMEWORK_OWNED_PREFIXES = [
+  '.claude/commands',
+  'scripts/sprint_lifecycle.py',
+  'scripts/run-lifecycle.js',
+  'scripts/mc-commit.js',
+  'scripts/smoke_test.sh',
+  'scripts/dev2_worktree.sh',
+  'scripts/worktree_test.sh',
+  'scripts/launcher',
+  'scripts/install.js',
+  'templates/sprint-template.md',
+  'docs/HUMAN_OVERRIDE.md',
+];
 
 function die(msg) {
   console.error(`ERROR: ${msg}`);
@@ -133,6 +186,162 @@ function resolveInsideSprints(p) {
   return real;
 }
 
+// True if `abs` (already an absolute, resolved path) sits at or inside
+// `prefixRel` (a path relative to ROOT) — the same relative-path
+// containment test resolveInsideSprints() above already uses, generalized
+// to an arbitrary prefix so it can check both the framework-owned list
+// and (for the decisions-log check below) the repository root and .git/
+// itself, without three near-identical copies of the same three-line test.
+function isInsidePrefix(abs, prefixRel) {
+  const prefixAbs = path.resolve(ROOT, prefixRel);
+  const rel = path.relative(prefixAbs, abs);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+// Sprint 40, Req 2b: reads exactly the way sprint 17's readDeclaredTestCommand()
+// (scripts/launcher/run-role.js) reads the project's declared test command
+// -- same file, same JSONC parsing, same "anything short of a real,
+// non-empty declared string means not declared" default. Returns null
+// (never declared, or declared invalid-shape) rather than guessing.
+function readDeclaredDecisionsLogPath(root) {
+  const settingsPath = path.join(root, '.vscode', 'settings.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(settingsPath, 'utf8');
+  } catch (e) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = parseJsonc(raw);
+  } catch (e) {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const value = parsed['fullyCompletely.mcDecisionsLog'];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+// Sprint 40, Req 2b: the pure validator -- same "validated, never
+// sanitised" shape run-role.js's own validateOwnedRepositoryDeclaration()
+// established, returning a verdict rather than exiting, so it stays
+// directly unit-testable. Checked, in order: not empty; not glob/list-
+// shaped (a single real path never legitimately contains *, ?, [, ], a
+// comma, or a newline); resolves inside the repository; does not resolve
+// inside .git/; does not resolve inside any INSTALL_FRAMEWORK_OWNED_PREFIXES
+// entry; and, if it already exists on disk, is a regular file, not a
+// directory. A path that does not exist YET is accepted (same "resolved
+// lexically" precedent resolveInsideSprints() above already sets) -- Master
+// Controller may be about to create the decisions log for the first time.
+function validateDecisionsLogDeclaration(declaredOrDefault, root) {
+  if (typeof declaredOrDefault !== 'string' || !declaredOrDefault.trim()) {
+    return { valid: false, reason: 'the path is empty' };
+  }
+  const value = declaredOrDefault.trim();
+  if (/[*?[\]]/.test(value) || /[,\n;]/.test(value)) {
+    return { valid: false, reason: `"${value}" looks like a glob or a list of multiple paths (contains *, ?, [, ], a comma, semicolon, or newline) -- the decisions log must be exactly one real file, named directly` };
+  }
+  if (path.isAbsolute(value)) {
+    return { valid: false, reason: `"${value}" is an absolute path -- declare it relative to the repository root instead` };
+  }
+
+  const abs = path.resolve(root, value);
+  if (!isInsidePrefix(abs, '.') || path.relative(root, abs) === '') {
+    return { valid: false, reason: `"${value}" does not resolve to a file inside the repository (${root})` };
+  }
+  if (isInsidePrefix(abs, '.git')) {
+    return { valid: false, reason: `"${value}" resolves inside .git/ (${abs}) -- this framework never commits anything there` };
+  }
+  for (const owned of INSTALL_FRAMEWORK_OWNED_PREFIXES) {
+    if (isInsidePrefix(abs, owned)) {
+      return {
+        valid: false,
+        reason: `"${value}" resolves inside "${owned}", which this framework's own installer manages on every ` +
+          'upgrade -- a decisions log placed there would be silently overwritten or removed the next time this ' +
+          'project upgrades. Declare a path this framework does not own',
+      };
+    }
+  }
+  let real = abs;
+  try {
+    real = fs.realpathSync(abs);
+  } catch (e) {
+    // Doesn't exist yet -- fine, resolved lexically, same as
+    // resolveInsideSprints() above.
+  }
+  if (fs.existsSync(real)) {
+    let st = null;
+    try {
+      st = fs.statSync(real);
+    } catch (e) {
+      st = null;
+    }
+    if (st && !st.isFile()) {
+      return { valid: false, reason: `"${value}" (${real}) exists but is not a regular file (a directory?) -- the decisions log must be exactly one file` };
+    }
+  }
+  return { valid: true, real };
+}
+
+// The thin wrapper: resolves what the declared-or-default decisions-log
+// path WOULD be, structurally (no validation yet, so this alone never
+// dies) -- used by resolveOwnedPath() below to cheaply decide whether a
+// GIVEN commit path is even a candidate for "the decisions log" before
+// paying the cost (and the risk of an unrelated commit being refused for
+// the wrong reason) of fully validating a declaration nobody asked to use
+// this run.
+function decisionsLogCandidateAbs(root) {
+  const declared = readDeclaredDecisionsLogPath(root);
+  return path.resolve(root, declared !== null ? declared : DEFAULT_DECISIONS_LOG_PATH);
+}
+
+// Sprint 40, Req 2: the generalized allowlist check -- tries, in order,
+// docs/sprints/ (Req 2a's own unchanged default), then CLAUDE.md (Req 2a's
+// fixed entry), then the declared-or-default decisions log (Req 2b), each
+// an EXACT single-file match, never a directory wildcard for the two new
+// entries. Returns { real, owner } on a match, or null. The decisions-log
+// branch is the only one that can ever die() with a validation reason —
+// and only when the GIVEN path actually resolves to that candidate slot,
+// so an unrelated, simply-not-allowlisted path (e.g. scripts/tool.js)
+// is never misreported as "the decisions log is misconfigured" just
+// because a project's declaration happens to be broken.
+function resolveOwnedPath(p) {
+  const real = resolveInsideSprints(p);
+  if (real !== null) return { real, owner: 'docs/sprints/' };
+
+  const abs = path.resolve(ROOT, p);
+  const claudeMdAbs = path.resolve(ROOT, CLAUDE_MD_REL);
+  if (abs === claudeMdAbs) {
+    let realClaudeMd = abs;
+    try {
+      realClaudeMd = fs.realpathSync(abs);
+    } catch (e) {
+      // Doesn't exist yet -- every real project installing this framework
+      // has one, but refusing a not-yet-existing CLAUDE.md here would be
+      // stricter than resolveInsideSprints() itself is for docs/sprints/.
+    }
+    return { real: realClaudeMd, owner: CLAUDE_MD_REL };
+  }
+
+  if (abs === decisionsLogCandidateAbs(ROOT)) {
+    const declared = readDeclaredDecisionsLogPath(ROOT);
+    const result = validateDecisionsLogDeclaration(declared !== null ? declared : DEFAULT_DECISIONS_LOG_PATH, ROOT);
+    if (!result.valid) {
+      const source = declared !== null
+        ? `the declared "fullyCompletely.mcDecisionsLog" (${JSON.stringify(declared)})`
+        : `this framework's own default decisions-log path (${JSON.stringify(DEFAULT_DECISIONS_LOG_PATH)})`;
+      die(`${source} failed validation: ${result.reason}. ` +
+        (declared !== null
+          ? 'Fix "fullyCompletely.mcDecisionsLog" in .vscode/settings.json, or remove it to use the default.'
+          : 'This is a framework defect, not a project misconfiguration — report it.') +
+        ' Nothing has been committed.');
+    }
+    return { real: result.real, owner: 'the declared decisions log' };
+  }
+
+  return null;
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
 
@@ -154,12 +363,14 @@ function main() {
 
   const resolved = [];
   for (const p of opts.paths) {
-    const real = resolveInsideSprints(p);
-    if (real === null) {
-      die(`'${p}' does not resolve to a path strictly inside docs/sprints/ (${SPRINTS_ROOT}). ` +
-        'This script only ever stages/commits paths under docs/sprints/ — nothing has been run.');
+    const match = resolveOwnedPath(p);
+    if (match === null) {
+      die(`'${p}' does not resolve to a path this script is allowed to commit -- exactly ` +
+        `docs/sprints/ (${SPRINTS_ROOT}), ${CLAUDE_MD_REL}, or the declared/default decisions log ` +
+        `(${DEFAULT_DECISIONS_LOG_PATH} unless "fullyCompletely.mcDecisionsLog" declares another). ` +
+        'Nothing has been run.');
     }
-    resolved.push(path.relative(ROOT, real));
+    resolved.push(path.relative(ROOT, match.real));
   }
 
   const addResult = spawnSync('git', ['add', '--', ...resolved], { cwd: ROOT, encoding: 'utf8' }); // nosec B603 B607

@@ -4271,8 +4271,18 @@ const MC_COMMIT_PATH = path.join(REPO_ROOT, 'scripts', 'mc-commit.js');
 function withMcCommitFixture(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-mc-commit-test-'));
   try {
-    fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'scripts', 'launcher'), { recursive: true });
     fs.copyFileSync(MC_COMMIT_PATH, path.join(dir, 'scripts', 'mc-commit.js'));
+    // Sprint 40, Req 2b: mc-commit.js now requires ./launcher/jsonc (the
+    // same JSONC parser run-role.js's own readDeclaredTestCommand() uses)
+    // to read a project's declared decisions-log path -- a real dependency
+    // the fixture must carry too, or every real subprocess launch below
+    // crashes with MODULE_NOT_FOUND before ever reaching the code under
+    // test.
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'scripts', 'launcher', 'jsonc.js'),
+      path.join(dir, 'scripts', 'launcher', 'jsonc.js')
+    );
     fs.mkdirSync(path.join(dir, 'docs', 'sprints', 'state'), { recursive: true });
     fs.mkdirSync(path.join(dir, 'scripts_other'), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: dir });
@@ -4325,7 +4335,7 @@ test('mc-commit.js: refuses a path outside docs/sprints/ -- the exact QA1 P2 rep
     const before = gitLog(dir);
     const result = runMcCommit(dir, ['--message', 'tool tweak', '--', 'scripts_other/tool.js']);
     assert.notStrictEqual(result.status, 0, 'a path outside docs/sprints/ must be refused');
-    assert.match(result.stderr, /does not resolve to a path strictly inside docs\/sprints/);
+    assert.match(result.stderr, /does not resolve to a path this script is allowed to commit/);
     assert.strictEqual(gitLog(dir), before, 'nothing must have been committed');
   });
 });
@@ -4347,7 +4357,7 @@ test('mc-commit.js: refuses a `..` traversal path', () => {
   withMcCommitFixture((dir) => {
     const result = runMcCommit(dir, ['--message', 'traversal', '--', 'docs/sprints/../../etc-like.txt']);
     assert.notStrictEqual(result.status, 0);
-    assert.match(result.stderr, /does not resolve to a path strictly inside docs\/sprints/);
+    assert.match(result.stderr, /does not resolve to a path this script is allowed to commit/);
   });
 });
 
@@ -4357,7 +4367,7 @@ test('mc-commit.js: refuses a string-prefix trick (docs/sprints-evil/ is not doc
     fs.writeFileSync(path.join(dir, 'docs', 'sprints-evil', 'y.txt'), 'x\n');
     const result = runMcCommit(dir, ['--message', 'prefix trick', '--', 'docs/sprints-evil/y.txt']);
     assert.notStrictEqual(result.status, 0);
-    assert.match(result.stderr, /does not resolve to a path strictly inside docs\/sprints/);
+    assert.match(result.stderr, /does not resolve to a path this script is allowed to commit/);
   });
 });
 
@@ -4367,6 +4377,158 @@ test('mc-commit.js: refuses when no paths are given -- there is no "commit every
     assert.notStrictEqual(result.status, 0);
     assert.match(result.stderr, /At least one path is required/);
   });
+});
+
+// -------------------------------------------------------------------------
+// mc-commit.js: sprint 40, Req 2 -- the widened allowlist (CLAUDE.md, and
+// the declared-or-default decisions log), alongside docs/sprints/.
+// -------------------------------------------------------------------------
+
+test('mc-commit.js: accepts CLAUDE.md itself, an exact single-file match', () => {
+  withMcCommitFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'base\n');
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-q', '-m', 'baseline claude.md'], { cwd: dir });
+    fs.appendFileSync(path.join(dir, 'CLAUDE.md'), 'a real amendment\n');
+    const result = runMcCommit(dir, ['--message', 'update CLAUDE.md', '--', 'CLAUDE.md']);
+    assert.strictEqual(result.status, 0, `expected success, got: ${result.stderr}`);
+    assert.match(gitLog(dir), /update CLAUDE\.md/);
+  });
+});
+
+test('mc-commit.js: refuses a CLAUDE.md prefix-lookalike (CLAUDE.mdx is not CLAUDE.md)', () => {
+  withMcCommitFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'CLAUDE.mdx'), 'lookalike\n');
+    const result = runMcCommit(dir, ['--message', 'sneaky', '--', 'CLAUDE.mdx']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /does not resolve to a path this script is allowed to commit/);
+    assert.match(gitLog(dir), /^[0-9a-f]+ baseline$/, 'nothing new should have been committed');
+  });
+});
+
+test('mc-commit.js: accepts the DEFAULT decisions log (docs/decisions.md) when nothing is declared', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs', 'decisions.md'), 'decision: upgraded 0.2.9 -> 0.2.11\n');
+    const result = runMcCommit(dir, ['--message', 'record decision', '--', 'docs/decisions.md']);
+    assert.strictEqual(result.status, 0, `expected success, got: ${result.stderr}`);
+    assert.match(gitLog(dir), /record decision/);
+  });
+});
+
+test('mc-commit.js: accepts a DECLARED decisions log at a project-chosen path (sprint 40, Req 2b -- settled with FMC, the path belongs to the project)', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'),
+      JSON.stringify({ 'fullyCompletely.mcDecisionsLog': 'docs/rebuild/mc-decisions.md' }));
+    fs.mkdirSync(path.join(dir, 'docs', 'rebuild'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs', 'rebuild', 'mc-decisions.md'), 'a real decision\n');
+    const result = runMcCommit(dir, ['--message', 'record decision', '--', 'docs/rebuild/mc-decisions.md']);
+    assert.strictEqual(result.status, 0, `expected success, got: ${result.stderr}`);
+    assert.match(gitLog(dir), /record decision/);
+  });
+});
+
+test('mc-commit.js: a declared decisions log does NOT also grant the unrelated default path (the declaration replaces, not adds to, the default)', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'),
+      JSON.stringify({ 'fullyCompletely.mcDecisionsLog': 'docs/rebuild/mc-decisions.md' }));
+    fs.mkdirSync(path.join(dir, 'docs', 'rebuild'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs', 'decisions.md'), 'stray default-shaped file\n');
+    const result = runMcCommit(dir, ['--message', 'sneaky', '--', 'docs/decisions.md']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /does not resolve to a path this script is allowed to commit/);
+  });
+});
+
+test('mc-commit.js: refuses (and does NOT silently fall back to the default) when the declared decisions log resolves outside the repository', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'),
+      JSON.stringify({ 'fullyCompletely.mcDecisionsLog': '../outside-the-repo.md' }));
+    const result = runMcCommit(dir, ['--message', 'escape attempt', '--', '../outside-the-repo.md']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /failed validation/);
+    assert.match(result.stderr, /does not resolve to a file inside the repository/);
+    assert.match(result.stderr, /fullyCompletely\.mcDecisionsLog/);
+  });
+});
+
+test('mc-commit.js: refuses when the declared decisions log resolves inside .git/', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'),
+      JSON.stringify({ 'fullyCompletely.mcDecisionsLog': '.git/config' }));
+    const result = runMcCommit(dir, ['--message', 'escape attempt', '--', '.git/config']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /failed validation/);
+    assert.match(result.stderr, /resolves inside \.git\//);
+  });
+});
+
+test('mc-commit.js: refuses when the declared decisions log resolves inside a path the install manifest owns', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'),
+      JSON.stringify({ 'fullyCompletely.mcDecisionsLog': 'scripts/sprint_lifecycle.py' }));
+    const result = runMcCommit(dir, ['--message', 'escape attempt', '--', 'scripts/sprint_lifecycle.py']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /failed validation/);
+    assert.match(result.stderr, /this framework's own installer manages/);
+  });
+});
+
+test('mc-commit.js: refuses when the declared decisions log is a directory, not a file', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'),
+      JSON.stringify({ 'fullyCompletely.mcDecisionsLog': 'docs/sprints' }));
+    const result = runMcCommit(dir, ['--message', 'escape attempt', '--', 'docs/sprints']);
+    assert.notStrictEqual(result.status, 0);
+    // docs/sprints itself is ALSO refused by the unchanged docs/sprints/
+    // check (it's the directory itself, not a file inside it) -- either
+    // refusal reason is correct here, this just confirms nothing commits.
+    assert.match(gitLog(dir), /^[0-9a-f]+ baseline$/, 'nothing new should have been committed');
+  });
+});
+
+test('mc-commit.js: refuses when the declared decisions log is glob/list-shaped', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'),
+      JSON.stringify({ 'fullyCompletely.mcDecisionsLog': 'docs/*.md' }));
+    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs', '_glob_.md'), 'x\n');
+    const result = runMcCommit(dir, ['--message', 'escape attempt', '--', 'docs/*.md']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /failed validation/);
+    assert.match(result.stderr, /looks like a glob or a list/);
+  });
+});
+
+test('mc-commit.js: no environment variable or CLI flag widens the allowlist at run time (Req 2c, no escape hatch)', () => {
+  withMcCommitFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'scripts_other', 'tool.js'), 'tweaked\n');
+    const result = spawnSync(process.execPath, [path.join(dir, 'scripts', 'mc-commit.js'),
+      '--message', 'escape attempt', '--', 'scripts_other/tool.js'], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        FULLY_COMPLETELY_MC_COMMIT_ALLOW: 'scripts_other',
+        MC_COMMIT_EXTRA_PATHS: 'scripts_other',
+        FULLY_COMPLETELY_ALLOW_ANY_PATH: '1',
+      },
+    });
+    assert.notStrictEqual(result.status, 0, 'no environment variable may widen what this script accepts');
+    assert.match(gitLog(dir), /^[0-9a-f]+ baseline$/, 'nothing new should have been committed');
+  });
+});
+
+test('mc-commit.js: source-level check -- no code path reads process.env or a CLI flag to build or extend the allowlist', () => {
+  const src = fs.readFileSync(MC_COMMIT_PATH, 'utf8');
+  assert.ok(!src.includes('process.env'), 'mc-commit.js must never read process.env anywhere -- the allowlist is fixed code and one validated project declaration, never an environment override');
 });
 
 test('mc-commit.js: refuses an empty commit message', () => {

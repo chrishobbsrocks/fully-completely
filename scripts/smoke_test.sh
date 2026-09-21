@@ -2549,4 +2549,104 @@ echo "$DUBIOUS_OUT" | grep -q "branch unknown" || \
 
 rm -rf "$BRANCH_SANDBOX"
 
+echo "== sprint 40, Req 1a/1d: a correction on a COMPLETE sprint appends exactly one history event and changes nothing else -- diffed against the full state dict, phase included =="
+SPRINT_CORRECT=$(new_sprint "Correction sprint")
+$SCRIPT start "$SPRINT_CORRECT" > /dev/null
+git commit -q --allow-empty -m "sprint $SPRINT_CORRECT work"
+CLAUDE_CODE_AGENT="qa1" $SCRIPT qa1 "$SPRINT_CORRECT" --verdict PASS --notes "looked good" > /dev/null
+CLAUDE_CODE_AGENT="dev-team-1" $SCRIPT dev-done "$SPRINT_CORRECT" > /dev/null
+CORRECT_COMMIT=$(git rev-parse HEAD)
+PATH="$FAKE_GH_DIR:$PATH" FAKE_GH_MODE=green $SCRIPT ship "$SPRINT_CORRECT" --commit "$CORRECT_COMMIT" > /dev/null
+CLAUDE_CODE_AGENT="liveqa" $SCRIPT liveqa "$SPRINT_CORRECT" --deployed-commit "$CORRECT_COMMIT" --verdict PASS --notes "verified live, on branch release" > /dev/null
+printf 'close it' > /tmp/correct_user_said.txt
+CLAUDE_CODE_AGENT="dev-team-1" $SCRIPT complete "$SPRINT_CORRECT" --user-said-file /tmp/correct_user_said.txt > /dev/null
+rm -f /tmp/correct_user_said.txt
+
+CORRECT_STATE_BEFORE=$(cat "docs/sprints/state/sprint-${SPRINT_CORRECT}.json")
+LIVEQA_EVENT_INDEX=$(python3 -c "
+import json
+s = json.loads('''$CORRECT_STATE_BEFORE''')
+for i, h in enumerate(s['history']):
+    if h['event'] == 'live_test' and h['actor'] == 'liveqa':
+        print(i)
+        break
+")
+[ -n "$LIVEQA_EVENT_INDEX" ] || fail "could not find the liveqa verdict event to correct -- history: $CORRECT_STATE_BEFORE"
+
+CORRECT_OUT=$(CLAUDE_CODE_AGENT="liveqa" $SCRIPT correct "$SPRINT_CORRECT" --event-index "$LIVEQA_EVENT_INDEX" --correction "the branch name in my notes was wrong -- it was main, not release" 2>&1)
+echo "$CORRECT_OUT" | grep -q "correction recorded against event #${LIVEQA_EVENT_INDEX}" || \
+  fail "correct's success message is missing or wrong -- output: $CORRECT_OUT"
+echo "$CORRECT_OUT" | grep -qi "not a new verdict" || fail "correct's own output doesn't say this isn't a new verdict (Req 1e)"
+
+python3 -c "
+import json
+before = json.loads('''$CORRECT_STATE_BEFORE''')
+after = json.load(open('docs/sprints/state/sprint-${SPRINT_CORRECT}.json'))
+# Nothing but history (and the always-stamped last_claim, sprint 25's own
+# established per-write timestamp) may differ.
+before_copy = dict(before); after_copy = dict(after)
+del before_copy['history']; del after_copy['history']
+del before_copy['last_claim']; del after_copy['last_claim']
+assert before_copy == after_copy, f'a correction changed something other than history/last_claim -- before={before_copy} after={after_copy}'
+assert len(after['history']) == len(before['history']) + 1, 'a correction must append EXACTLY one event'
+assert after['history'][-1]['event'] == 'correction'
+assert after['history'][-1]['actor'] == 'liveqa'
+assert after['phase'] == 'complete', 'phase must be unchanged -- still complete'
+assert after['groundtruth_result'] == 'PASS', 'the verdict itself must be unchanged'
+"
+
+echo "== sprint 40, Req 1d: the correction is visible against its target event in --verbose, and the summary shows a correction exists =="
+CORRECT_STATUS=$($SCRIPT status "$SPRINT_CORRECT")
+echo "$CORRECT_STATUS" | grep -q "Corrections on record: 1" || \
+  fail "the non-verbose summary must show a correction exists -- output: $CORRECT_STATUS"
+CORRECT_VERBOSE=$($SCRIPT status "$SPRINT_CORRECT" --verbose)
+echo "$CORRECT_VERBOSE" | grep -q "\[${LIVEQA_EVENT_INDEX}\].*live_test" || \
+  fail "verbose history should show the target event at its index -- output: $CORRECT_VERBOSE"
+echo "$CORRECT_VERBOSE" | grep -q "CORRECTION.*liveqa.*branch name in my notes was wrong" || \
+  fail "verbose history should show the correction, attached to its target -- output: $CORRECT_VERBOSE"
+# It must appear immediately after the target line, not merely somewhere
+# in the output -- Req 1d's own "attached to, or immediately after".
+python3 -c "
+lines = '''$CORRECT_VERBOSE'''.splitlines()
+target_i = next(i for i, l in enumerate(lines) if l.strip().startswith('[${LIVEQA_EVENT_INDEX}]'))
+assert 'CORRECTION' in lines[target_i + 1], f'the correction must appear on the line immediately after its target: {lines[target_i:target_i+2]}'
+"
+
+echo "== sprint 40, Req 1c: refuses a correction from a DIFFERENT actor than the one who recorded the target event, naming both =="
+CORRECT_WRONG_ACTOR_OUT=$(CLAUDE_CODE_AGENT="dev-team-1" $SCRIPT correct "$SPRINT_CORRECT" --event-index "$LIVEQA_EVENT_INDEX" --correction "trying to correct liveqa's own note" 2>&1) && \
+  fail "a different role's correction attempt should have been refused -- output: $CORRECT_WRONG_ACTOR_OUT" || true
+echo "$CORRECT_WRONG_ACTOR_OUT" | grep -q "was recorded by 'liveqa', not 'dev-team-1'" || \
+  fail "the actor-mismatch refusal doesn't name both actors -- output: $CORRECT_WRONG_ACTOR_OUT"
+
+echo "== sprint 40, Req 1c: refuses a correction with no CLAUDE_CODE_AGENT set (unattributable) =="
+CORRECT_UNKNOWN_OUT=$(env -u CLAUDE_CODE_AGENT $SCRIPT correct "$SPRINT_CORRECT" --event-index "$LIVEQA_EVENT_INDEX" --correction "no agent set" 2>&1) && \
+  fail "an unattributable correction should have been refused -- output: $CORRECT_UNKNOWN_OUT" || true
+echo "$CORRECT_UNKNOWN_OUT" | grep -q "CLAUDE_CODE_AGENT is not set" || \
+  fail "the unknown-actor refusal message is missing -- output: $CORRECT_UNKNOWN_OUT"
+
+echo "== sprint 40, Req 1b: refuses when the target event index does not exist =="
+CORRECT_MISSING_OUT=$(CLAUDE_CODE_AGENT="liveqa" $SCRIPT correct "$SPRINT_CORRECT" --event-index 999 --correction "out of range" 2>&1) && \
+  fail "an out-of-range event index should have been refused -- output: $CORRECT_MISSING_OUT" || true
+echo "$CORRECT_MISSING_OUT" | grep -q "has no history event at index 999" || \
+  fail "the missing-event refusal message is missing -- output: $CORRECT_MISSING_OUT"
+
+echo "== sprint 40, Req 1b: refuses an empty correction =="
+CORRECT_EMPTY_OUT=$(CLAUDE_CODE_AGENT="liveqa" $SCRIPT correct "$SPRINT_CORRECT" --event-index "$LIVEQA_EVENT_INDEX" --correction "" 2>&1) && \
+  fail "an empty correction should have been refused -- output: $CORRECT_EMPTY_OUT" || true
+echo "$CORRECT_EMPTY_OUT" | grep -q -- "--correction is required and must be non-empty" || \
+  fail "the empty-correction refusal message is missing -- output: $CORRECT_EMPTY_OUT"
+
+echo "== sprint 40, Req 1a: none of the refused correction attempts above actually appended anything =="
+FINAL_CORRECT_STATE=$(cat "docs/sprints/state/sprint-${SPRINT_CORRECT}.json")
+python3 -c "
+import json
+after_one_correction = json.loads('''$CORRECT_STATE_BEFORE''')
+final = json.loads('''$FINAL_CORRECT_STATE''')
+# CORRECT_STATE_BEFORE was captured before the ONE successful correction,
+# so the real event count now should be exactly +1 relative to it, not
+# +1 plus however many refused attempts ran afterward.
+assert len(final['history']) == len(after_one_correction['history']) + 1, \
+    f\"a refused correction attempt must never append anything -- expected {len(after_one_correction['history']) + 1} events, got {len(final['history'])}\"
+"
+
 echo "ALL SMOKE TESTS PASSED"

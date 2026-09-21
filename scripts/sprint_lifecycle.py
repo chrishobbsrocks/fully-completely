@@ -170,6 +170,40 @@ LIVEQA_PHASES = (LIVEQA_PHASE, _LEGACY_LIVEQA_PHASE)
 # is untouched by this sprint).
 LIVE_LOOP_AUDIT_EVENT = "live_loop_audit"
 
+# Sprint 40, Req 1: a distinct event name for the same reason
+# LIVE_LOOP_AUDIT_EVENT is distinct from "audit" above -- cmd_gates' own
+# verdict-counting filters history by exact event name, so a correction
+# recorded under this name is invisible to every gate-catch calculation by
+# construction. Also lets cmd_status's --verbose renderer (and any future
+# reader) recognize a correction event without guessing from its detail
+# text alone.
+CORRECTION_EVENT = "correction"
+
+# Sprint 40, Req 1b: the RECORDED detail for a correction event always
+# starts with this exact, parseable prefix (target_index=<N>), so
+# cmd_status's --verbose renderer can attach a correction to the event it
+# targets without a second, redundant field on the history dict itself --
+# log_event() only ever takes a plain string `detail`, and every multi-
+# field detail already encoded in this file (cmd_block's own "blocked
+# from phase=", cmd_override's "old_hash=... | new_hash=...") uses the
+# identical shape: parseable text, not a second schema. Read back by
+# _correction_target_index() below; kept here as ONE format string so the
+# writer (cmd_correct) and the reader (cmd_status) can never drift apart.
+CORRECTION_DETAIL_PREFIX = "target_index={index}"
+
+
+def _correction_target_index(detail: str):
+    """Sprint 40, Req 1d: parses CORRECTION_DETAIL_PREFIX's own
+    target_index=<N> back out of a correction event's detail string, for
+    cmd_status's --verbose renderer to attach the correction to the right
+    history entry. Returns None (never raises) for anything that doesn't
+    match -- a corrupted or hand-edited detail must degrade to "print it
+    unattached" (cmd_status's own fallback), never crash a read-only
+    status command."""
+    m = re.match(r"target_index=(\d+)", detail or "")
+    return int(m.group(1)) if m else None
+
+
 # Sprint 15, Req 1: the live-loop audit's own dispatch phases in cmd_qa1,
 # widened beyond LIVEQA_PHASES to also include complete_ready — the exact
 # moment a sprint has passed both gates but isn't closed yet, which is
@@ -1654,6 +1688,14 @@ def cmd_status(args) -> None:
     print(f"Phase: {state['phase']}")
     print(f"QA1 audit result: {state['qa1_audit_result']} (rounds: {state['audit_rounds']})")
     print(f"LiveQA live result: {state['groundtruth_result']} (rounds: {state['live_test_rounds']})")
+    # Sprint 40, Req 1d: "a reader who looks only at the summary line must
+    # still see that a correction exists" -- shown here, unconditionally,
+    # even without --verbose. The full text (what was corrected and why)
+    # only appears in --verbose, attached to its target event below.
+    correction_count = sum(1 for h in state.get("history", []) if h.get("event") == CORRECTION_EVENT)
+    if correction_count:
+        plural = "correction" if correction_count == 1 else "corrections"
+        print(f"Corrections on record: {correction_count} {plural} to earlier notes (see --verbose for detail).")
     if state["phase"] in LIVEQA_PHASES:
         # Pure observability, doesn't gate anything: a ship/reship that
         # landed after the last recorded live_test verdict means whatever
@@ -1698,8 +1740,35 @@ def cmd_status(args) -> None:
         print(claim_line)
     if args.verbose:
         print("\nHistory:")
-        for h in state["history"]:
-            print(f"  [{h['ts']}] {h['actor']}: {h['event']} {h['detail']}")
+        # Sprint 40, Req 1d: a correction is shown ATTACHED TO (immediately
+        # after) the event it corrects, indented, rather than only at its
+        # own chronological position -- which, for a correction recorded
+        # long after the original event, could otherwise sit many entries
+        # away from the evidence it corrects, exactly what this Req exists
+        # to prevent (a reader must not see the original evidence without
+        # also seeing it was corrected). Every correction whose target can
+        # be resolved is printed ONLY here (skipped at its own top-level
+        # position below); one whose target can't be resolved (a
+        # corrupted or hand-edited detail -- never produced by cmd_correct
+        # itself) still gets printed at its own position rather than
+        # silently dropped.
+        history = state["history"]
+        corrections_by_target: dict = {}
+        unattached = set()
+        for i, h in enumerate(history):
+            if h.get("event") != CORRECTION_EVENT:
+                continue
+            target_i = _correction_target_index(h.get("detail", ""))
+            if target_i is not None and 0 <= target_i < len(history):
+                corrections_by_target.setdefault(target_i, []).append((i, h))
+            else:
+                unattached.add(i)
+        for i, h in enumerate(history):
+            if h.get("event") == CORRECTION_EVENT and i not in unattached:
+                continue
+            print(f"  [{i}] [{h['ts']}] {h['actor']}: {h['event']} {h['detail']}")
+            for corr_i, corr in corrections_by_target.get(i, []):
+                print(f"        -> CORRECTION [{corr_i}] [{corr['ts']}] {corr['actor']}: {corr['detail']}")
 
 
 def _qa1_live_loop_audit(args, state) -> None:
@@ -3036,6 +3105,79 @@ def cmd_abort(args) -> None:
     print(f"Sprint {args.id} aborted. Reason: {reason}")
 
 
+def cmd_correct(args) -> None:
+    """Sprint 40, Req 1: FMC's own finding 9 -- LiveQA recorded a sound
+    verdict whose NOTES contained a factual error of LiveQA's own making
+    (a claim about a check that had silently failed, and the wrong branch
+    name); the verdict was right, the evidence text supporting it was
+    wrong, and there was no route to say so except a later report nobody
+    reading the original notes would ever see. This closes that gap with
+    an append-only correction, never a second verdict.
+
+    Req 1a: NEVER mutates anything already recorded -- the target event,
+    every verdict field, both audit hashes, last_shipped_commit, round
+    counts, and phase are all left exactly as they were. The only mutation
+    anywhere in this function is one APPEND to history (log_event), the
+    same append-only shape _qa1_live_loop_audit() already established for
+    an analogous "record something without re-gating" case. No phase
+    check at all, deliberately -- the whole point (Req 1a's own words) is
+    that this works AFTER the sprint has moved on, including on a
+    `complete` sprint, which every other write command in this file
+    refuses to touch.
+
+    Req 1c: only the role that recorded the TARGET event may correct it --
+    compared against CLAUDE_CODE_AGENT, refusing on any mismatch and
+    refusing outright if CLAUDE_CODE_AGENT isn't set at all (an
+    unattributable correction is worse than no correction). This is a role
+    saying its OWN evidence was wrong, never a route for one role to
+    annotate -- let alone quietly override -- another's verdict; a real
+    disagreement with another role's VERDICT is a fresh /sprint-qa1 or
+    /sprint-liveqa run (Req 1e), not this command."""
+    correction_text = resolve_text(args.correction, args.correction_file)
+    if not correction_text.strip():
+        die("--correction is required and must be non-empty. State the correction itself -- "
+            "this is what a later reader sees attached to the event it corrects. No override.")
+
+    actor = os.environ.get("CLAUDE_CODE_AGENT") or "unknown"
+    if actor == "unknown":
+        die("CLAUDE_CODE_AGENT is not set, so this correction would be unattributable. A "
+            "correction is a role saying its OWN evidence was wrong -- it must be attributed "
+            "to a real, identifiable actor, refused otherwise. No override.")
+
+    with locked(f"sprint-{args.id}"):
+        state = load_state(args.id)
+        history = state.get("history", [])
+        if not history or args.event_index < 0 or args.event_index >= len(history):
+            valid_range = f"0-{len(history) - 1}" if history else "none -- history is empty"
+            die(f"Sprint {args.id} has no history event at index {args.event_index} (valid "
+                f"range: {valid_range}). Run /sprint-status {args.id} --verbose to see the "
+                "indexed history and pick the right one. Nothing recorded.")
+        target = history[args.event_index]
+        target_actor = target.get("actor")
+        if target_actor != actor:
+            die(f"Sprint {args.id}'s event #{args.event_index} ({target.get('event')}) was "
+                f"recorded by '{target_actor}', not '{actor}'. Only the role that recorded an "
+                "event may correct it -- a disagreement with another role's own evidence is a "
+                "fresh /sprint-qa1 or /sprint-liveqa run, not a correction. No override.")
+
+        # Req 1b: the target's own event name and timestamp, alongside its
+        # position, so the correction is self-describing even if history
+        # is later inspected without this same index in hand.
+        detail = (
+            f"{CORRECTION_DETAIL_PREFIX.format(index=args.event_index)} | "
+            f"target_event={target.get('event')} | target_ts={target.get('ts', '')} | "
+            f"{correction_text}"
+        )
+        log_event(state, actor, CORRECTION_EVENT, detail)
+        save_state(args.id, state)
+    print(f"Sprint {args.id}: correction recorded against event #{args.event_index} "
+          f"({target.get('event')} at {target.get('ts', '')}).")
+    print("This is an append-only correction, not a new verdict -- the original event, every "
+          "gate result, and this sprint's phase are all unchanged. If the VERDICT itself is "
+          "wrong, not just its evidence, re-run the actual gate (/sprint-qa1 or /sprint-liveqa) "
+          "instead of correcting the notes.")
+
+
 def cmd_block(args) -> None:
     """Sprint 33, Req 4: the non-destructive alternative to abort, for a
     role that correctly determines a sprint is not currently buildable
@@ -3870,6 +4012,20 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--title", default=None, help="The new title. Prefer --title-file for text pasted from elsewhere.")
     s.add_argument("--title-file", help="Read the new title from this file instead of the command line.")
     s.set_defaults(func=cmd_rename)
+
+    s = sub.add_parser("correct",
+                        help="Sprint 40, Req 1: an append-only correction to a factual error in "
+                        "a role's OWN recorded notes -- never a verdict, gate, or phase change. "
+                        "No phase restriction: works on a complete sprint too.")
+    s.add_argument("id", type=int)
+    s.add_argument("--event-index", type=int, required=True,
+                    help="The 0-based index of the history event being corrected, exactly as "
+                    "shown by `/sprint-status <id> --verbose`.")
+    s.add_argument("--correction", default="",
+                    help="Required. The correction itself -- what was wrong and what the real "
+                    "fact is. Prefer --correction-file for text containing backticks, $, or code.")
+    s.add_argument("--correction-file", help="Read the correction from this file instead of the command line.")
+    s.set_defaults(func=cmd_correct)
 
     # Deliberately not wired to any .claude/commands/*.md slash command, and
     # never mentioned in CLAUDE.md or any agent file, see cmd_override's

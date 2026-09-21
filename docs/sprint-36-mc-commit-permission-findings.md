@@ -202,3 +202,54 @@ add`/`git commit` bypass entirely skipping the wrapper (N2), `git commit
 consistent: the shipped profile denies every raw-`git` form tried against
 it, and the wrapper script itself holds under a real headless launch, not
 only in the standalone unit test.
+
+## Sprint 40, Req 2: the allowlist widened to CLAUDE.md and a declared decisions log
+
+Downstream finding 10 (ShowOffTest, 16 September): after a 0.2.9 → 0.2.11
+upgrade, a real Master Controller recorded its upgrade decision in
+`docs/rebuild/mc-decisions.md` and hand-merged `CLAUDE.md`, which the
+installer had left unmerged. `mc-commit.js` refused both — correctly, by
+its own rule — and the files sat uncommitted, exactly the state this
+wrapper exists to prevent.
+
+Unlike Req 6a above, this widening needed no LIVE `claude` measurement:
+the entire change is deterministic Node code inside `mc-commit.js`
+itself — whether a given path resolves to one of the three allowlisted
+things, and whether a declared decisions-log path passes its own
+validation, are both pure functions with no model or permission-gate
+involved. What Req 3a's own live-measurement bar exists for
+(`docs/sprint-12-permission-scope-findings.md`) is uncertainty about
+`claude`'s OWN tool-call enforcement, which this widening never touches —
+Master Controller's headless profile still grants Bash access to this one
+wrapper script and nothing else touching `git`, unchanged since sprint
+36. Confirmed instead by real, deterministic unit tests in
+`launcher_test.js` (never a permission_denials read, since there's no
+permission layer being tested here):
+
+- **Accepts** `CLAUDE.md` itself, the default decisions log
+  (`docs/decisions.md`) when nothing is declared, and a project-declared
+  decisions log at an arbitrary project-chosen path (`.vscode/settings.json`'s
+  `"fullyCompletely.mcDecisionsLog"`, read the same way sprint 17's own
+  declared test command is).
+- **Still refuses**, unchanged: a `..` traversal, a string-prefix
+  lookalike (`docs/sprints-evil/`), and any path outside the three
+  allowlisted things (the exact QA1 P2/P3 shapes from Req 6a above).
+- **Refuses, and does NOT silently fall back to the default**, a declared
+  decisions-log path that: resolves outside the repository; resolves
+  inside `.git/`; resolves inside any path this framework's own installer
+  manages (`INSTALL_FRAMEWORK_OWNED_PREFIXES` in `mc-commit.js`, kept in
+  sync by hand with `install.js`'s own `FRAMEWORK_OWNED` list — see that
+  constant's own comment for why `mc-commit.js` can't safely `require()`
+  `install.js` directly to read it live); is a directory rather than a
+  file; or is glob/list-shaped (contains `*`, `?`, `[`, `]`, a comma, or a
+  newline) — each refused with the specific reason, naming which check
+  failed, per Req 2b's own explicit instruction.
+- **No escape hatch (Req 2c)**: a source-level check confirms
+  `mc-commit.js` never reads `process.env` anywhere, and a real
+  subprocess test confirms three separate environment variables aimed at
+  the allowlist have no effect.
+
+Every one of the above is a real regression test, not just a passing
+one — confirmed directly by disabling the corresponding check and
+re-running the suite: the install-manifest-owned refusal, tried this way,
+fails exactly as expected with the check removed.
