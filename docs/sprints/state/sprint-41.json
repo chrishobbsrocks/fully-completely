@@ -1,7 +1,7 @@
 {
   "id": 41,
   "title": "Stop the launcher's own lock files showing up as the project's, warn on a downgrade, and make a first-launch warning readable",
-  "phase": "qa1_audit",
+  "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "0073e812f49b8a644c454f3d8575b164905aca62e8e814db10feff88d7a1e2f3",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -38,11 +38,17 @@
       "actor": "qa1",
       "event": "audit",
       "detail": "PASS: QA1 gate-1 audit, sprint 41, round 3. Audited commit d72255a. The sprint file was re-read and is unchanged since 0bee813. Verdict: PASS.\n\nSCOPE. The delta c820b85..d72255a outside bookkeeping is scripts/check_user_said_guard.py alone.\n\n1. Round-2 finding (quote-class coverage): FIXED, and demonstrated fixed.\n - Both patterns now build their quote class from a shared _QUOTE (single, double, backtick) plus a _QUOTE_PREFIX allowing an optional 0-2 letter Python string prefix before the opening quote, so the flag-definition check, the argv-array shape and the CLI shape all cover the same literal forms.\n - Re-planted every shape from both previous rounds against d72255a in a clean clone, each reverted before the next:\n   - V1 same-line argv literal: caught.\n   - V2 same call wrapped across lines: caught.\n   - V3 --user-said=\"yes, close it\": caught.\n   - V5 JS template literal value: caught (round-2 gap, now closed).\n   - V6 Python f-string value: caught (round-2 gap, now closed).\n - Two further variants QA1 had not previously raised, planted this round to check the generalization rather than the two specific fixes:\n   - V7 backtick on BOTH the flag and the value: caught.\n   - V8 = separator with single quotes: caught.\n - The real, unmodified tree still scans clean, and prompts.js/run-role.js/sprint-complete.md were byte-restored after each planting (git status clean).\n - --selftest now covers 8 shapes and reports USER_SAID_GUARD_SELFTEST_OK; smoke_test.sh checks for that exact string, so a silent detection regression fails the suite.\n - The docstring's scope statement is unchanged and now matches the behaviour: literal-value scan, data-flow indirection named as the accepted limit. That is the right place to stop, and this class is closed.\n\n2. Full-sprint re-verification at d72255a, not just the round-3 delta:\n - Req 4c: scripts/sprint_lifecycle.py is untouched across the entire sprint (0bee813..d72255a is empty for that path), so cmd_complete is byte-unchanged.\n - Req 6c: zero added or removed lines touching allowedTools, disallowedTools or Bash( in run-role.js across the whole sprint. No grant moved.\n - Req 3b: initialPrompt('QA1') and initialPrompt('QA1', null) are identical, so a clean launch is unchanged.\n - Everything else verified in rounds 1 and 2 stands: Req 1's derived lock patterns and divergence guard, Req 2's downgrade line naming both versions with upgrade/equal wording untouched, Req 3a's measured record at claude 2.1.278 with the resume path covered, Req 4b's history guard, Req 5's template section and the three agent files, Req 6's two measurements with the safe-read hypothesis ruled out by evidence, and Req 7's 0.2.16 against published 0.2.15.\n\n3. Req 8: QA1 ran both suites at d72255a in a clean clone. node scripts/launcher_test.js: ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh: ALL SMOKE TESTS PASSED, exit 0. pyflakes clean on sprint_lifecycle.py and both guard scripts.\n\nFOR LIVEQA, carried forward:\n - Record the CLI version you actually see at gate time; it moved twice during this epic (2.1.276, then 2.1.278 here), and Req 6's findings are anchored to it.\n - For Req 1, test the stolen-lock sibling shape specifically, not only the plain .lock file, since only the sibling relies on the trailing-* glob.\n - Req 3 needs both platforms in real VS Code: a collision warning still visible after launch, and FC: Start All with no collision adding nothing and delaying nothing."
+    },
+    {
+      "ts": "2026-09-21T20:18:14+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-21T20:17:03+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-21T20:18:14+00:00"
   }
 }
