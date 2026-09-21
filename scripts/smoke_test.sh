@@ -42,6 +42,12 @@ fail() { echo "SMOKE TEST FAILED: $1" >&2; exit 1; }
 # see scripts/check_user_said_guard.py's own header for the full method
 # and the three violation shapes it's been verified (by negative control)
 # to catch.
+echo "== Req 4a (sprint 41): the scanner's own detection logic against every known violation shape (QA1 round 1 regression test) =="
+if ! USER_SAID_SELFTEST_OUT=$(python3 "$REPO_ROOT/scripts/check_user_said_guard.py" --selftest 2>&1); then
+  fail "check_user_said_guard.py --selftest found a detection regression:\n$USER_SAID_SELFTEST_OUT"
+fi
+echo "$USER_SAID_SELFTEST_OUT" | grep -q "USER_SAID_GUARD_SELFTEST_OK" || fail "check_user_said_guard.py --selftest did not report OK"
+
 echo "== Req 4a (sprint 41): no code path supplies --user-said/--user-said-file content =="
 if ! USER_SAID_GUARD_OUT=$(python3 "$REPO_ROOT/scripts/check_user_said_guard.py" 2>&1); then
   fail "check_user_said_guard.py found a violation:\n$USER_SAID_GUARD_OUT"
