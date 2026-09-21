@@ -4,13 +4,29 @@
 // agent's own persona file under .claude/agents/ — that wording is never
 // touched here.
 
-function initialPrompt(roleLabel) {
-  return (
+// `warning` (sprint 41, Req 3): role-claims.js's own `roleClaimWarning()`
+// text, when a collision was detected at launch, or null/undefined for a
+// clean launch. Prepending it here — rather than relying solely on the
+// pre-launch `console.error()` line run-role.js already prints — is the
+// fix for a real readability gap: that stderr line exists and is gone,
+// overwritten by Claude Code's own interactive TUI redraw, before the
+// session the warning is FOR ever gets a chance to read it. Text prepended
+// to the opening prompt instead becomes part of the model's own first
+// turn, which the TUI renders into the visible transcript like any other
+// message — measured live (`claude 2.1.278`, 3/3 real headless runs) to
+// actually survive, unlike the stderr line it supplements, never
+// replaces. A clean launch (no warning) produces the exact same prompt
+// text as before this sprint, byte for byte — this never blocks or
+// alters a normal launch, it only ever adds a prefix when there is
+// something to say.
+function initialPrompt(roleLabel, warning) {
+  const body = (
     `You are now running as ${roleLabel} for this project. Before anything ` +
     `else, check docs/sprints/registry.json (and docs/sprints/state/ for ` +
     `any sprint listed there) to see what's currently in flight, then wait ` +
     `for instructions.`
   );
+  return warning ? `${warning}\n\n${body}` : body;
 }
 
 // Dev Team 2 is the one role whose working directory can legitimately move

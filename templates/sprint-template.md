@@ -23,6 +23,9 @@
 - Blocked by: [what must be done first]
 - External: [APIs, services, decisions waiting on others]
 
+### Human Prerequisites
+[Anything a PERSON must do OUTSIDE this repository before this sprint's gates can pass — a migration applied to a hosted database, a DNS record, an account, a device at hand. Not anything a role can do itself; that belongs in Requirements instead. An empty section is a normal outcome: write "None" rather than leaving it blank or padding it with filler. If QA1's audit predicts an operator-side blocker, it routes here at planning time (or, once a sprint is already in flight, as a Master Controller repair to this file) — never left as a warning buried in a verdict's own notes, which is read after the failure, not before.]
+
 ### Team Assignments
 - **Dev Team 1:** [what they own, or "not assigned"]
 - **Dev Team 2:** [what they own, or "not assigned"; if both teams are assigned, confirm here that the split is genuinely independent — no shared files, types, or dependencies — and name the worktree Dev Team 2 must build in]

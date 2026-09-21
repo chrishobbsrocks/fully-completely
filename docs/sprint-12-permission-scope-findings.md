@@ -786,3 +786,107 @@ after use, never committed. This entry is the record of what was
 measured, not a pointer to preserved transcripts; reproducing it means
 re-running `permission-gate-repro.js`'s own method against a `node *`
 candidate grant, not reading a saved log this document links to.
+
+## Sprint 41, Req 6: two measured gaps between the documented model and
+## what actually happens — measurement only, no grant touched (Req 6c)
+
+Both observed live by LiveQA during earlier sprints (sprint 39's live
+test for 6a's shape, sprint 40's live test for 6b's), neither previously
+re-measured deliberately. **Version anchor: `claude 2.1.278`.** Method
+matches this document's own standard throughout: real headless launches
+via this repo's own `headlessLaunchArgs()`/`ROLES`, `--output-format
+json`, verdict decided only from the structured `permission_denials`
+array plus an independently-checked real side effect, never narration
+alone; every probe run at least twice, both reps recorded.
+
+### 6a — read vs. write confinement asymmetry outside the launch cwd (`liveqa`)
+
+| Half | Command shape | Rep 1 | Rep 2 |
+|---|---|---|---|
+| WRITE (`node -e "...writeFileSync(...)"` to a file under `os.tmpdir()`, outside the launch cwd) | `node -e "require('fs').writeFileSync('<path>', 'written-by-liveqa')"` | not denied (`permission_denials: []`); file existed after, content matched | not denied; file existed after, content matched |
+| READ (`cat` on a pre-existing file in that same outside directory) | `cat <path>` | denied — a real `Bash`/`cat ...` entry in `permission_denials` | denied, same shape |
+
+**Grade: CONFIRMED**, both halves, 2/2 reps, no drift. This sharpens
+sprint 19's own finding ("`node -e` writes outside the working directory
+with zero denials", carried into sprint 39's Req 3 above) rather than
+repeating it: the gap isn't merely "writes escape confinement," it's
+that a **read** of the identical outside path is confidently blocked
+while a program-mediated **write** to it is not — the confinement this
+project has documented for the Write tool and a shell redirect (sprint
+12) does not hold for `node -e`, in either direction consistently; it
+holds for reads and not for writes. `liveqa.md` and `qa1.md` are updated
+below to say this plainly rather than imply a symmetric confinement that
+doesn't hold.
+
+One harness-side defect surfaced and was fixed before these reps were
+recorded, named here so it isn't mistaken for a CLI finding: a first
+attempt double-quoted the target path inside an already-double-quoted
+`node -e "..."` argument, which let the outer shell close the string
+early and left Node parsing a bare path as a regex literal
+(`SyntaxError: Invalid regular expression flags`, exit 1,
+`permission_denials: []`) — a quoting bug in the probe, not a
+permission result. Single-quoting the inner path fixed it; the reps
+above are the corrected runs.
+
+### 6b — what `qa1`/`liveqa` can actually do with git today
+
+Disposable scratch git repo per rep (`mktemp -d`, `git init -q`,
+throwaway author identity — matching `smoke_test.sh`'s own sandboxing,
+never this repo's tree), seeded with a throwaway
+`docs/sprints/state/sprint-999.json`, torn down after each run. 2 reps
+x 2 roles x 5 ops = 20 real headless launches, zero drift across any
+cell.
+
+| Op | qa1 | liveqa |
+|---|---|---|
+| `git status` | pass, not denied (2/2) | pass, not denied (2/2) |
+| `git log --oneline -5` | pass, not denied (2/2) | pass, not denied (2/2) |
+| `git diff` | pass, not denied (2/2) | pass, not denied (2/2) |
+| `git add <path>` | denied, "This command requires approval" (2/2) | denied, same (2/2) |
+| sprint-32 pathspec commit (`git commit -m "..." docs/sprints/state/sprint-999.json`) | denied, same (2/2) | denied, same (2/2) |
+
+**Grade: CONFIRMED**, all 10 cells, 2/2 reps each, no ambiguous case.
+
+**Ruling out the supplied hypothesis first, as Req 6b's own text
+required**: neither `qa1` nor `liveqa`'s `allowedTools` has any
+git-related entry at all, and `liveqa` is structurally excluded from
+the separate `eligibleForOwnedRepositoryGrant` mechanism (only
+`dev-team-1`, `dev-team-2`, and `qa1` carry that flag) — ruling out "the
+owned-repository grant is silently reaching liveqa" as an explanation.
+FMC's supplied hypothesis (Claude Code's own built-in safe-read
+allowlist covering some read-only git commands independently of a
+profile's `allowedTools`) is what the shape of this data actually
+matches: reads (`status`/`log`/`diff`) pass with zero denials for
+*both* roles despite neither profile granting git at all, while writes
+(`add`, the pathspec `commit`) are denied for both, also regardless of
+grant. That is a read-vs-write split applied at the gate itself, not
+"the profile is wider than documented" in the sense of a write leaking
+through — no write leaked through in this measurement. This reconciles
+sprint 39/40's two observations, which looked contradictory read
+separately (a headless `liveqa` `git status` passing with no git grant,
+and a headless `qa1` pathspec `git commit` on its own state-file
+bookkeeping failing with "This command requires approval"): they are
+the same mechanism, read passes, write doesn't, independent of grant
+content — not two different bugs.
+
+**A live consequence, measured, not designed around here (Req 6c
+forbids that in this sprint)**: under the current profiles, neither
+`qa1` nor `liveqa` can actually execute the sprint-32 pathspec
+bookkeeping commit CLAUDE.md's own rule requires of them, even with
+`qa1`'s `eligibleForOwnedRepositoryGrant` set — that grant is evidently
+not sufficient by itself to pass a live `git commit`, a distinct fact
+from the read/write gate pattern above and worth flagging separately.
+One rep (qa1) also showed the model's own retry behavior, recorded for
+context only: it first tried a chained form (`git add ...; echo "exit
+status: $?"`), correctly denied, then retried the exact unmodified
+single-command form, which was *also* denied — the denial is not an
+artifact of chaining, it's the mutating op itself.
+
+**Reported to Master Controller, per Req 6b's own instruction, not
+designed or shipped here**: CLAUDE.md's commit-bookkeeping rule (sprint
+27/32) is currently unfollowable by a headless gate role under the
+grants measured above — a real durability gap FMC's own Show Off run
+already hit once (a headless LiveQA round-3 PASS sitting uncommitted
+until Dev Team happened to sweep it into an unrelated close commit).
+This measurement is the deliverable for Req 6b; the fix is Master
+Controller's to file as its own sprint, per Req 6c.

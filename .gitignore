@@ -12,3 +12,15 @@ docs/sprints/.locks/
 # scripts/launcher/role-claims.js). Advisory, local-machine bookkeeping,
 # never meant to be shared or committed.
 .claude/role-claims.json
+
+# Sprint 41, Req 1 (FMC finding 11): sprint 38's own lock file (and, on a
+# steal, its stolen-lock sibling) around the read-modify-write above --
+# transient, per-launch, never meant to be committed. This repository's
+# own copy of these two lines is a hand-kept match to
+# scripts/launcher/role-claims.js's LOCK_SUFFIX/CLAIMS_RELATIVE_PATH
+# constants (a plain text file can't require() a JS module the way
+# install.js's own managed block, generated from those same constants,
+# can) -- guarded by a test in launcher_test.js that fails if this file
+# and those constants ever disagree.
+.claude/role-claims.json.lock
+.claude/role-claims.json.lock.stolen-*

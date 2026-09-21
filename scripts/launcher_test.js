@@ -1210,6 +1210,58 @@ test('install.js: the version marker is written after install and reports instal
   });
 });
 
+test('install.js: installing an older version than what is already present says so, naming both versions (sprint 41, Req 2 -- LiveQA: installing 0.2.11 over 0.2.13 went backwards silently)', () => {
+  withFixture((dir) => {
+    // A synthetic, unambiguously-newer marker rather than parsing/
+    // incrementing REAL_CURRENT_VERSION -- clearly greater regardless of
+    // what the real package version happens to be right now.
+    writeVersionMarker(dir, '99.0.0');
+    const output = runInstall(dir);
+    assert.match(output, new RegExp(`Installing an OLDER version: 99\\.0\\.0 -> ${REAL_CURRENT_VERSION.replace(/\./g, '\\.')}`));
+    assert.match(output, /downgrade/i);
+    assert.doesNotMatch(output, /^Upgraded/m, 'a downgrade must not also be reported as an upgrade');
+  });
+});
+
+test('install.js: a genuine upgrade (older marker than current) still reports "Upgraded", unaffected by the new downgrade check', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, '0.0.1');
+    const output = runInstall(dir);
+    assert.match(output, new RegExp(`Upgraded 0\\.0\\.1 -> ${REAL_CURRENT_VERSION.replace(/\./g, '\\.')}`));
+    assert.doesNotMatch(output, /downgrade/i);
+  });
+});
+
+test('install.js: same-version and missing-marker wording is unchanged by sprint 41, Req 2', () => {
+  withFixture((dir) => {
+    writeVersionMarker(dir, REAL_CURRENT_VERSION);
+    const sameVersionOutput = runInstall(dir);
+    assert.match(sameVersionOutput, /Already at \d+\.\d+\.\d+ \(re-run, nothing to upgrade\)/);
+    assert.doesNotMatch(sameVersionOutput, /downgrade/i);
+  });
+});
+
+test('install.js: compareVersions() -- the sprint 41, Req 2 downgrade detector -- has not drifted from scripts/baselines/generate.js\'s own identical comparison', () => {
+  // Duplicated, not shared (see install.js's own comment on why it never
+  // requires scripts/baselines/ at runtime) -- this proves the duplicate
+  // hasn't drifted, the same guard sprint 41's own Req 1 uses for its own
+  // hand-kept-copy case. Compares the function BODY text directly (the
+  // strongest, simplest guarantee -- byte-identical algorithms, not just
+  // behaviorally similar ones) rather than eval'ing extracted source.
+  const bodyOf = (src, label) => {
+    const m = src.match(/function compareVersions\(a, b\) \{[\s\S]*?\n\}/);
+    assert.ok(m, `could not find compareVersions() in ${label}`);
+    return m[0];
+  };
+  const generateSrc = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'baselines', 'generate.js'), 'utf8');
+  const installSrc = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'install.js'), 'utf8');
+  assert.strictEqual(
+    bodyOf(installSrc, 'install.js'),
+    bodyOf(generateSrc, 'scripts/baselines/generate.js'),
+    'install.js\'s own compareVersions() must stay byte-identical to generate.js\'s -- update both together if either ever changes'
+  );
+});
+
 test('install.js: an old, exact .claude-launcher/ gitignore line is removed on upgrade; the new merged line is still added', () => {
   withFixture((dir) => {
     const oldGitignore =
@@ -1246,6 +1298,33 @@ test('install.js: a fresh install\'s managed .gitignore block includes .claude/r
   });
 });
 
+test('install.js: a fresh install\'s managed .gitignore block also includes the lock file and its stolen-lock sibling, derived from role-claims.js\'s own constants (sprint 41, Req 1)', () => {
+  withFixture((dir) => {
+    runInstall(dir);
+    const lines = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8').split(/\r?\n/);
+    const { LOCK_SUFFIX, CLAIMS_RELATIVE_PATH } = require('./launcher/role-claims');
+    const { toRelPathKey } = require('./launcher/rel-path-key');
+    const claimsRelPath = toRelPathKey(CLAIMS_RELATIVE_PATH);
+    assert.ok(lines.includes(`${claimsRelPath}${LOCK_SUFFIX}`), 'a fresh install must gain the lock-file ignore entry, derived from the real constant');
+    assert.ok(lines.includes(`${claimsRelPath}${LOCK_SUFFIX}.stolen-*`), 'a fresh install must gain the stolen-lock ignore entry, derived from the real constant');
+  });
+});
+
+test('install.js: this repository\'s OWN .gitignore matches what role-claims.js\'s constants would derive -- the hand-kept-copy divergence guard Req 1 requires', () => {
+  // This repo's own .gitignore can't require() role-claims.js the way
+  // install.js's managed block (generated, not hand-written) can -- it's
+  // a plain text file. This is the promised fallback: a test that fails
+  // if the hand-kept lines here and the real constant ever disagree,
+  // rather than a silent, unguarded duplicate literal.
+  const { LOCK_SUFFIX, CLAIMS_RELATIVE_PATH } = require('./launcher/role-claims');
+  const { toRelPathKey } = require('./launcher/rel-path-key');
+  const claimsRelPath = toRelPathKey(CLAIMS_RELATIVE_PATH);
+  const lines = fs.readFileSync(path.join(REPO_ROOT, '.gitignore'), 'utf8').split(/\r?\n/);
+  assert.ok(lines.includes(claimsRelPath), `this repo's own .gitignore is missing ${claimsRelPath}`);
+  assert.ok(lines.includes(`${claimsRelPath}${LOCK_SUFFIX}`), `this repo's own .gitignore is missing the lock-file entry for the current LOCK_SUFFIX (${LOCK_SUFFIX}) -- update .gitignore by hand to match`);
+  assert.ok(lines.includes(`${claimsRelPath}${LOCK_SUFFIX}.stolen-*`), `this repo's own .gitignore is missing the stolen-lock entry for the current LOCK_SUFFIX (${LOCK_SUFFIX}) -- update .gitignore by hand to match`);
+});
+
 test('install.js: an upgrade of an install that predates the role-claims entry adds it, and preserves an unrelated pre-existing line exactly (sprint 36, Req 7)', () => {
   withFixture((dir) => {
     const oldGitignore =
@@ -1260,7 +1339,12 @@ test('install.js: an upgrade of an install that predates the role-claims entry a
     assert.ok(lines.includes('node_modules/'), 'an unrelated pre-existing line must survive exactly');
     assert.ok(lines.includes('*.log'), 'an unrelated pre-existing line must survive exactly');
     assert.ok(lines.includes('docs/sprints/.locks/'), 'the pre-existing managed line must survive unchanged');
-    assert.match(output, /gitignore \(appended 1 line\(s\)\)/);
+    // Sprint 41, Req 1: the managed block grew by two more entries (the
+    // lock file and its stolen-lock sibling), so an upgrade missing all
+    // three new-since-sprint-36 lines now appends 3, not 1.
+    assert.ok(lines.includes('.claude/role-claims.json.lock'), 'the upgrade must add the lock-file ignore entry');
+    assert.ok(lines.includes('.claude/role-claims.json.lock.stolen-*'), 'the upgrade must add the stolen-lock ignore entry');
+    assert.match(output, /gitignore \(appended 3 line\(s\)\)/);
   });
 });
 
@@ -1981,6 +2065,58 @@ test('run-role: resumeLaunchArgs appends the worktree-check prompt only for dev-
     'uuid-789',
     RR_devTeam2ResumePrompt('fully-completely'),
   ]);
+});
+
+// Sprint 41, Req 3: a collision warning must survive the interactive TUI's
+// own redraw, which a pre-launch console.error() line does not (it's gone
+// before the session it's FOR ever gets a chance to read it, confirmed
+// live against a real headless launch). Prepending/appending the warning
+// onto the actual opening prompt is what survives -- verified here as a
+// mechanical argv assertion, and a clean launch (no warning, the vastly
+// more common case) must be byte-for-byte unchanged from the pre-Req-3
+// argv the tests above already pin.
+test('run-role: freshLaunchArgs prepends a collision warning onto the opening prompt when one is given', () => {
+  const warning = 'NOTE: another QA1 session was recorded starting at 2026-01-01T00:00:00.000Z in this same tree.';
+  const args = freshLaunchArgs(QA1_ROLE, 'fc:qa1:fully-completely', 'uuid-123', warning);
+  assert.deepStrictEqual(args, [
+    '--agent',
+    'qa1',
+    '--session-id',
+    'uuid-123',
+    '--name',
+    'fc:qa1:fully-completely',
+    RR_initialPrompt('QA1', warning),
+  ]);
+  // And the prompt itself actually contains the warning text verbatim,
+  // ahead of the standing orientation body -- not merely a differently-
+  // shaped argv.
+  const prompt = args[args.length - 1];
+  assert.ok(prompt.startsWith(warning), `prompt does not start with the warning:\n${prompt}`);
+  assert.match(prompt, /You are now running as QA1 for this project/);
+});
+
+test('run-role: freshLaunchArgs with no warning produces the exact same prompt as before Req 3 (undefined and omitted both)', () => {
+  const withUndefined = freshLaunchArgs(QA1_ROLE, 'fc:qa1:fully-completely', 'uuid-123', undefined);
+  const omitted = freshLaunchArgs(QA1_ROLE, 'fc:qa1:fully-completely', 'uuid-123');
+  assert.deepStrictEqual(withUndefined, omitted);
+  assert.strictEqual(withUndefined[withUndefined.length - 1], RR_initialPrompt('QA1'));
+});
+
+test('run-role: resumeLaunchArgs appends a collision warning as its own trailing message for a non-dev-team-2 role', () => {
+  const warning = 'NOTE: another Pipeman session was recorded starting at 2026-01-01T00:00:00.000Z in this same tree.';
+  const args = resumeLaunchArgs(QA1_ROLE, 'uuid-456', 'fully-completely', warning);
+  assert.deepStrictEqual(args, ['--agent', 'qa1', '--resume', 'uuid-456', warning]);
+});
+
+test('run-role: resumeLaunchArgs combines the dev-team-2 worktree note and a collision warning into one trailing argv element', () => {
+  const warning = 'NOTE: another Dev Team 2 session was recorded starting at 2026-01-01T00:00:00.000Z in this same tree.';
+  const args = resumeLaunchArgs(DEV_TEAM_2_ROLE, 'uuid-789', 'fully-completely', warning);
+  // Exactly one trailing argv element -- the CLI only accepts one -- and it
+  // carries both messages, worktree note first (existing behavior), then
+  // the warning, separated the same way initialPrompt() separates its own
+  // warning from its body.
+  assert.strictEqual(args.length, 5);
+  assert.strictEqual(args[4], `${RR_devTeam2ResumePrompt('fully-completely')}\n\n${warning}`);
 });
 
 // Req 3 + Req 4 (headless argv shape): built from the same

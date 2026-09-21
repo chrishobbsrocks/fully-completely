@@ -124,6 +124,12 @@ const { hasComments, parseJsonc } = require('./launcher/jsonc');
 const { normalizeLineEndings, hashContent } = require('./launcher/content-hash');
 const { toRelPathKey } = require('./launcher/rel-path-key');
 const { findPython3Interpreter } = require('./launcher/python-interpreter');
+// Sprint 41, Req 1: role-claims.js is a plain module of functions and
+// constants with no top-level side-effecting code (confirmed by reading
+// it in full) -- safe to require here, unlike install.js itself, which
+// mc-commit.js cannot safely require for the opposite reason (real,
+// cwd-comparing side effects at module load time).
+const { LOCK_SUFFIX, CLAIMS_RELATIVE_PATH } = require('./launcher/role-claims');
 
 const SOURCE_ROOT = path.resolve(__dirname, '..');
 const DEST_ROOT = process.cwd();
@@ -274,6 +280,28 @@ function findSurvivingBackups(root) {
 
 const VERSION_MARKER_PATH = path.join(DEST_ROOT, '.claude', 'fully-completely-version');
 const CURRENT_VERSION = require(path.join(SOURCE_ROOT, 'package.json')).version;
+
+// Sprint 41, Req 2: same dotted-numeric comparison scripts/baselines/
+// generate.js's own compareVersions() already uses for sorting a version
+// table -- duplicated rather than required from there, deliberately:
+// package.json's own "files" allowlist comment (above) already states why
+// this installer never depends on scripts/baselines/ at runtime (that
+// directory is a Pipeman release-time tool, not something a downstream
+// install needs), and this three-line comparison is small enough that
+// keeping the boundary intact costs nothing. A malformed version string
+// (Number() producing NaN for a segment) makes this return NaN, which is
+// neither > 0 nor < 0 nor === 0 -- callers below treat that the same as
+// "not a downgrade" (the conservative direction: never alarm on a
+// comparison we can't actually make).
+function compareVersions(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
 
 // Sprint 6, Req 1: the manifest lives beside the version marker — a
 // framework-owned location, not sprint state, same reasoning as
@@ -988,7 +1016,29 @@ function mergeGitignore() {
   // already has it is a no-op (`missing` below already excludes it), and
   // an upgrade of an install that lacks it gets it appended, exactly like
   // any other entry in this block.
-  const block = ['docs/sprints/.locks/', `*${BACKUP_MARKER}*`, '.claude/role-claims.json'];
+  //
+  // Sprint 41, Req 1 (FMC finding 11): sprint 38's lock design writes
+  // `<claims-path><LOCK_SUFFIX>` and, on a steal, a
+  // `<claims-path><LOCK_SUFFIX>.stolen-<pid>-<ts>` sibling next to
+  // role-claims.json itself -- neither was ever added here, so a
+  // downstream Master Controller running a scope check saw untracked
+  // files it never created, exactly the "the record should never accuse
+  // the project of something it didn't do" property sprint 25 wrote the
+  // role-claims.json line for in the first place. Derived from
+  // role-claims.js's own LOCK_SUFFIX/CLAIMS_RELATIVE_PATH constants
+  // (required above), never retyped as separate literals that could
+  // silently drift out of sync with what acquireClaimsLock() actually
+  // writes -- toRelPathKey() normalizes CLAIMS_RELATIVE_PATH's own
+  // path.join() separators to the forward-slash form every line in this
+  // block (and every published baseline table) already uses, so this
+  // still reads correctly on a Windows install. The stolen-lock sibling's
+  // own pid/timestamp suffix varies per steal, so it's a glob (a trailing
+  // `*`, which gitignore matches within one path segment, exactly the
+  // shape needed here) rather than a literal line.
+  const claimsRelPath = toRelPathKey(CLAIMS_RELATIVE_PATH);
+  const lockRelPath = `${claimsRelPath}${LOCK_SUFFIX}`;
+  const stolenLockPattern = `${lockRelPath}.stolen-*`;
+  const block = ['docs/sprints/.locks/', `*${BACKUP_MARKER}*`, claimsRelPath, lockRelPath, stolenLockPattern];
   let existingLines = [];
   let existed = fs.existsSync(destPath);
   if (existed) {
@@ -1090,7 +1140,17 @@ function section(title, items) {
 const didUpgradeWork = replaced.length > 0 || removed.length > 0;
 
 console.log(`Fully Completely: installed into ${DEST_ROOT}`);
-if (installedVersion && installedVersion !== CURRENT_VERSION) {
+if (installedVersion && installedVersion !== CURRENT_VERSION && compareVersions(installedVersion, CURRENT_VERSION) > 0) {
+  // Sprint 41, Req 2 (FMC, LiveQA sprint 38 round 2): installing 0.2.11
+  // over 0.2.13 used to print "Upgraded 0.2.13 -> 0.2.11" -- true only in
+  // the sense that a version transition happened, actively misleading
+  // about its DIRECTION. Not forbidden (a deliberate rollback is
+  // legitimate, Out of Scope says so explicitly) -- just stated, in the
+  // same place the normal transition is reported, naming both versions,
+  // so a workshop attendee doesn't end up behind the version the guides
+  // were written against with no signal that anything unusual happened.
+  console.log(`Installing an OLDER version: ${installedVersion} -> ${CURRENT_VERSION} (this is a downgrade -- allowed, but make sure it's what you meant)`);
+} else if (installedVersion && installedVersion !== CURRENT_VERSION) {
   console.log(`Upgraded ${installedVersion} -> ${CURRENT_VERSION}`);
 } else if (installedVersion && didUpgradeWork) {
   const repairedCount = replaced.length + removed.length;

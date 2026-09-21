@@ -34,6 +34,31 @@ SCRIPT="python3 scripts/sprint_lifecycle.py"
 
 fail() { echo "SMOKE TEST FAILED: $1" >&2; exit 1; }
 
+# Sprint 41, Req 4a: run against the REAL repository tree (REPO_ROOT), not
+# the sandbox copy -- this is a static scan of this project's own shipped
+# scripts/.claude files, not something that needs a throwaway sprint
+# lifecycle to exercise. Asserts no code path constructs, defaults,
+# templates, or otherwise supplies --user-said/--user-said-file CONTENT;
+# see scripts/check_user_said_guard.py's own header for the full method
+# and the three violation shapes it's been verified (by negative control)
+# to catch.
+echo "== Req 4a (sprint 41): no code path supplies --user-said/--user-said-file content =="
+if ! USER_SAID_GUARD_OUT=$(python3 "$REPO_ROOT/scripts/check_user_said_guard.py" 2>&1); then
+  fail "check_user_said_guard.py found a violation:\n$USER_SAID_GUARD_OUT"
+fi
+echo "$USER_SAID_GUARD_OUT" | grep -q "USER_SAID_GUARD_OK" || fail "check_user_said_guard.py did not report OK"
+
+# Sprint 41, Req 4b: the reverse assertion, also against the REAL
+# docs/sprints/state/ in REPO_ROOT (this repository's own actual close
+# history), not the sandbox -- every sprint this project has ever actually
+# closed must carry a non-empty --user-said on record. See
+# scripts/check_user_said_history.py's own header for the full method.
+echo "== Req 4b (sprint 41): every recorded sprint close carries a non-empty --user-said =="
+if ! USER_SAID_HISTORY_OUT=$(python3 "$REPO_ROOT/scripts/check_user_said_history.py" 2>&1); then
+  fail "check_user_said_history.py found a violation:\n$USER_SAID_HISTORY_OUT"
+fi
+echo "$USER_SAID_HISTORY_OUT" | grep -q "USER_SAID_HISTORY_OK" || fail "check_user_said_history.py did not report OK"
+
 # Content hash of every file under docs/sprints/, used to assert a command
 # (like `gates`) that claims to be read-only actually didn't write anything.
 sprints_hash() {
@@ -365,6 +390,19 @@ $SCRIPT ship "$SPRINT_LEGACY" --commit "$LEGACY_COMMIT" > /tmp/out.txt 2>&1 && f
 grep -q "no QA1-audited commit on record" /tmp/out.txt || fail "legacy-sprint ship message missing"
 grep -q "doesn't match what QA1 audited" /tmp/out.txt && fail "legacy sprint should not be told the commit 'doesn't match', nothing was ever recorded to compare against"
 rm -f /tmp/out.txt
+
+echo "== sprint 41, Req 5a: a newly-created sprint file carries the template's Human Prerequisites section, between Dependencies and Team Assignments =="
+SPRINT_HP=$(new_sprint "Human prerequisites template sprint")
+HP_FILE=$(python3 -c "import json; print(json.load(open('docs/sprints/registry.json'))['sprints']['${SPRINT_HP}']['file'])")
+grep -q '^### Human Prerequisites$' "$HP_FILE" || fail "new sprint file is missing the '### Human Prerequisites' section header"
+# Order matters -- the sprint's own text says it belongs between Dependencies
+# and Team Assignments, not merely present somewhere in the file.
+DEP_LINE=$(grep -n '^### Dependencies$' "$HP_FILE" | head -1 | cut -d: -f1)
+HP_LINE=$(grep -n '^### Human Prerequisites$' "$HP_FILE" | head -1 | cut -d: -f1)
+TEAM_LINE=$(grep -n '^### Team Assignments$' "$HP_FILE" | head -1 | cut -d: -f1)
+[ -n "$DEP_LINE" ] && [ -n "$HP_LINE" ] && [ -n "$TEAM_LINE" ] || fail "could not locate all three section headers in the new sprint file"
+[ "$DEP_LINE" -lt "$HP_LINE" ] && [ "$HP_LINE" -lt "$TEAM_LINE" ] || \
+  fail "Human Prerequisites is not positioned between Dependencies and Team Assignments (lines: Dependencies=$DEP_LINE, Human Prerequisites=$HP_LINE, Team Assignments=$TEAM_LINE)"
 
 echo "== a custom template containing literal braces doesn't break sprint creation =="
 printf '\n### Example config\n```json\n{ "key": "value" }\n```\n' >> templates/sprint-template.md

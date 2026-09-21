@@ -13,6 +13,79 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.16 — Sprint 41
+
+Four items, all found by running the framework rather than reading it: the
+launcher's own transient lock files were showing up as untracked in a
+downstream project's git status, a downgrade install happened silently,
+a real collision warning was unreadable in practice (gone before the
+person it's for could see it), and the `--user-said` human-authorization
+rule was protected by exactly one refusal with no test defending either
+direction of it.
+
+- **The launcher's own lock files (and steal siblings) no longer show up
+  as untracked project files.** `role-claims.json.lock` and
+  `role-claims.json.lock.stolen-*` are now in the managed `.gitignore`
+  block every install writes (fresh and upgrade), and in this repository's
+  own `.gitignore` — both derived from `role-claims.js`'s own
+  `LOCK_SUFFIX`/`CLAIMS_RELATIVE_PATH` constants, with a divergence-guard
+  test for the one hand-kept copy (a plain `.gitignore` can't `require()`
+  a JS module). An upgrade adds the new lines while preserving whatever
+  else was already in a target's `.gitignore`, exactly as the existing
+  block merge already guaranteed.
+- **The installer now says so when it's about to install an older version
+  than the one already present**, naming both versions, in the same place
+  the normal version-transition line prints. A deliberate rollback still
+  works exactly as before — this only makes it visible rather than silent.
+  Upgrade and same-version wording are unchanged.
+- **A collision warning now survives long enough to actually be read.**
+  Measured first, not reasoned about: Claude Code's own interactive TUI
+  covers a pre-launch `console.error()` line within well under a second
+  (LiveQA, sprint 38 round 2), so the warning is now also prepended to the
+  role's own opening prompt — fresh launch and resume alike — where it
+  becomes part of the model's own first turn and rides the same rendering
+  pipeline the TUI already uses for the conversation itself. Confirmed
+  live, 3/3 real headless runs at `claude 2.1.278`, including on
+  `--resume` (which previously carried no trailing message at all for any
+  role but Dev Team 2's own worktree note). A clean launch — no
+  collision — produces byte-identical prompt text to before this release;
+  nothing is delayed or gated. Full measurement:
+  `docs/sprint-41-collision-warning-readability-findings.md`.
+- **The `--user-said` human-authorization rule is now defended by tests on
+  both sides**, not just `cmd_complete`'s own single refusal: one static
+  scan asserts no code path in this repository's `scripts/`, command
+  files, or agent files ever constructs, defaults, or otherwise supplies
+  `--user-said`/`--user-said-file` content (`scripts/check_user_said_guard.py`),
+  and one asserts every sprint close actually recorded in this project's
+  own history carries a non-empty one
+  (`scripts/check_user_said_history.py`). Neither test touches
+  `cmd_complete`'s own behavior — the rule is unchanged, just harder to
+  erode unnoticed the way an earlier rule (sprint 9's publish ordering)
+  once did.
+- **The sprint template gains a `### Human Prerequisites` section**
+  (between Dependencies and Team Assignments) for anything a person must
+  do outside the repository before a sprint's gates can pass — a
+  migration, a DNS record, an account, a device at hand. QA1, LiveQA, and
+  Master Controller's own agent files now say to route a predicted
+  operator-side blocker there at planning/repair time, not bury it as a
+  warning inside a verdict's own notes read only after a live-test
+  failure — the gap that cost FMC two live-test rounds on a real,
+  effectively-predicted blocker.
+- **Two permission-model gaps re-measured, not fixed** (Req 6c: no grant
+  changed this release). A `node -e` write outside the launch working
+  directory succeeds for headless LiveQA while a plain read (`cat`/`ls`)
+  of that same outside path is denied — confinement holds for reads and
+  not for writes, the opposite of symmetric. And under the live headless
+  profiles, `qa1`/`liveqa` can both run read-only git (`status`/`log`/
+  `diff`) with zero denials despite no git grant at all, while `git add`
+  and the sprint-32 pathspec bookkeeping commit are both denied for both
+  roles regardless of grant — including for `qa1` with its
+  `eligibleForOwnedRepositoryGrant` set, meaning neither gate role can
+  currently execute the commit CLAUDE.md's own rule requires of it,
+  headless. Both findings are stated plainly in `liveqa.md`/`qa1.md` and
+  recorded in `docs/sprint-12-permission-scope-findings.md`; the fix is
+  routed to Master Controller as its own sprint, not designed here.
+
 ## 0.2.15 — Sprint 40
 
 Two more downstream findings from FMC's own use of this framework, routed

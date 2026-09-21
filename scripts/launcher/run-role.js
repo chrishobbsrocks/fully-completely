@@ -293,20 +293,42 @@ function spawnClaude(args) {
 // in a handoff, and without needing a real claude process or credentials
 // to do it. This is the exact shape every interactive launch already
 // used before this sprint touched the file; extracted, not changed.
-function freshLaunchArgs(role, sessionTitle, uuid) {
-  return ['--agent', role.id, '--session-id', uuid, '--name', sessionTitle, initialPrompt(role.label)];
+// `roleWarning` (sprint 41, Req 3), fourth and optional: the collision
+// NOTE from role-claims.js's `roleClaimWarning()`, or null/undefined on a
+// clean launch — see initialPrompt()'s own comment in prompts.js for why
+// this is prepended here rather than left to the pre-launch
+// `console.error()` line alone (still printed, unconditionally, right
+// below where this is computed in main() — this is additive, not a
+// replacement).
+function freshLaunchArgs(role, sessionTitle, uuid, roleWarning) {
+  return ['--agent', role.id, '--session-id', uuid, '--name', sessionTitle, initialPrompt(role.label, roleWarning)];
 }
 
-function resumeLaunchArgs(role, uuid, repoName) {
+// Sprint 41, Req 3: before this sprint, a resumed session had no generic
+// trailing-message mechanism at all — only dev-team-2's own worktree note
+// ever rode along on `--resume`. A collision warning on a RESUMED launch
+// needs the identical fix freshLaunchArgs() got above, or a warning
+// surfaced only on the first launch of a session would go unsurfaced on
+// every resume after it. Both messages, when both apply, are sent as one
+// trailing argv element (the CLI accepts exactly one), joined the same
+// way initialPrompt() joins a warning onto its own body.
+function resumeLaunchArgs(role, uuid, repoName, roleWarning) {
   const args = ['--agent', role.id, '--resume', uuid];
+  const messages = [];
   if (role.id === 'dev-team-2') {
-    args.push(devTeam2ResumePrompt(repoName));
+    messages.push(devTeam2ResumePrompt(repoName));
+  }
+  if (roleWarning) {
+    messages.push(roleWarning);
+  }
+  if (messages.length > 0) {
+    args.push(messages.join('\n\n'));
   }
   return args;
 }
 
-async function launchFresh(role, sessionTitle, uuid) {
-  return spawnClaude(freshLaunchArgs(role, sessionTitle, uuid));
+async function launchFresh(role, sessionTitle, uuid, roleWarning) {
+  return spawnClaude(freshLaunchArgs(role, sessionTitle, uuid, roleWarning));
 }
 
 // Sprint 11, Req 3: the headless prompt is read from a file, never taken
@@ -1928,18 +1950,18 @@ async function main() {
     // a future headless variant ever reach it, rather than relying on
     // headless simply never calling it today.
     console.error(`Restarting ${role.label}: starting a brand-new session (any prior one is left alone).`);
-    const result = await launchFresh(role, sessionTitle, uuid);
+    const result = await launchFresh(role, sessionTitle, uuid, roleWarning);
     process.exitCode = result.code === null ? 0 : result.code;
     return;
   }
 
   if (!resume) {
-    const result = await launchFresh(role, sessionTitle, uuid);
+    const result = await launchFresh(role, sessionTitle, uuid, roleWarning);
     process.exitCode = result.code === null ? 0 : result.code;
     return;
   }
 
-  const result = await spawnClaude(resumeLaunchArgs(role, uuid, repoName));
+  const result = await spawnClaude(resumeLaunchArgs(role, uuid, repoName, roleWarning));
   process.exitCode = result.code === null ? 0 : result.code;
 }
 

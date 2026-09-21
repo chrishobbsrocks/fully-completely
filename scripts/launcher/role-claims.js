@@ -99,6 +99,11 @@ function claimsFilePath(repoRoot) {
 // instead of a busy-spin while retrying, since this function's own
 // call site (run-role.js's synchronous preflight, before any async work
 // begins) has no access to `await`.
+// Sprint 41, Req 1: exported (see module.exports below) so install.js's
+// own managed .gitignore block can derive the lock file's ignore pattern
+// from this constant directly, rather than retyping the literal '.lock'
+// a second time where it could silently drift out of sync with the value
+// acquireClaimsLock() below actually uses.
 const LOCK_SUFFIX = '.lock';
 const LOCK_STALE_MS = 10000;
 const LOCK_MAX_WAIT_MS = 3000;
@@ -517,6 +522,7 @@ function roleClaimWarning(roleLabel, previousClaims) {
 
 module.exports = {
   CLAIMS_RELATIVE_PATH,
+  LOCK_SUFFIX,
   claimsFilePath,
   readClaims,
   recordRoleClaim,
