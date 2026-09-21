@@ -1,7 +1,7 @@
 {
   "id": 40,
   "title": "Let a role correct its own recorded notes without rewriting them, and let Master Controller commit the files it actually owns",
-  "phase": "qa1_audit",
+  "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "b9764264ecfe5e5204dd1d48b009159c051eed5be0ddd09453cecf2ca724e118",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -32,11 +32,17 @@
       "actor": "qa1",
       "event": "audit",
       "detail": "PASS: QA1 gate-1 audit, sprint 40, round 2. Audited commit 05739f8. The sprint file was re-read and is unchanged since 616ef58, so the requirements have not moved. Verdict: PASS.\n\nSCOPE. The delta f1de0cc..05739f8 outside bookkeeping is scripts/mc-commit.js and scripts/launcher_test.js. HEAD is 05739f8.\n\n1. Round-1 HIGH (symlink bypass in both new allowlist branches): FIXED, and demonstrated fixed.\n - Both branches now resolve first and then refuse when real !== abs, so a symlink followed at the final component or at any parent directory is refused outright rather than resolved and trusted. The decisions-log check lives inside validateDecisionsLogDeclaration, so the validator stays correct standalone, and the directory check now uses lstatSync.\n - Re-ran all three of QA1's round-1 repros against 05739f8's own mc-commit.js, in a throwaway repo laid out like a real install:\n   - Decisions log symlinked to scripts/tool.js: REFUSED, naming the symlink and what it resolves to.\n   - Decisions log symlinked outside the repository: REFUSED by the wrapper itself, not by git's incidental complaint.\n   - CLAUDE.md symlinked to scripts/tool.js: REFUSED.\n   - git log afterward shows scripts/tool.js never entered history.\n - Controls, to be sure the fix does not over-refuse:\n   - A real CLAUDE.md commits normally.\n   - A real decisions log at the default path commits normally.\n   - Invoking the wrapper through a symlinked repo path (SP/mcp2-link -> SP/mcp2, the same shape as macOS /tmp -> /private/tmp) still commits, because Node resolves the script's own path before ROOT is computed, so abs and real agree. An absolute path argument also still works. No false refusal from the new equality test.\n - Negative control, run by QA1: with f1de0cc's mc-commit.js restored under 05739f8's tests, exactly the three new tests FAIL (symlinked CLAUDE.md, symlinked decisions log to a source file, symlinked decisions log outside the repo). With the fix restored, all pass. Real regression tests.\n\n2. Round-1 LOW (false \"under docs/sprints/\" success line): FIXED. The owner label resolveOwnedPath already computed is now used. Observed output: \"Committed 1 path(s): CLAUDE.md (CLAUDE.md)\" and \"Committed 1 path(s): docs/decisions.md (the declared decisions log)\".\n\n3. Everything verified in round 1 still holds at 05739f8, unchanged by this diff: Req 1/1a-1e (append-only correction, no phase gate, actor matching, unknown actor refused, required non-empty text, index validation, status summary count plus --verbose attachment, docs in CLAUDE.md, the command file, qa1.md and liveqa.md), Req 2a's docs/sprints/ default and its traversal and prefix-lookalike refusals, Req 2b's declaration reading and validation with a documented default, Req 2c's absence of any run-time widening (no process.env read in mc-commit.js at all, argv parsed only for --message/--message-file and the path list), Req 2d's doc updates, and Req 3's version bump (0.2.15 against published 0.2.14) with CHANGELOG. See round 1's notes for the evidence behind each.\n\n4. Req 4: QA1 ran both suites at 05739f8 in a clean clone. node scripts/launcher_test.js: ALL LAUNCHER TESTS PASSED, 3 of 3 runs. bash scripts/smoke_test.sh: ALL SMOKE TESTS PASSED, exit 0. pyflakes is clean.\n\nADVISORY, not blocking, for a future sprint. INSTALL_FRAMEWORK_OWNED_PREFIXES in mc-commit.js is a hand-maintained duplicate of install.js's FRAMEWORK_OWNED, named honestly as such with the reason install.js cannot be required. Nothing fails if the two drift. Sprint 38 added a structural test tying package.json's files list to FRAMEWORK_OWNED; the same shape of test would cover this pair.\n\nFOR LIVEQA. The sprint's own criteria already cover the refusals; add the two symlink shapes above (a symlinked CLAUDE.md and a symlinked decisions log) to the live refusal checks, and confirm the success line names the right owner for each of the three allowlist entries."
+    },
+    {
+      "ts": "2026-09-21T19:01:19+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-21T18:52:37+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-21T19:01:19+00:00"
   }
 }
