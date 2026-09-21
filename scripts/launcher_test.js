@@ -4406,6 +4406,57 @@ test('mc-commit.js: refuses a CLAUDE.md prefix-lookalike (CLAUDE.mdx is not CLAU
   });
 });
 
+test('mc-commit.js: refuses a CLAUDE.md that is actually a symlink to a source file -- QA1 round 1 FINDING (control: real file is unaffected)', () => {
+  withMcCommitFixture((dir) => {
+    fs.symlinkSync(path.join(dir, 'scripts_other', 'tool.js'), path.join(dir, 'CLAUDE.md'));
+    const result = runMcCommit(dir, ['--message', 'sneaky via symlink', '--', 'CLAUDE.md']);
+    assert.notStrictEqual(result.status, 0, 'a symlinked CLAUDE.md must be refused, not resolved-and-committed');
+    assert.match(result.stderr, /is a symlink/);
+    assert.match(gitLog(dir), /^[0-9a-f]+ baseline$/, 'nothing new should have been committed');
+    // Control: confirm the fixture's own tool.js was NOT touched/staged by
+    // this attempt, and that a genuinely real (non-symlink) CLAUDE.md
+    // still works -- isolates the refusal to the symlink shape itself.
+    fs.unlinkSync(path.join(dir, 'CLAUDE.md'));
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'a real file\n');
+    const realResult = runMcCommit(dir, ['--message', 'real claude.md', '--', 'CLAUDE.md']);
+    assert.strictEqual(realResult.status, 0, `a genuinely real CLAUDE.md must still work -- got: ${realResult.stderr}`);
+  });
+});
+
+test('mc-commit.js: refuses a declared decisions log that is actually a symlink to a source file -- QA1 round 1 FINDING', () => {
+  withMcCommitFixture((dir) => {
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'),
+      JSON.stringify({ 'fullyCompletely.mcDecisionsLog': 'docs/decisions.md' }));
+    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
+    fs.symlinkSync(path.join(dir, 'scripts_other', 'tool.js'), path.join(dir, 'docs', 'decisions.md'));
+    const result = runMcCommit(dir, ['--message', 'sneaky via symlink', '--', 'docs/decisions.md']);
+    assert.notStrictEqual(result.status, 0, 'a symlinked decisions log must be refused, not resolved-and-committed');
+    assert.match(result.stderr, /is a symlink/);
+    assert.match(gitLog(dir), /^[0-9a-f]+ baseline$/, 'nothing new should have been committed');
+  });
+});
+
+test('mc-commit.js: refuses a declared decisions log that is a symlink pointing OUTSIDE the repository -- QA1 round 1 FINDING ("git add complaining" is not this wrapper\'s own check)', () => {
+  withMcCommitFixture((dir) => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-mc-commit-outside-'));
+    try {
+      fs.writeFileSync(path.join(outside, 'secret.txt'), 'not part of this repo\n');
+      fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'),
+        JSON.stringify({ 'fullyCompletely.mcDecisionsLog': 'docs/decisions.md' }));
+      fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
+      fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(dir, 'docs', 'decisions.md'));
+      const result = runMcCommit(dir, ['--message', 'escape via symlink', '--', 'docs/decisions.md']);
+      assert.notStrictEqual(result.status, 0, 'a symlink pointing outside the repository must be refused by THIS wrapper\'s own check');
+      assert.match(result.stderr, /is a symlink/);
+      assert.match(gitLog(dir), /^[0-9a-f]+ baseline$/, 'nothing new should have been committed');
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
 test('mc-commit.js: accepts the DEFAULT decisions log (docs/decisions.md) when nothing is declared', () => {
   withMcCommitFixture((dir) => {
     fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });

@@ -268,16 +268,40 @@ function validateDecisionsLogDeclaration(declaredOrDefault, root) {
   } catch (e) {
     // Doesn't exist yet -- fine, resolved lexically, same as
     // resolveInsideSprints() above.
+    real = abs;
+  }
+  // QA1 round 1 FINDING, FIXED HERE: every check above runs against
+  // `abs`, the LEXICAL path -- so a declared path that is ITSELF a
+  // symlink (or sits behind one) sailed through every one of them, and
+  // this function then returned the symlink's own RESOLVED TARGET as
+  // `real`, unchecked, which the caller committed under the allowlisted
+  // name. Demonstrated live by QA1: a declared decisions log symlinked to
+  // a real source file, and separately to a path outside the repository,
+  // both committed their real targets -- exactly the confinement bypass
+  // sprint 36 built this whole wrapper to close, reopened on the path
+  // this sprint added. `real !== abs` after realpathSync means AT LEAST
+  // ONE symlink was followed somewhere along the path (the final
+  // component or a parent directory) -- refused outright, never
+  // resolved-and-trusted. A not-yet-existing path is still fine: `real`
+  // was just reset to the lexical `abs` above, so this never fires for
+  // it.
+  if (real !== abs) {
+    return {
+      valid: false,
+      reason: `"${value}" is a symlink (or sits behind one) -- resolves to ${real}, not ${abs}. A symlink here ` +
+        'could point anywhere and would defeat every check above; declare and commit the real file directly, ' +
+        'never a symlink to it',
+    };
   }
   if (fs.existsSync(real)) {
     let st = null;
     try {
-      st = fs.statSync(real);
+      st = fs.lstatSync(real);
     } catch (e) {
       st = null;
     }
     if (st && !st.isFile()) {
-      return { valid: false, reason: `"${value}" (${real}) exists but is not a regular file (a directory?) -- the decisions log must be exactly one file` };
+      return { valid: false, reason: `"${value}" (${real}) exists but is not a regular file (a directory or symlink?) -- the decisions log must be exactly one file` };
     }
   }
   return { valid: true, real };
@@ -312,15 +336,30 @@ function resolveOwnedPath(p) {
   const abs = path.resolve(ROOT, p);
   const claudeMdAbs = path.resolve(ROOT, CLAUDE_MD_REL);
   if (abs === claudeMdAbs) {
-    let realClaudeMd = abs;
+    // QA1 round 1 FINDING, FIXED HERE: this used to resolve the symlink
+    // and return the TARGET unchecked -- so a project's own CLAUDE.md,
+    // replaced with a symlink to any file anywhere (including this
+    // repo's own source), would have this wrapper commit the symlink's
+    // real target under the CLAUDE.md name. Demonstrated live by QA1.
+    // Fixed the same way validateDecisionsLogDeclaration() now is:
+    // resolve, then require the result to equal the lexical path exactly
+    // -- `real !== abs` means a symlink was followed somewhere (the file
+    // itself or a parent directory), refused outright rather than
+    // resolved-and-trusted. Not-yet-existing (a fresh project's very
+    // first CLAUDE.md commit) still resolves to itself lexically, same
+    // as resolveInsideSprints()'s own established precedent.
+    let real = abs;
     try {
-      realClaudeMd = fs.realpathSync(abs);
+      real = fs.realpathSync(abs);
     } catch (e) {
-      // Doesn't exist yet -- every real project installing this framework
-      // has one, but refusing a not-yet-existing CLAUDE.md here would be
-      // stricter than resolveInsideSprints() itself is for docs/sprints/.
+      real = abs;
     }
-    return { real: realClaudeMd, owner: CLAUDE_MD_REL };
+    if (real !== abs) {
+      die(`'${p}' (CLAUDE.md) is a symlink (or sits behind one) -- resolves to ${real}, not ${abs}. A symlink ` +
+        'here could point anywhere and would defeat this allowlist entirely; commit the real file directly, ' +
+        'never a symlink to it. Nothing has been committed.');
+    }
+    return { real, owner: CLAUDE_MD_REL };
   }
 
   if (abs === decisionsLogCandidateAbs(ROOT)) {
@@ -362,6 +401,7 @@ function main() {
   }
 
   const resolved = [];
+  const owners = [];
   for (const p of opts.paths) {
     const match = resolveOwnedPath(p);
     if (match === null) {
@@ -371,6 +411,7 @@ function main() {
         'Nothing has been run.');
     }
     resolved.push(path.relative(ROOT, match.real));
+    owners.push(match.owner);
   }
 
   const addResult = spawnSync('git', ['add', '--', ...resolved], { cwd: ROOT, encoding: 'utf8' }); // nosec B603 B607
@@ -383,7 +424,13 @@ function main() {
     die(`git commit failed: ${(commitResult.stderr || commitResult.stdout || '').trim()}`);
   }
   process.stdout.write(commitResult.stdout || '');
-  console.log(`Committed ${resolved.length} path(s) under docs/sprints/: ${resolved.join(', ')}`);
+  // QA1 round 1 FINDING, FIXED HERE: this used to unconditionally claim
+  // "under docs/sprints/" regardless of which allowlist entry a path
+  // actually matched -- false whenever a commit went through the
+  // CLAUDE.md or decisions-log branch instead. resolveOwnedPath() already
+  // computed the real owner for exactly this reason; this just uses it.
+  const described = resolved.map((r, i) => `${r} (${owners[i]})`).join(', ');
+  console.log(`Committed ${resolved.length} path(s): ${described}`);
 }
 
 main();
