@@ -1,7 +1,7 @@
 {
   "id": 43,
   "title": "Say which gate role's confinement is enforced and which is instructional, and record the measurement that settles it",
-  "phase": "qa1_audit",
+  "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "d0da6a7e82153a8d122b1a32dbb81f05ef35eb4f3a5675a40bb683f8f5c2fe9e",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -68,11 +68,17 @@
       "actor": "qa1",
       "event": "audit",
       "detail": "PASS: QA1 gate-1 audit, sprint 43, round 6. Audited commit 3b3ffd7. Verdict: PASS. Short round: the sprint file's header and Req 7 changed, and the build added exactly the bump and the CHANGELOG entry.\n\nWHAT MOVED since round 5's PASS (fef42e3): the sprint file (fee3725 -- header reversed, Req 7 added, acceptance criteria, Out of Scope, Human Prerequisites and Risks all updated to match), and the build (3b3ffd7 -- package.json and CHANGELOG.md only).\n\n1. The reversal is recorded coherently, not just applied. The header now says explicitly that it REPLACES the earlier no-bump instruction, that the user declined and then reversed the same day, and that the earlier instruction is void and should not be followed. Every downstream consequence in the file moved with it: the \"a bump added here is a FAIL\" criterion is explicitly voided and inverted (its absence is now the failure), Out of Scope's \"a release for documentation alone\" line is gone and replaced with one keeping code and grant changes out, Human Prerequisites records that the wait-for-another-release condition is resolved, and the stale-wording risk is replaced with one about a doc-only release smuggling a behaviour change. A reversal that left any of those behind would have been the real defect here; none was left behind.\n - The FMC note is still correctly framed as input and explicitly not authorization, and the new LiveQA criterion states that authorizing the bump on 22 September is not the publish authorization and does not stand in for the user's own word in Pipeman's session. That is the right distinction and it is now written where Pipeman will read it.\n2. Req 7 itself: npm view fully-completely version returns 0.2.17 and package.json is 0.2.18, so it is published+1 confirmed at build time. The CHANGELOG 0.2.18 entry opens by stating this release is documentation and tests only with no permission grant or other code change, then covers the substance of Reqs 1-6.\n3. Req 4 and Req 6 still hold at the bump, which is what the new Out of Scope line exists to protect: scripts/launcher/run-role.js has a zero-line diff across the ENTIRE sprint (a08dbf5..3b3ffd7), so HEADLESS_PERMISSION_PROFILES is byte-unchanged and no grant moved. The whole-sprint file list is liveqa.md, qa1.md, CHANGELOG.md, CLAUDE.md, the findings doc, the sprint file, its state file, package.json and launcher_test.js -- documentation, tests, and the release metadata, nothing else.\n4. Everything audited in rounds 1-5 is untouched by this diff and still stands: the conditional enforcement wording, the corrected settings-file name, the findings entry, CLAUDE.md's general principle, and the three tests (grants-vs-docs, declared-owned companion, and the structural pairing check I planted against in round 5).\n5. Suites at 3b3ffd7 in a clean clone: node scripts/launcher_test.js ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh ALL SMOKE TESTS PASSED, exit 0.\n\nONE ITEM FOR PIPEMAN, not a defect and not blocking: npm run baselines:check reports the table covers published versions through 0.2.17, which is correct right now -- 0.2.18 does not exist on the registry yet. Regenerating the baseline table for 0.2.18 is the established release-time step (Pipeman's own process, as done for 0.2.10 through 0.2.13), so it belongs after publish, not in this diff.\n\nFOR LIVEQA, unchanged: three probes at gate time with the CLI version recorded -- default-profile QA1 denied, LiveQA runs, declared-owned QA1 (declaration in .claude/settings.local.json) runs -- plus reading the installed qa1.md, liveqa.md, CLAUDE.md paragraph and findings doc in a real install of 0.2.18, and the provenance check against last_shipped_commit."
+    },
+    {
+      "ts": "2026-09-22T03:45:19+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-22T03:43:30+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-22T03:45:19+00:00"
   }
 }
