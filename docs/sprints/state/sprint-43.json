@@ -1,7 +1,7 @@
 {
   "id": 43,
   "title": "Say which gate role's confinement is enforced and which is instructional, and record the measurement that settles it",
-  "phase": "qa1_audit",
+  "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "a024970ed8180669211cd8eb5cdf301d7c0b6b3b0bc15eb68d4a46538df656bf",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -44,11 +44,17 @@
       "actor": "qa1",
       "event": "audit",
       "detail": "PASS: QA1 gate-1 audit, sprint 43, round 4. Audited commit 3471879. Verdict: PASS. Short round, as expected: this re-audit exists because Master Controller amended the sprint file after a PASS, which the dev-done hash check correctly requires a fresh audit for.\n\nWHAT MOVED. Only the sprint file (3471879): Req 2's wording, and one added LiveQA criterion. Everything outside docs/sprints/ is byte-identical to ba39be3, which I passed in round 3 (git diff ba39be3..HEAD excluding docs/sprints is empty), so round 3's suite runs and code review carry over unchanged rather than being re-asserted here.\n\n1. The amendment is accurate to what shipped, checked clause by clause against the current .claude/agents/qa1.md rather than against my memory of it:\n - Req 2's headline now states the enforcement conditionally (\"enforced on its DEFAULT profile\"), which matches the shipped text.\n - 2(a) gate-commit.js as a sanctioned, purpose-built narrow child process: present in qa1.md.\n - 2(b) the fullyCompletely.ownedRepository conditional, that the same probe would run there, that the rule is instructional for that session, and that QA1 must say so if it bears on a finding: all present.\n - 2(c) no \"narrowest of the six\" claim: the phrase survives in qa1.md only inside the sentence that disowns it as the first version's own overclaim, followed by the accurate comparison (Master Controller's default is equally narrow and never eligible for the broad grant). That is a correction, not a claim, and it is the right way to leave it.\n - \"Name the asymmetry with LiveQA\": satisfied in prose rather than by filename \u2014 the text contrasts the identical probe's DENIED result on QA1's profile with its running under LiveQA's, and says the rule is \"exactly like LiveQA's own restraint\" in the declared-owned case. The requirement asks for the asymmetry to be named, not for a file citation.\n - The amendment's own parenthetical is honest about why it exists and what it cost, which is the right shape for a post-PASS sprint-file change.\n2. The new live criterion is exactly the third case I asked for in round 3: a headless QA1 in a project validly declaring fullyCompletely.ownedRepository in .claude/settings.local.json, where the probe should RUN rather than be denied, with the CLI version recorded. It names the correct file, consistent with the round-2 fix and with readOwnedRepositoryDeclaration's actual behaviour.\n3. Unchanged and still true at 3471879: no permission grant moved (run-role.js is not in this sprint's diff at all), no version bump (package.json untouched across a08dbf5..3471879), Req 1/3/5 text as audited in rounds 1-3, and Req 6's two tests with the six plantings I ran across earlier rounds.\n\nNOTHING OUTSTANDING. The Master Controller item I carried in rounds 1-3 (the sprint file's own premise overclaiming) is what this amendment closed.\n\nFOR LIVEQA, unchanged from round 3 and now written into the sprint's own criteria: three probes, on the CLI version current at gate time, with that version recorded \u2014 default-profile QA1 denied, LiveQA runs, declared-owned QA1 runs. If any of the three has changed, the documentation is stale and needs its own correction rather than a pass."
+    },
+    {
+      "ts": "2026-09-22T03:07:33+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-22T03:06:34+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-22T03:07:33+00:00"
   }
 }
