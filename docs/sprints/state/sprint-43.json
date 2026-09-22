@@ -1,7 +1,7 @@
 {
   "id": 43,
   "title": "Say which gate role's confinement is enforced and which is instructional, and record the measurement that settles it",
-  "phase": "qa1_audit",
+  "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "4e6562caaf1cfdba3e4c810a6e929ea8a76fe80a7a8e67bc28a2a9a808c6c94e",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -56,11 +56,17 @@
       "actor": "qa1",
       "event": "audit",
       "detail": "PASS: QA1 gate-1 audit, sprint 43, round 5. Audited commit fef42e3. Verdict: PASS.\n\nWHAT MOVED since round 4's PASS (3471879): the sprint file gained Req 6a/6b plus two recorded-input notes in the header and Context; scripts/launcher_test.js gained the structural pairing test and a logic test; .claude/agents/qa1.md gained the literal marker phrase. Nothing else. run-role.js is still absent from the entire sprint diff, and package.json is untouched.\n\n1. Req 6a: the invariant is asserted structurally, not as prose-versus-grants.\n - disallowsEditAndWrite() and grantsArbitraryChildProcessRoute() are derived from the profile objects themselves (disallowedTools, allowedTools, eligibleForOwnedRepositoryGrant), and the test iterates every entry in HEADLESS_PERMISSION_PROFILES rather than naming qa1/liveqa. A role that does not exist yet is covered by construction.\n - eligibleForOwnedRepositoryGrant counts as a route on its own, which is the correct call: eligibility is what flips QA1, and the assembled argv only reflects whatever declaration happens to exist on the machine running the test.\n - The vacuity floor (checked >= 2) is the right guard against the detection logic silently breaking and the whole test passing on an empty set.\n2. QA1 PLANTED THE PROFILE, as Req 6a's acceptance criterion requires. In a clean clone at fef42e3, each planting reverted after:\n - Planted pipeman with disallowedTools ['Edit','Write'] AND allowedTools containing Bash(bash *) -- a role this test names nowhere and whose agent file carries no marker (grep: 0 hits). The pairing test FAILS, with a message naming the file that must carry the wording. This is the case that proves the generic derivation works rather than a hardcoded qa1/liveqa expectation.\n - Stripped the marker phrase from liveqa.md (a real role that needs it): FAILS.\n - Stripped it from qa1.md: FAILS.\n - Restored: ALL LAUNCHER TESTS PASSED.\n - My first attempt at the pipeman planting misfired (the grant landed in disallowedTools), which produced two unrelated guard failures and not the pairing failure. I redid it correctly rather than counting that run; recording it because the distinction matters for whether the criterion was actually met.\n3. The second test exercises the pure functions directly against a constructed adversarial case for each recognized route (node, npx, bash, sh, git), the eligibility-only route, and a safe profile that must not be flagged. That is a real complement to the data-driven test, not a duplicate.\n4. Req 6b: the comment states plainly why prose-matching alone cannot catch this shape (two independently-asserted facts with nothing connecting them), and says so where someone simplifying the test would read it.\n5. The marker phrase: qa1.md carries it verbatim in the conditional case; liveqa.md carries it in upper case, which the case-insensitive regex matches. Both are covered by one substring test, as the comment intends.\n6. The two new sprint-file notes are correctly framed: FMC's input is recorded as input, explicitly not authorization, with publishing still requiring the user's own word in Pipeman's session; and the independent-reproduction note strengthens the Context's ruling without changing it.\n7. Everything from rounds 1-4 still holds: Req 1/2/3/5 text, Req 4 (no grant moved, run-role.js absent from the diff), the two earlier grant-versus-documentation tests with the six plantings I ran previously, and no version bump.\n8. Suites at fef42e3 in a clean clone: node scripts/launcher_test.js ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh ALL SMOKE TESTS PASSED, exit 0.\n\nNOTHING OUTSTANDING.\n\nFOR LIVEQA, unchanged: three probes at gate time with the CLI version recorded -- default-profile QA1 denied, LiveQA runs, declared-owned QA1 runs."
+    },
+    {
+      "ts": "2026-09-22T03:26:51+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-22T03:26:22+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-22T03:26:51+00:00"
   }
 }
