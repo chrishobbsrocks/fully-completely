@@ -16,7 +16,10 @@ tool layer while LiveQA's is instructional, record the measurement that
 establishes it, and change no permission grant.
 
 **NO VERSION BUMP IN THIS SPRINT.** The user declined a release for
-documentation alone (22 September). This sprint is written and held; it ships
+documentation alone (22 September). *(Input on record, not authorization: FMC's
+Master Controller asked for this wording sooner rather than later, 22 September.
+Publishing still requires the user's own word in Pipeman's session, in the
+moment — a downstream team's preference is not a substitute and never will be.)* This sprint is written and held; it ships
 whenever the next release carries it, or gets its own bump later if the user
 decides so. Dev Team: do not add a version bump, and do not treat the absence of
 one as an oversight. See Human Prerequisites for what that means for the live
@@ -33,7 +36,13 @@ commit was not stopped by the permission layer at all. That is LiveQA's own
 `Bash(node *)` grant from sprint 39, not anything sprint 42 introduced.
 
 Master Controller's ruling, 22 September: **document it, do not narrow the
-grant.** Narrowing `Bash(node *)` would not restore a boundary, because
+grant.** *(Independently reproduced: FMC's own sprint 39 granted their headless
+LiveQA `Bash(node *)` and recorded the same measurement in the profile itself —
+`npx *` already permits arbitrary program-mediated writes inside and outside the
+working directory. Two installs, same measurement, same ruling; treat it as
+settled rather than as one team's judgment call. Their owned-repository grant
+includes `bash *`, `sh *`, `git *` and `node *`, so the QA1 conditional in Req 2
+reproduces there too.)* Narrowing `Bash(node *)` would not restore a boundary, because
 `Bash(npx *)` remains and does the same thing — that is precisely what sprint 39
 measured when it concluded `node *` widened nothing. And `npx` cannot go:
 LiveQA's job is installing and running the published artifact, which is arbitrary
@@ -106,6 +115,25 @@ files currently imply more uniformity than holds.
    grant change that contradicts the documentation fails the suite rather than
    silently making it false.
 
+   **6a. Assert the PAIRING, not only the prose (added 22 September, FMC's
+   sharpening; requires a fresh `/sprint-qa1` and a second `/sprint-dev-done`,
+   which is the hash check working as intended).** A prose-versus-grants test
+   passes on a profile that is quietly lying, and this is not hypothetical:
+   `disallowedTools: ['Edit', 'Write']` sits directly above `Bash(npx *)` in
+   LiveQA's profile and directly above the narrow script grants in QA1's. Same
+   two lines, opposite meaning, no marker telling them apart — and FMC's own
+   install carries the identical shape. So assert the structural invariant:
+   **any profile that disallows `Edit`/`Write` while granting a general
+   interpreter or shell (`node *`, `npx *`, `bash`, `sh`, `git *`, or an
+   equivalent route to an arbitrary child process) MUST carry the
+   instructional-not-enforced wording, and the suite fails if it does not.**
+   Include the owned-repository grant set in what counts as such a route, since
+   a declaration is what flips QA1. The test must fail on a planted profile that
+   pairs the two without the wording — QA1 plants one to prove it.
+
+   **6b.** State in the test's own comment why prose-matching alone is
+   insufficient, so the next person to touch it does not simplify it back.
+
 ### Acceptance Criteria
 
 **QA1 verifies statically:**
@@ -122,7 +150,11 @@ files currently imply more uniformity than holds.
   this instance.
 - **Req 6** — the profile-versus-documentation test exists and fails if a grant
   is changed without updating these files. QA1 plants a change and confirms it
-  fails.
+  fails. **6a** — the pairing invariant is asserted structurally, covering the
+  owned-repository route; QA1 plants a profile that disallows `Edit`/`Write`
+  alongside a general interpreter with no instructional wording and confirms the
+  suite fails on it. A test that only compares prose to grants does not meet this
+  requirement. **6b** — the comment says why.
 - **No version bump.** `package.json` unchanged. A bump added here is a FAIL,
   per the header.
 
