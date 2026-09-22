@@ -1,17 +1,17 @@
 {
   "id": 43,
   "title": "Say which gate role's confinement is enforced and which is instructional, and record the measurement that settles it",
-  "phase": "liveqa_live",
+  "phase": "complete_ready",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "d0da6a7e82153a8d122b1a32dbb81f05ef35eb4f3a5675a40bb683f8f5c2fe9e",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "eb3493a501fdc3fad8fff4bcb2159365538ce24273ce169182cf0d2fc2383539",
   "last_shipped_commit": "3b3ffd7e6f899c482f45aa9655a36d8717df7274",
-  "groundtruth_result": null,
+  "groundtruth_result": "PASS",
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
   "audit_rounds": 6,
-  "live_test_rounds": 0,
+  "live_test_rounds": 1,
   "started": "2026-09-22T02:33:50+00:00",
   "completed": null,
   "history": [
@@ -80,11 +80,17 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=3b3ffd7e6f899c482f45aa9655a36d8717df7274 | ci=green: 1 CI run(s) for 3b3ffd7e6f899c482f45aa9655a36d8717df7274 all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-22T03:58:52+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: LiveQA live test, sprint 43, round 1. Verdict: PASS.\nEvery LiveQA criterion in the sprint file was run against the published 0.2.18, in a real scratch install with real headless sessions. All three measurements the sprint's documentation rests on still hold at the CLI version current at gate time. No defects.\n\nENVIRONMENT\nmacOS 26.6.2 arm64, node v24.21.0, npm 11.19.0, Python 3.14.7, git 2.55.0. **Claude Code CLI 2.1.278 at gate time** \u2014 the same version the shipped findings-doc entry anchors to, so its claims are current, not stale. 2026-09-22. Scratch projects s43/proj and s43/owned under this session's scratchpad. Tools: npx, the installed scripts/launcher/run-role.js, git, three real headless launches. No browser; this release is a package.\n\nPROVENANCE (registry, not the handoff)\nnpm dist-tags latest 0.2.18. npm view fully-completely@0.2.18 gitHead 3b3ffd7e6f899c482f45aa9655a36d8717df7274 == last_shipped_commit. dist.shasum 5609ee6ea54726cff00d8793278916e9e96d1cdf == the npm pack download. All 59 published files byte-identical to git show 3b3ffd7:<path> (MISMATCHED 0, NOT-IN-COMMIT 0).\n\nREQ 4, NO GRANT OR SOURCE CHANGE: PASS, checked first because everything else assumes it\ngit diff d522c43..3b3ffd7 over scripts/launcher/, scripts/gate-commit.js, scripts/install.js and scripts/sprint_lifecycle.py produces ZERO lines. scripts/launcher/run-role.js is byte-unchanged from 0.2.17, so HEADLESS_PERMISSION_PROFILES is untouched and this release changes documentation, tests, the CHANGELOG, the version and the baseline table only.\n\nDOCUMENTATION ARRIVED (read from a real install of 0.2.18, not from the repo)\n- Req 1, liveqa.md: \"Say this plainly rather than leave it implied (sprint 43): YOUR CONFINEMENT IS INSTRUCTIONAL, NOT ENFORCED, and that extends past source-editing to git itself.\" It names the reason \u2014 \"A role whose job is that cannot be confined by a tool grant without also breaking the job\" \u2014 and ties it to the existing never-write-source rule.\n- Req 2, qa1.md: states the DEFAULT-profile boundary is enforced by the tool layer, \"but that enforcement is conditional, not absolute\", and carries all three qualifications: (a) gate-commit.js named as the one sanctioned narrow child process; (b) a valid fullyCompletely.ownedRepository declaration in .claude/settings.local.json makes QA1 eligible for the broad set \u2014 \"your confinement there is instructional, not enforced \u2014 treat it as a rule you keep for that session, the same as LiveQA's own restraint\"; (c) the no-narrowest-claim correction is explicit: \"'the narrowest of the six roles' was its own overclaim in the first version of this note: Master Controller's default profile is the same three narrow script grants and, unlike yours, is never eligible for this broader grant at all\".\n- Req 5, CLAUDE.md (line 246): the general principle, stated to outlive the two agent files \u2014 a rule that matters for a role which runs arbitrary code must be \"dealt with as an instruction, not assumed to be enforced\" \u2014 with pointers to both agent files and the findings doc.\n- Req 3, docs/sprint-12-permission-scope-findings.md: the \"Sprint 43\" section exists in the shipped commit with the established format \u2014 version anchor claude 2.1.278, the method (two real headless launches, one per profile, identical node -e probe), and the ruling's reasoning. Note for the record: that file is not part of the install manifest, so it is in the repository, not in a downstream install; that is pre-existing and matches how the other findings docs ship.\n\nTHE THREE MEASUREMENTS, RE-RUN AT GATE TIME (claude 2.1.278)\nIdentical probe in every case, one attempt each: node -e \"console.log(require('child_process').execSync('git status --porcelain').toString())\".\n(a) Headless QA1, DEFAULT profile \u2014 DENIED. Verbatim: \"This command requires approval\", and the command appears in permission_denials. Grant observed in the run's own PERMISSION_RECORD: Bash(node scripts/run-lifecycle.js *), Bash(python3 scripts/sprint_lifecycle.py *), Bash(node scripts/gate-commit.js *). No node *, no npx *.\n(b) Headless LiveQA, DEFAULT profile \u2014 ALLOWED, permission_denials empty, output \"?? probe.txt\". Grant includes Bash(npm install *), Bash(npx *), Bash(node *) alongside the three script grants.\n(c) Headless QA1 in a project that VALIDLY declares fullyCompletely.ownedRepository (the declaration written as a plain absolute-path string in .claude/settings.local.json, as run-role.js requires) \u2014 ALLOWED, permission_denials empty, output \"?? probe.txt\". The session's grant expanded to include Bash(npm *), Bash(npx *), Bash(node *), Bash(./node_modules/.bin/*), Bash(yarn *), Bash(pnpm *), Bash(curl *), Bash(wget *), Bash(python*...) and the rest of the owned-repository set. The launcher also printed its sprint 19 uncommitted-work notice for that tree, which is the expected behaviour for a declared-owned repository.\nSo the shipped wording is accurate on all three points, including the conditional in Req 2(b), which is the case QA1 specifically asked to have proven rather than stated cautiously. Nothing has changed since the sprint's own measurement, so none of the documentation is stale.\n\nWHAT THIS DOES NOT CLAIM\nThe probe used a read-only git command deliberately, so nothing was written in any of the three sessions. Case (b) and case (c) establish that the permission layer does not stop a child process from reaching git, which is the property the documentation asserts; sprint 42's own live test already measured the write side (a node -e git commit in a headless LiveQA session was not stopped by the permission layer, and failed only because git had nothing to commit). I did not repeat the write probe here because the sprint's criterion asks for the denial/allowance shape, and repeating a write attempt in a scratch tree adds risk without adding evidence.\n\nReq 6/6a's structural pairing test is QA1's static criterion and was verified there; the shipped tests are in the repository's own suite rather than the install manifest, so there is nothing for a live install check to add beyond what Req 4's byte-comparison already establishes."
     }
   ],
   "last_claim": {
-    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-22T03:50:20+00:00"
+    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
+    "claude_agent": "liveqa",
+    "ts": "2026-09-22T03:58:52+00:00"
   }
 }
