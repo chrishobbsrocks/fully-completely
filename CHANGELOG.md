@@ -13,6 +13,55 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.18 — Sprint 43
+
+Documentation and tests only — no permission grant or other code change.
+LiveQA's own live test of sprint 42 measured something that sprint hadn't
+asked about: `gate-commit.js` is a real, tool-enforced boundary for QA1,
+and only a convenience for LiveQA, which already holds a broad enough
+grant to reach `git` directly. Both `qa1.md` and `liveqa.md` previously
+implied more uniformity between the two roles than actually holds.
+
+- **`liveqa.md` now states plainly that LiveQA's confinement is
+  instructional, not enforced.** `Bash(node *)` reaches a child process
+  and therefore `git` the same way it reaches the filesystem — measured
+  directly (`claude 2.1.278`): a `node -e` git-commit attempt was not
+  stopped by the permission layer at all. Tied to the file's own existing
+  "you do not write or modify code" instruction as the same principle
+  extended, not a new license.
+- **`qa1.md` now states, conditionally, that QA1's confinement IS
+  enforced on its default profile** — no `Bash(node *)`/`Bash(npx *)`,
+  `Edit`/`Write` disallowed, and the identical `node -e` probe was
+  DENIED. Three qualifications stated plainly rather than left implied:
+  `gate-commit.js` is a narrow, purpose-built exception, not the
+  arbitrary-execution primitive the claim is about; a project that
+  validly declares `fullyCompletely.ownedRepository` in
+  `.claude/settings.local.json` hands QA1 the identical broad grant Dev
+  Team gets, at which point the boundary is instructional instead,
+  exactly like LiveQA's; and "narrowest of the six roles" was dropped as
+  its own overclaim (Master Controller's default profile is equally
+  narrow and never eligible for the broader grant at all).
+- **The measurement is recorded in
+  `docs/sprint-12-permission-scope-findings.md`**, in the established
+  format, and states plainly that it confirms sprint 39's own conclusion
+  (`Bash(node *)` widens nothing beyond what `Bash(npx *)` already
+  permitted) rather than contradicting it.
+- **CLAUDE.md gains one general paragraph**: a role whose job is running
+  published or arbitrary code cannot be confined by a tool grant, so
+  where a rule matters for such a role it must be stated as an
+  instruction and verified by review, never assumed enforced.
+- **A new test asserts the pairing structurally, not just prose against
+  grants.** Any profile that disallows `Edit`/`Write` while also
+  granting a route to an arbitrary child process (`node *`, `npx *`,
+  `bash`, `sh`, `git *`, or eligibility for the owned-repository grant
+  set) must carry the instructional-not-enforced wording in its own
+  agent file — derived generically from the real profile data, not
+  hardcoded to QA1/LiveQA by name, so a future role or grant change that
+  reproduces the same shape is caught even if nobody remembers to update
+  a name-based test. A companion test exercises the detection logic
+  directly against constructed adversarial profiles.
+- `HEADLESS_PERMISSION_PROFILES` is byte-unchanged by this release.
+
 ## 0.2.17 — Sprint 42
 
 Two items, both measured facts rather than hypotheses, both established by
