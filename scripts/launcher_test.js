@@ -2007,7 +2007,7 @@ test('install.js: the actual runtime output (conflicts + Python warning) is pure
 // -------------------------------------------------------------------------
 // run-role.js (Sprint 11: headless launch, Req 9 coverage)
 // -------------------------------------------------------------------------
-const { ROLES: RUN_ROLE_ROLES, readAgentMeta, agentBody } = require('./launcher/agents');
+const { ROLES: RUN_ROLE_ROLES, readAgentMeta, agentBody, agentFilePath } = require('./launcher/agents');
 const {
   initialPrompt: RR_initialPrompt,
   devTeam2ResumePrompt: RR_devTeam2ResumePrompt,
@@ -2492,6 +2492,108 @@ test('run-role: a declared-owned repository grants qa1 the SAME arbitrary-execut
       assert.ok(allowed.includes(broad), `a declared-owned repository must grant qa1 ${broad}, same as Dev Team -- if this stops being true, qa1.md's qualification is now the thing overclaiming, the other direction`);
     }
   });
+});
+
+// Sprint 43, Req 6a (FMC's sharpening, added after the sprint's original
+// PASS): the "grants match what the docs claim" test above (and its
+// declared-owned companion) both compare TODAY's known grants against a
+// FIXED expectation, hardcoded per role name -- exactly a prose-versus-
+// grants comparison, and FMC pointed out that shape passes on a profile
+// that is quietly lying: `disallowedTools: ['Edit', 'Write']` sits
+// directly above `Bash(npx *)` in liveqa's profile and directly above
+// the narrow script grants in qa1's -- same two lines, opposite meaning,
+// nothing in the DATA itself telling them apart. Neither prior test
+// would notice if some OTHER role, or a new grant added to an existing
+// one, reproduced that same dangerous pairing (Edit/Write disallowed +
+// a route to an arbitrary child process) without the required wording,
+// because neither reads the pairing back out of the profile object at
+// all -- both just assert a fixed, named expectation.
+//
+// Req 6b, stated here so this isn't simplified back to prose-matching by
+// a future edit: a test that only compares prose to grants can never
+// catch this shape, because "the prose says X" and "the grant permits Y"
+// are two independently-asserted facts with nothing connecting them --
+// this test instead DERIVES which roles require the wording, generically,
+// from the actual profile data (disallowedTools + allowedTools +
+// eligibleForOwnedRepositoryGrant), so a role that doesn't exist yet, or
+// a grant nobody thought to update this test for by name, is still
+// caught the moment its OWN data creates the dangerous pairing.
+const ARBITRARY_CHILD_PROCESS_RE = [/Bash\(node \*\)/, /Bash\(npx \*\)/, /Bash\(bash \*\)/, /Bash\(sh \*\)/, /Bash\(git \*\)/];
+
+function disallowsEditAndWrite(profile) {
+  const disallowed = profile.disallowedTools || [];
+  return disallowed.includes('Edit') && disallowed.includes('Write');
+}
+
+// A "route to an arbitrary child process" is a general-purpose
+// interpreter/shell grant, in contrast to a narrow, single-purpose
+// wrapper like gate-commit.js or mc-commit.js (each refuses everything
+// outside one path, enforced in code -- see those scripts' own header
+// comments). The sprint's own enumeration, plus the owned-repository
+// grant SET, since a valid declaration is what "flips" a role like qa1
+// from enforced to instructional -- eligibility alone is the route, not
+// the currently-assembled argv, because the argv only reflects whichever
+// declaration (if any) happens to exist on THIS machine right now.
+function grantsArbitraryChildProcessRoute(profile) {
+  const allowedStr = (profile.allowedTools || []).join(' ');
+  if (ARBITRARY_CHILD_PROCESS_RE.some((re) => re.test(allowedStr))) return true;
+  return Boolean(profile.eligibleForOwnedRepositoryGrant);
+}
+
+// The literal marker sprint 43's own docs now use for this exact claim
+// (qa1.md's conditional case and liveqa.md's unconditional one both
+// carry it verbatim, on purpose, so one simple substring test covers
+// both rather than two different bespoke regexes per file).
+const INSTRUCTIONAL_NOT_ENFORCED_RE = /instructional,?\s*not\s*(?:merely\s*)?enforced/i;
+
+test('run-role: any profile that disallows Edit/Write while granting a route to an arbitrary child process must carry the instructional-not-enforced wording in its own agent file -- the structural pairing, not just prose-matching (sprint 43, Req 6a/6b, FMC\'s sharpening)', () => {
+  let checked = 0;
+  for (const [roleId, profile] of Object.entries(HEADLESS_PERMISSION_PROFILES)) {
+    if (!disallowsEditAndWrite(profile)) continue;
+    if (!grantsArbitraryChildProcessRoute(profile)) continue;
+    checked += 1;
+    const docPath = agentFilePath(roleId);
+    const docText = fs.readFileSync(docPath, 'utf8');
+    assert.match(
+      docText,
+      INSTRUCTIONAL_NOT_ENFORCED_RE,
+      `${roleId}'s profile disallows Edit/Write while granting a route to an arbitrary child process ` +
+        `(directly, or via eligibleForOwnedRepositoryGrant) -- its own agent file (${path.relative(REPO_ROOT, docPath)}) ` +
+        'must say plainly that this confinement is instructional, not enforced, or a reader of that file will ' +
+        'trust a boundary the tool layer does not actually hold. Prose-matching alone would not have caught this ' +
+        'pairing -- see this test\'s own comment for why.'
+    );
+  }
+  // A sanity floor, not a hardcoded role list: today this must find at
+  // least qa1 (disallows Edit/Write, eligibleForOwnedRepositoryGrant)
+  // and liveqa (disallows Edit/Write, Bash(node *)/Bash(npx *) directly)
+  // -- if this ever drops to zero, the detection logic itself has
+  // silently broken, and the whole test would otherwise pass vacuously.
+  assert.ok(checked >= 2, `expected at least 2 profiles to match the dangerous pairing (qa1, liveqa); found ${checked} -- the detection logic may be broken`);
+});
+
+test('run-role: the structural pairing check (Req 6a) correctly flags a PLANTED profile that pairs Edit/Write-disallowed with an arbitrary-execution grant -- confirming the checker itself, not just today\'s real roles', () => {
+  // The shape QA1 plants during audit: some profile, real or synthetic,
+  // that disallows Edit/Write while granting node */npx */bash */sh */
+  // git */the owned-repository set. This test exercises the same two
+  // pure functions the real test above uses, directly, against a
+  // constructed adversarial case for each recognized route -- proving
+  // the checker logic itself (not merely today's fixed data) actually
+  // flags the pairing, per Req 6a's own acceptance criterion.
+  for (const route of ['Bash(node *)', 'Bash(npx *)', 'Bash(bash *)', 'Bash(sh *)', 'Bash(git *)']) {
+    const planted = { disallowedTools: ['Edit', 'Write'], allowedTools: [route] };
+    assert.ok(disallowsEditAndWrite(planted), `planted profile with ${route}: disallowsEditAndWrite() must be true`);
+    assert.ok(grantsArbitraryChildProcessRoute(planted), `planted profile with ${route}: grantsArbitraryChildProcessRoute() must be true`);
+  }
+  // The owned-repository route, via eligibility rather than a literal
+  // allowedTools entry.
+  const plantedOwned = { disallowedTools: ['Edit', 'Write'], allowedTools: [], eligibleForOwnedRepositoryGrant: true };
+  assert.ok(grantsArbitraryChildProcessRoute(plantedOwned), 'eligibleForOwnedRepositoryGrant alone must count as the route -- a declaration is what flips a role like qa1');
+  // A profile with NEITHER Edit/Write disallowed NOR any arbitrary-
+  // execution route must never be flagged -- e.g. master-controller's
+  // real shape (empty disallowedTools, three narrow script grants only).
+  const safeProfile = { disallowedTools: [], allowedTools: ['Bash(node scripts/run-lifecycle.js *)'] };
+  assert.ok(!disallowsEditAndWrite(safeProfile) || !grantsArbitraryChildProcessRoute(safeProfile), 'a profile with no Edit/Write disallow and no arbitrary-execution route must not be flagged');
 });
 
 test('run-role: headlessPermissionArgs grants pipeman its narrow npm subcommands and nothing about npm to qa1', () => {
