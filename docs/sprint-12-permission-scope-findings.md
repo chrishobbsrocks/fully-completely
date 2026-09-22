@@ -949,10 +949,27 @@ express "reaches nothing beyond this one path" for a command whose own
 syntax, or whose own child-process reach, accepts arbitrary further
 argv). **The fix this sprint ships is documentation, not a grant
 change**: `qa1.md` and `liveqa.md` now each state plainly which kind of
-confinement their own role actually has -- enforced for qa1 (no route to
-a child process at all), instructional for liveqa (a role whose job is
-running arbitrary published code cannot be confined by a tool grant
-without breaking that job) -- and CLAUDE.md states the general principle
-once, since it will outlive both files. `HEADLESS_PERMISSION_PROFILES`
-is byte-unchanged by this sprint; `git diff` on `scripts/launcher/
-run-role.js` shows no permission-grant line touched.
+confinement their own role actually has -- enforced for qa1 on its
+DEFAULT profile (no route to an arbitrary child process there),
+instructional for liveqa (a role whose job is running arbitrary
+published code cannot be confined by a tool grant without breaking that
+job) -- and CLAUDE.md states the general principle once, since it will
+outlive both files. `HEADLESS_PERMISSION_PROFILES` is byte-unchanged by
+this sprint; `git diff` on `scripts/launcher/run-role.js` shows no
+permission-grant line touched.
+
+**Qualification added in the fix round (QA1's own round-1 audit of this
+sprint):** the table above measured qa1's DEFAULT profile only -- qa1 is
+also `eligibleForOwnedRepositoryGrant`, and this document's own earlier
+sections (`headlessPermissionArgs: a valid ownership declaration grants
+the broad profile`) already establish that a project declaring
+`fullyCompletely.ownedRepository` hands any eligible role the full
+`OWNED_REPOSITORY_ALLOWED_TOOLS` set -- `Bash(node *)`, `Bash(npx *)`,
+`Bash(git *)`, `bash`, `sh`, and more, for qa1 exactly as for Dev Team.
+Under that declaration the node-`-e`-git probe above would run for qa1
+too, not be denied, and the "enforced" grade in the table only holds for
+the undeclared, default case. This was not re-measured as a fresh probe
+-- it follows directly from code already read and tested elsewhere in
+this document and in `launcher_test.js` -- but it is the qualification
+that keeps this entry from overclaiming the way `qa1.md`'s own first
+draft did.

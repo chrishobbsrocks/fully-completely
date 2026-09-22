@@ -2435,13 +2435,16 @@ test('run-role: headlessPermissionArgs grants qa1 and liveqa ONLY the gate-commi
   }
 });
 
-test('run-role: qa1/liveqa permission grants match what qa1.md/liveqa.md now claim about their own confinement (sprint 43, Req 6) -- a grant change that contradicts the documentation must fail this test', () => {
-  // qa1.md's claim (sprint 43): QA1's "never modify what you audit"
-  // boundary is enforced by the TOOL LAYER -- no route to a child
-  // process at all (no Bash(node *)/Bash(npx *)), and Edit/Write
+test('run-role: qa1/liveqa permission grants match what qa1.md/liveqa.md now claim about their own confinement on the DEFAULT profile (sprint 43, Req 6) -- a grant change that contradicts the documentation must fail this test', () => {
+  // qa1.md's claim (sprint 43, qualified in the fix round after QA1's own
+  // round-1 audit): QA1's "never modify what you audit" boundary is
+  // enforced by the TOOL LAYER on its DEFAULT profile -- no route to an
+  // arbitrary child process (no Bash(node *)/Bash(npx *)), and Edit/Write
   // disallowed. If any of that ever changes, the enforced-confinement
   // claim in qa1.md becomes false and needs a documentation update, not
-  // a silent grant change -- this is the mechanical guard for that.
+  // a silent grant change -- this is the mechanical guard for that. See
+  // the test below this one for the DECLARED-OWNED-REPOSITORY case, where
+  // the claim is documented to NOT hold.
   const qa1Args = headlessPermissionArgs(QA1_ROLE);
   const qa1AllowedIdx = qa1Args.indexOf('--allowedTools');
   assert.ok(qa1AllowedIdx !== -1, 'qa1 must pass --allowedTools');
@@ -2466,6 +2469,29 @@ test('run-role: qa1/liveqa permission grants match what qa1.md/liveqa.md now cla
     /Bash\(node \*\)/.test(liveqaAllowed) || /Bash\(npx \*\)/.test(liveqaAllowed),
     'liveqa.md\'s "confinement is instructional, not enforced" claim rests on liveqa holding at least one arbitrary-execution primitive (node * or npx *) -- if this test starts failing here, the documentation is now describing a stronger boundary than actually exists and must be revised'
   );
+});
+
+test('run-role: a declared-owned repository grants qa1 the SAME arbitrary-execution primitives as Dev Team -- qa1.md\'s enforced-confinement claim is documented to NOT hold here (sprint 43, QA1 round 1 finding)', () => {
+  // QA1's own round-1 audit of this sprint found the first version of
+  // qa1.md's claim stated the boundary as unconditional, when
+  // eligibleForOwnedRepositoryGrant: true means a project declaring
+  // fullyCompletely.ownedRepository hands qa1 the identical broad set
+  // Dev Team gets. The fix qualified the doc to "on the DEFAULT profile
+  // only" -- this test is what the test above's own comment promised:
+  // the companion case, confirming the declared-owned path really does
+  // widen qa1 the way the now-qualified documentation says it does.
+  withFixture((dir) => {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), JSON.stringify({ 'fullyCompletely.ownedRepository': dir }));
+    const args = headlessPermissionArgs(QA1_ROLE, dir);
+    const allowedIdx = args.indexOf('--allowedTools');
+    assert.ok(allowedIdx !== -1, 'qa1 must still pass --allowedTools under a declared-owned repository');
+    const allowed = args[allowedIdx + 1];
+    for (const broad of ['Bash(node *)', 'Bash(npx *)', 'Bash(git *)', 'Bash(bash *)', 'Bash(sh *)']) {
+      assert.ok(allowed.includes(broad), `a declared-owned repository must grant qa1 ${broad}, same as Dev Team -- if this stops being true, qa1.md's qualification is now the thing overclaiming, the other direction`);
+    }
+  });
 });
 
 test('run-role: headlessPermissionArgs grants pipeman its narrow npm subcommands and nothing about npm to qa1', () => {

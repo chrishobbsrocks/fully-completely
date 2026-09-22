@@ -247,10 +247,18 @@ with as an instruction, not assumed to be enforced** (sprint 43,
 generalizing a difference sprint 42's live test found between QA1's and
 LiveQA's own profiles — see `qa1.md` and `liveqa.md` for the specifics,
 and `docs/sprint-12-permission-scope-findings.md`'s "Sprint 43" section
-for the measurement). QA1 holds no arbitrary-execution primitive at all
-(`Edit`/`Write` disallowed, no `Bash(node *)`/`Bash(npx *)`), so its own
-"never modify what you audit" rule is a real, tool-layer boundary.
-LiveQA's job is installing and running a published artifact, which is
+for the measurement). On its DEFAULT profile, QA1 holds no
+arbitrary-execution primitive at all (`Edit`/`Write` disallowed, no
+`Bash(node *)`/`Bash(npx *)`), so its own "never modify what you audit"
+rule is a real, tool-layer boundary there — **conditionally, not
+absolutely: QA1 is also `eligibleForOwnedRepositoryGrant`, and a project
+that declares itself owned hands QA1 the identical broad grant Dev Team
+gets (`Bash(node *)`, `Bash(npx *)`, `Bash(git *)`, and more), at which
+point the boundary is gone and the rule is back to being an instruction,
+same as LiveQA's** (QA1's own round-1 audit of this sprint found the
+first version of this claim stated it unconditionally — see `qa1.md`
+for the corrected, qualified version). LiveQA's job is installing and
+running a published artifact, which is
 arbitrary code execution by definition — any grant broad enough for that
 job is also broad enough to reach git and arbitrary file writes through
 a child process, and narrowing one such grant while another equally
