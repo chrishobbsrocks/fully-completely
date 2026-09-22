@@ -890,3 +890,69 @@ already hit once (a headless LiveQA round-3 PASS sitting uncommitted
 until Dev Team happened to sweep it into an unrelated close commit).
 This measurement is the deliverable for Req 6b; the fix is Master
 Controller's to file as its own sprint, per Req 6c.
+
+## Sprint 43: which gate role's confinement is enforced, and which is
+## instructional -- LiveQA's own sprint-42 live test found this and
+## reported it rather than leaving it unstated
+
+**Version anchor: `claude 2.1.278`** (the same version sprint 42's own
+live test ran on; LiveQA's round-1 PASS on sprint 42 recorded this as an
+observation "for Master Controller," not a sprint 42 defect -- Master
+Controller's ruling, 22 September, was to document it, not narrow any
+grant, for the reasons given below).
+
+**Method.** Two real headless launches, one per profile, in the same
+scratch project sprint 42's own live test already used (a real npm
+install of the published `0.2.17`). Both ran the identical `node -e`
+probe, differing only in which role's profile it ran under:
+`node -e "console.log(require('child_process').execSync('git status
+--porcelain').toString())"`, followed by a `node -e` git *write* attempt.
+Verdict decided from the structured `permission_denials` array plus the
+real git state afterward, never narration alone -- this project's own
+established standard throughout this document.
+
+| Probe | qa1's profile | liveqa's profile |
+|---|---|---|
+| `node -e "...execSync('git status --porcelain')..."` (read) | **DENIED** -- "This command requires approval," present in `permission_denials` | **RAN** -- returned `?? liveqa-notes-2.txt`, zero denials |
+| `node -e "...execSync('git commit -m bypass docs/sprints/state/sprint-2.json')..."` (write) | not applicable -- qa1 has no route to a child process to attempt this with in the first place | **NOT STOPPED BY THE PERMISSION LAYER AT ALL** -- git itself exited 1 only because nothing happened to be staged in that run, not because anything denied the attempt |
+
+**Grade: CONFIRMED.** qa1's profile holds no `Bash(node *)` and no
+`Bash(npx *)` at all -- `scripts/gate-commit.js` (sprint 42) really is
+qa1's only route to `git`, because there is no other route to a child
+process to begin with. liveqa's profile holds `Bash(node *)` (sprint 39,
+Req 3), which reaches a child process and therefore reaches `git` the
+same way it reaches the filesystem -- `gate-commit.js` is a convenience
+for liveqa, not a boundary: liveqa *can* run `git add`/`git commit`
+directly through `node -e`, and the tool layer does not stop it.
+
+**This confirms sprint 39's own conclusion, it does not contradict it.**
+Sprint 39 measured that `Bash(node *)` widens nothing beyond what
+`Bash(npx *)` already permits for liveqa -- both are arbitrary
+program-mediated execution, and `npx *` already reached git-equivalent
+writes before `node *` was ever granted. This sprint's finding is the
+same fact restated through a different specific command (`git commit`
+rather than a generic file write): a role holding either grant has no
+tool-layer boundary against reaching git, full stop, and that was already
+true before this sprint's own probe ran it. Narrowing `Bash(node *)`
+for liveqa would not create a real boundary either, for the identical
+reason sprint 39 already established -- `Bash(npx *)` remains, and does
+the same thing.
+
+**Ruled out, deliberately, as the fix**: narrowing either grant for
+liveqa. `npx` cannot be removed without breaking liveqa's own job
+(installing and running the published artifact is arbitrary code
+execution by definition), and removing `node *` alone buys nothing while
+`npx *` remains, exactly the shape this project has now measured three
+times as a dead end (sprint 36's `Bash(git commit -m *)`, sprint 26's
+re-grading, sprint 30's conditions -- a pattern-layer restriction cannot
+express "reaches nothing beyond this one path" for a command whose own
+syntax, or whose own child-process reach, accepts arbitrary further
+argv). **The fix this sprint ships is documentation, not a grant
+change**: `qa1.md` and `liveqa.md` now each state plainly which kind of
+confinement their own role actually has -- enforced for qa1 (no route to
+a child process at all), instructional for liveqa (a role whose job is
+running arbitrary published code cannot be confined by a tool grant
+without breaking that job) -- and CLAUDE.md states the general principle
+once, since it will outlive both files. `HEADLESS_PERMISSION_PROFILES`
+is byte-unchanged by this sprint; `git diff` on `scripts/launcher/
+run-role.js` shows no permission-grant line touched.

@@ -2435,6 +2435,39 @@ test('run-role: headlessPermissionArgs grants qa1 and liveqa ONLY the gate-commi
   }
 });
 
+test('run-role: qa1/liveqa permission grants match what qa1.md/liveqa.md now claim about their own confinement (sprint 43, Req 6) -- a grant change that contradicts the documentation must fail this test', () => {
+  // qa1.md's claim (sprint 43): QA1's "never modify what you audit"
+  // boundary is enforced by the TOOL LAYER -- no route to a child
+  // process at all (no Bash(node *)/Bash(npx *)), and Edit/Write
+  // disallowed. If any of that ever changes, the enforced-confinement
+  // claim in qa1.md becomes false and needs a documentation update, not
+  // a silent grant change -- this is the mechanical guard for that.
+  const qa1Args = headlessPermissionArgs(QA1_ROLE);
+  const qa1AllowedIdx = qa1Args.indexOf('--allowedTools');
+  assert.ok(qa1AllowedIdx !== -1, 'qa1 must pass --allowedTools');
+  const qa1Allowed = qa1Args[qa1AllowedIdx + 1];
+  assert.ok(!/Bash\(node \*\)/.test(qa1Allowed), 'qa1.md now claims QA1 has NO arbitrary-execution primitive -- Bash(node *) must not be granted to qa1');
+  assert.ok(!/Bash\(npx \*\)/.test(qa1Allowed), 'qa1.md now claims QA1 has NO arbitrary-execution primitive -- Bash(npx *) must not be granted to qa1');
+  const qa1DisallowedIdx = qa1Args.indexOf('--disallowedTools');
+  assert.ok(qa1DisallowedIdx !== -1, 'qa1 must still pass --disallowedTools -- part of the enforced-confinement claim');
+  const qa1Disallowed = qa1Args[qa1DisallowedIdx + 1];
+  assert.ok(qa1Disallowed.includes('Edit') && qa1Disallowed.includes('Write'), 'qa1.md\'s enforced-confinement claim depends on Edit and Write staying disallowed for qa1');
+
+  // liveqa.md's claim (sprint 43): LiveQA's own confinement is
+  // INSTRUCTIONAL, not enforced, because its job (running published
+  // code) requires an arbitrary-execution primitive. If both node * and
+  // npx * were ever removed, liveqa's confinement would actually BECOME
+  // enforced and the documentation would need revisiting the other way.
+  const liveqaArgs = headlessPermissionArgs(LIVEQA_ROLE);
+  const liveqaAllowedIdx = liveqaArgs.indexOf('--allowedTools');
+  assert.ok(liveqaAllowedIdx !== -1, 'liveqa must pass --allowedTools');
+  const liveqaAllowed = liveqaArgs[liveqaAllowedIdx + 1];
+  assert.ok(
+    /Bash\(node \*\)/.test(liveqaAllowed) || /Bash\(npx \*\)/.test(liveqaAllowed),
+    'liveqa.md\'s "confinement is instructional, not enforced" claim rests on liveqa holding at least one arbitrary-execution primitive (node * or npx *) -- if this test starts failing here, the documentation is now describing a stronger boundary than actually exists and must be revised'
+  );
+});
+
 test('run-role: headlessPermissionArgs grants pipeman its narrow npm subcommands and nothing about npm to qa1', () => {
   // Sprint 17 round 2 (QA1 finding 2): blanket Bash(npm *) reaches well
   // past pipeman's job -- `npm install` alone runs unattended postinstall

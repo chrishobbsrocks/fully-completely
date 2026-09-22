@@ -241,6 +241,28 @@ operator-launched gate role keeps committing exactly the raw `git commit
 -m "..." docs/sprints/state/sprint-<N>.json` form documented two
 paragraphs up, unchanged.
 
+**A tool grant cannot confine a role whose own job is running published
+or arbitrary code, and a rule for that role has to be stated and lived
+with as an instruction, not assumed to be enforced** (sprint 43,
+generalizing a difference sprint 42's live test found between QA1's and
+LiveQA's own profiles — see `qa1.md` and `liveqa.md` for the specifics,
+and `docs/sprint-12-permission-scope-findings.md`'s "Sprint 43" section
+for the measurement). QA1 holds no arbitrary-execution primitive at all
+(`Edit`/`Write` disallowed, no `Bash(node *)`/`Bash(npx *)`), so its own
+"never modify what you audit" rule is a real, tool-layer boundary.
+LiveQA's job is installing and running a published artifact, which is
+arbitrary code execution by definition — any grant broad enough for that
+job is also broad enough to reach git and arbitrary file writes through
+a child process, and narrowing one such grant while another equally
+broad one remains buys the *appearance* of a boundary with none of its
+substance, the same dead end this project has now measured three times
+(sprint 36's `Bash(git commit -m *)`, sprint 26's re-grading, sprint 30's
+conditions). Where a rule matters for a role in that position, the
+correct fix is naming the limit plainly in that role's own agent file, as
+an instruction it keeps rather than a wall it is held behind — never
+quietly implying a symmetry with a more-confined role's own boundary that
+does not actually hold.
+
 **QA1 audits code, not just the sprint file**: the same PASS that records
 the sprint-file hash also records the audited commit's tree hash, the
 content of the files at that commit, not its SHA. `/sprint-ship` resolves
