@@ -60,12 +60,28 @@ files currently imply more uniformity than holds.
    never writing source, so this reads as the same principle extended, not a new
    licence.
 
-2. **`qa1.md` states that QA1's confinement IS enforced, and why the two
-   differ.** No `node *`/`npx *`, `Edit`/`Write` denied, and — measured — a
-   `node -e` git attempt refused. Say plainly that this is deliberate: QA1 must
-   never modify what it audits, and its grant is the narrowest of the six for
-   that reason. Name the asymmetry with LiveQA so a reader of either file
-   understands it is designed, not an oversight.
+2. **`qa1.md` states that QA1's confinement is enforced on its DEFAULT profile,
+   conditionally, and why the two gate roles differ.** *(Amended 22 September,
+   after QA1's own round-1 audit found this requirement's first wording
+   overclaimed — the sprint whose subject is not overstating a boundary should
+   not overstate one in its own requirements. The shipped text was already
+   correct; this brings the requirement into line with it, and the cost is one
+   re-audit.)* By default QA1's profile holds no `Bash(node *)` and no
+   `Bash(npx *)`, with `Edit`/`Write` disallowed, so there is no route to an
+   arbitrary child process and the boundary genuinely is enforced rather than
+   merely instructed — measured, `node -e` git probe DENIED. Three
+   qualifications must be stated, not left implied:
+   (a) `gate-commit.js` (sprint 42) is a sanctioned, purpose-built narrow child
+   process, and naming it forecloses the obvious objection;
+   (b) a valid `fullyCompletely.ownedRepository` declaration makes QA1
+   `eligibleForOwnedRepositoryGrant` and hands it the broad set, at which point
+   the same probe would run and the boundary is instructional for that session —
+   so QA1 must know which case it is in and say so if it bears on a finding;
+   (c) no "narrowest of the six" claim — Master Controller's default profile is
+   equally narrow and is never eligible for the broad grant; the honest statement
+   is that QA1's default profile is narrow by design, not uniquely so.
+   Name the asymmetry with LiveQA so a reader of either file understands it is
+   designed, not an oversight.
 
 3. **The measurement is recorded where the other permission findings live.**
    Add LiveQA's sprint 42 observation to
@@ -115,10 +131,15 @@ files currently imply more uniformity than holds.
 - Read the installed `liveqa.md`, `qa1.md`, CLAUDE.md paragraph and findings doc
   in a real install of whichever version carries this, and confirm the wording
   arrived.
-- Re-confirm the measurement itself on the CLI version current at that time: in
-  a headless QA1 session, a `node -e` git attempt is denied; in a headless LiveQA
-  session, it runs. If that has changed, say so — the documentation this sprint
-  writes would then be stale and needs its own correction.
+- Re-confirm the measurement itself on the CLI version current at that time, and
+  record that version: in a headless QA1 session on the DEFAULT profile, a
+  `node -e` git attempt is denied; in a headless LiveQA session, it runs. **Add
+  the third case QA1 asked for (round 3): a headless QA1 in a project that
+  validly declares `fullyCompletely.ownedRepository` in
+  `.claude/settings.local.json` — there the same probe should RUN, not be denied,
+  which is what makes Req 2(b)'s conditional claim true rather than merely
+  cautious.** If any of the three has changed, say so — the documentation this
+  sprint writes would then be stale and needs its own correction.
 - Per `liveqa.md` step 7: run every runnable check before recording.
 
 ### Out of Scope
