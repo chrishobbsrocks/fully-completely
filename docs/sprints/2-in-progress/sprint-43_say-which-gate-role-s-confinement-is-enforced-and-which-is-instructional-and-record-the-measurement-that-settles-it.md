@@ -15,15 +15,15 @@ both, and every boundary it implies must be one that actually holds.
 tool layer while LiveQA's is instructional, record the measurement that
 establishes it, and change no permission grant.
 
-**NO VERSION BUMP IN THIS SPRINT.** The user declined a release for
-documentation alone (22 September). *(Input on record, not authorization: FMC's
-Master Controller asked for this wording sooner rather than later, 22 September.
-Publishing still requires the user's own word in Pipeman's session, in the
-moment — a downstream team's preference is not a substitute and never will be.)* This sprint is written and held; it ships
-whenever the next release carries it, or gets its own bump later if the user
-decides so. Dev Team: do not add a version bump, and do not treat the absence of
-one as an oversight. See Human Prerequisites for what that means for the live
-gate.
+**VERSION BUMP AUTHORIZED, 22 September — this header REPLACES the earlier
+"no version bump" instruction.** The user first declined a release for
+documentation alone, then reversed that later the same day and authorized this
+sprint to ship on its own. Dev Team: add the bump (Req 7 below). The earlier
+instruction is void; do not follow it, and do not read its removal as an
+oversight. *(Also on record, and explicitly NOT authorization: FMC's Master
+Controller asked for this wording sooner rather than later. Publishing still
+requires the user's own word in Pipeman's session, in the moment — a downstream
+team's preference is never a substitute for it.)*
 
 ### Context
 
@@ -134,6 +134,12 @@ files currently imply more uniformity than holds.
    **6b.** State in the test's own comment why prose-matching alone is
    insufficient, so the next person to touch it does not simplify it back.
 
+7. **Version bump to one above the currently published version**, with a
+   CHANGELOG entry covering Reqs 1–6. Authorized by the user, 22 September,
+   reversing the earlier decision recorded in this file's own header. Confirm the
+   published version with `npm view fully-completely version` at build time —
+   0.2.17 when this requirement was written; do not trust that number.
+
 ### Acceptance Criteria
 
 **QA1 verifies statically:**
@@ -155,10 +161,14 @@ files currently imply more uniformity than holds.
   alongside a general interpreter with no instructional wording and confirms the
   suite fails on it. A test that only compares prose to grants does not meet this
   requirement. **6b** — the comment says why.
-- **No version bump.** `package.json` unchanged. A bump added here is a FAIL,
-  per the header.
+- **Req 7** — `package.json` is published+1, confirmed at build time, with a
+  CHANGELOG entry. **The earlier "a bump here is a FAIL" criterion is void**
+  (the header says so): a bump is now required, and its ABSENCE is the FAIL.
 
-**LiveQA verifies live, once this reaches a published release:**
+**LiveQA verifies live, after Pipeman publishes (with the user's own go-ahead):**
+
+- Provenance: version and `gitHead` from `npm view`, matching
+  `last_shipped_commit`.
 
 - Read the installed `liveqa.md`, `qa1.md`, CLAUDE.md paragraph and findings doc
   in a real install of whichever version carries this, and confirm the wording
@@ -185,14 +195,17 @@ files currently imply more uniformity than holds.
 - **Re-examining the other four roles' grants.** Dev Team writes source and
   Pipeman pushes; both need broad grants by design. If someone wants that
   written down too, it is a separate sprint.
-- **A release for documentation alone.** The user declined one; see the header.
+- **Any code or grant change.** Reqs 4 and 6 still hold: this release carries
+  documentation and tests only. The bump does not license anything else into the
+  diff.
 
 ### Human Prerequisites
 
-- **A release that carries this.** This sprint has no bump of its own, so its
-  live gate cannot run until its content ships in some later release. Until then
-  it can reach QA1's gate and stop there. Master Controller asks the user, when
-  the next sprint with a bump is planned, whether this rides along.
+- **The user's own publish authorization in Pipeman's session**, at the moment of
+  publishing. Authorizing the bump here (22 September) is not that, and does not
+  stand in for it.
+- *(Resolved: this sprint no longer waits on another release to carry it — see
+  the header and Req 7.)*
 
 ### Dependencies
 
@@ -213,8 +226,8 @@ files currently imply more uniformity than holds.
   ties it to the existing source-writing rule; QA1 checks the framing.
 - **A future grant change makes these files quietly false.** — Req 6's test
   fails when the grants and the documentation disagree.
-- **The sprint sits unshipped and the wording goes stale.** — Human
-  Prerequisites names the trigger: Master Controller raises it when the next
-  bump is planned.
+- **A release published for documentation alone carries an unnoticed behaviour
+  change.** — Reqs 4 and 6 keep `HEADLESS_PERMISSION_PROFILES` byte-unchanged and
+  the diff to docs and tests; QA1 fails the sprint on any grant movement.
 - **The measurement expires with a CLI update.** — Req 3 anchors it to a
   version; LiveQA re-confirms at gate time and says so if it has changed.
