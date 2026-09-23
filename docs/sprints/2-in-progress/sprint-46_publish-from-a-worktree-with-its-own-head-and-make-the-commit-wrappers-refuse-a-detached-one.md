@@ -51,20 +51,39 @@ the window without closing it.
 
 ### Requirements
 
-1. **Pipeman publishes from a dedicated worktree, never by detaching the primary
-   checkout.** `git worktree add --detach <path> <audited-commit>` gives that
-   directory its own HEAD; the primary checkout stays on main throughout, so any
-   other session's commit lands where it expects. Pipeman `cd`s there, verifies
-   the tarball, publishes, then removes the worktree.
+1. **Pipeman publishes from a throwaway `git clone` at the audited commit, never
+   by detaching the primary checkout** *(REVISED 23 September, after this
+   sprint's own round-1 live test — see 1a; the original wording required a
+   linked worktree and that is now known to be wrong)*. Clone the repository to a
+   scratch directory, check out the audited commit there, verify the tarball,
+   publish, then remove the directory. The primary checkout stays on main
+   throughout, so any other session's commit lands where it expects — which was
+   this sprint's actual objective and is satisfied by either isolation
+   mechanism.
 
-   **1a. FLAGGED ASSUMPTION — measure before building on it.** That `npm publish`
-   run inside a linked worktree stamps `gitHead` with the worktree's HEAD (the
-   audited commit) is the entire point and is **unverified**. Establish it by
-   publishing for real and reading `npm view <pkg>@<version> gitHead` — this
-   sprint's own release is the natural test. If it does not hold, stop and report
-   to Master Controller rather than shipping a technique that silently produces a
-   wrong `gitHead`; the fallback (a throwaway `git clone` of the repo at that
-   commit) is named here so nobody has to invent one under pressure.
+   **1a. RESOLVED by measurement, round 1: a linked worktree silently drops
+   `gitHead` entirely.** 0.2.22 published from a worktree and has no `gitHead`
+   field at all, while 0.2.19–0.2.21 (detached checkout) each have it correctly.
+   Pipeman found it and stopped; LiveQA recorded the FAIL. The requirement's own
+   instruction — stop and report rather than ship a technique that produces a
+   wrong `gitHead` — was followed exactly, and Master Controller's decision is to
+   adopt the named fallback, the clone.
+
+   **This was already known here and the knowledge was unfindable.** The v0.1.11
+   tag annotation records the root cause — npm reads `.git/HEAD` as a plain file,
+   and in a linked worktree `.git` is a gitdir-pointer file, so the read fails
+   silently — and v0.1.12 and v0.1.14 record the switch to a real clone with
+   `gitHead` "correct by construction". It survived in tag annotations and
+   nowhere a reader looks. Master Controller wrote Req 1 for a worktree without
+   finding it; so did everyone else who touched this sprint.
+
+   **1a-i. Record the root cause where the next person will actually find it.**
+   In `pipeman.md`, beside the publish steps, state: the clone is required
+   because npm reads `.git/HEAD` as a plain file and a linked worktree's `.git`
+   is a pointer file, so publishing from one silently produces a release with no
+   `gitHead`; verified at 0.1.11 and again at 0.2.22. A rejected technique needs
+   its reason recorded next to the technique that replaced it, or it gets
+   re-proposed — this sprint is the second time, four months apart.
 
    **1b. No stash of other sessions' work.** The old technique stashed an
    uncommitted state-file write. A worktree needs no stash at all, and Pipeman
@@ -72,16 +91,16 @@ the window without closing it.
    install's Pipeman once swallowed another session's in-progress file with an
    unfiltered `git stash -u`, which is the same class of accident as this one.
 
-   **1c. Cleanup is explicit and safe.** Remove the worktree after publishing,
-   following CLAUDE.md's existing rules for worktree removal: never remove a
-   directory a session might still be in, and `git worktree remove` refuses on
-   uncommitted changes. A publish worktree is throwaway and carries no commits of
-   its own, so it has no branch to merge — say that plainly so nobody applies Dev
-   Team 2's merge-first rule to it.
+   **1c. Cleanup is explicit and safe.** Remove the clone directory after
+   publishing. It is a throwaway containing no commits of its own and no work
+   anyone else can want, so Dev Team 2's merge-before-removal rule does not apply
+   — say that plainly, since the directory looks superficially like a worktree.
+   Never remove a directory a session might still be in.
 
    **1d.** Update `.claude/agents/pipeman.md` (its publish steps) and CLAUDE.md
-   to describe the worktree publish as the documented technique, replacing the
-   detached-checkout one. State the reason in one line: HEAD is repository-wide,
+   to describe the clone publish as the documented technique, replacing the
+   detached-checkout one, and stating that a linked worktree is NOT an
+   alternative (1a-i). State the reason in one line: HEAD is repository-wide,
    and a publish that moves it can strand another session's commit.
 
 2. **Both commit wrappers refuse to commit onto a detached HEAD.**
@@ -122,10 +141,11 @@ the window without closing it.
 
 **QA1 verifies statically, before anything is published:**
 
-- **Req 1** — `pipeman.md` and CLAUDE.md describe the worktree publish, and the
-  detached-checkout technique is gone rather than offered as an alternative.
-  **1a** — the assumption is flagged in the file as unverified until this
-  sprint's own publish proves it, with the clone fallback named. **1b** — no
+- **Req 1** — `pipeman.md` and CLAUDE.md describe the CLONE publish; both the
+  detached-checkout and the linked-worktree techniques are gone rather than
+  offered as alternatives. **1a-i** — the root cause (npm reading `.git/HEAD`;
+  worktree `.git` being a pointer file) is stated beside the publish steps with
+  both measurements cited (0.1.11, 0.2.22). **1b** — no
   stash step survives anywhere in the publish path. **1c** — cleanup rules are
   stated, including that a publish worktree has no branch to merge.
 - **Req 2** — both wrappers check before any git write (**2a**), with no override
@@ -143,9 +163,10 @@ the window without closing it.
 
 **LiveQA verifies live, after Pipeman publishes (with the user's own go-ahead):**
 
-- **Req 1a is proved by this sprint's own publish:** confirm
-  `npm view fully-completely@<new version> gitHead` equals the audited commit,
-  published from a worktree. This is the requirement's whole risk; if `gitHead`
+- **Req 1a is proved by this sprint's own re-publish:** confirm
+  `npm view fully-completely@<new version> gitHead` is PRESENT and equals the
+  audited commit, published from a clone. Absence of the field is the round-1
+  failure and is a FAIL again. This is the requirement's whole risk; if `gitHead`
   is wrong, the technique failed regardless of anything else passing.
 - **Confirm the primary checkout never left main during the publish** — from
   Pipeman's report of the operation, and by confirming no orphaned commits exist
@@ -204,9 +225,11 @@ the window without closing it.
 
 ### Risks & Mitigations
 
-- **Publishing from a worktree stamps the wrong `gitHead`.** — Req 1a flags it as
-  unverified, names the clone fallback, and LiveQA proves it against this
-  sprint's own release before the sprint can pass.
+- **Publishing from a clone also gets `gitHead` wrong.** — Unlikely: 0.1.12 and
+  0.1.14 both did it correctly by construction. LiveQA proves it again on this
+  sprint's own release rather than inheriting those measurements.
+- **The rejected technique gets re-proposed a third time.** — Req 1a-i puts the
+  root cause beside the replacement, which is the only place it has never been.
 - **The wrappers' refusal blocks a role during a legitimate publish window.** —
   That is the intended behaviour: the commit would strand. The message says to
   wait and why, and Req 3's warning makes the cause visible from the lifecycle
