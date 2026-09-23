@@ -1,17 +1,17 @@
 {
   "id": 44,
   "title": "Move both Dev Teams to the opus alias, and stop two role tabs reading as the same colour",
-  "phase": "liveqa_live",
+  "phase": "complete_ready",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "9f7401bbb79a3c91e6d2904652a4781311157c5b00573babb761f2c43b3f3e5c",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "7ccc8a5d5a86335c964cc8216cbe8b6bd4695e129e6491fd472a6730aa3d6c89",
   "last_shipped_commit": "3cc6b909b4e932226abe93202ba34aecc18719d6",
-  "groundtruth_result": null,
+  "groundtruth_result": "PASS",
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
   "audit_rounds": 1,
-  "live_test_rounds": 0,
+  "live_test_rounds": 1,
   "started": "2026-09-23T04:29:30+00:00",
   "completed": null,
   "history": [
@@ -38,11 +38,23 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=3cc6b909b4e932226abe93202ba34aecc18719d6 | ci=green: 1 CI run(s) for 3cc6b909b4e932226abe93202ba34aecc18719d6 all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-23T13:48:13+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: LiveQA live test, sprint 44, round 1. Verdict: PASS.\nEvery LiveQA criterion in the sprint file was run against the published 0.2.19, in real scratch installs with real launched sessions, headless and interactive. No defects.\n\nENVIRONMENT\nmacOS 26.6.2 arm64, node v24.21.0, npm 11.19.0, git 2.55.0. **Claude Code CLI 2.1.280 at gate time** \u2014 it has moved since sprint 43's measurements at 2.1.278, which matters here because this sprint's whole subject is which model a launched session actually runs. 2026-09-22/23. Projects: s44/proj under this session's scratchpad (headless work, driven by LiveQA) and ~/Programming/ws-0219 (VS Code, driven by the operator). Tools: npx, the installed scripts/launcher/run-role.js, git, six real headless launches, one operator-run FC: Start All.\n\nPROVENANCE (registry, not the handoff)\nnpm dist-tags latest 0.2.19. npm view fully-completely@0.2.19 gitHead 3cc6b909b4e932226abe93202ba34aecc18719d6 == last_shipped_commit. dist.shasum 27fb2e92d8db86a713d580e57b5316941fc7843f == the npm pack download. All 59 published files byte-identical to git show 3cc6b90:<path> (MISMATCHED 0, NOT-IN-COMMIT 0).\n\nREQS 1, 2, 4 \u2014 THE DECLARED CONFIGURATION (read from a real install of 0.2.19)\nAgent-file frontmatter: master-controller opus/blue, dev-team-1 opus/red, dev-team-2 opus/cyan, qa1 opus/yellow, pipeman sonnet/green, liveqa opus/purple. Both Dev Teams carry the bare alias `opus`, not a pinned version string.\nCLAUDE.md's team table: Master Controller opus, Dev Team 1 opus, Dev Team 2 opus, QA1 opus, Pipeman sonnet, LiveQA opus \u2014 matching the frontmatter string for string, all six rows.\nPipeman is still sonnet and the other three opus roles are untouched (Req 4).\n\nREQ 3 \u2014 WHAT A LAUNCHED SESSION ACTUALLY RUNS ON\nEvidence is taken from the structured `modelUsage` key of each headless run's own JSON envelope, not from the model's narration, and from the interactive session header for the operator-run launches.\nHeadless (installed run-role.js, CLI 2.1.280):\n  dev-team-1 -> modelUsage key `claude-opus-5-5`; the session also stated \"Opus 5.5, model ID claude-opus-5-5\".\n  dev-team-2 -> `claude-opus-5-5`; stated \"Model: Opus 5.5 (claude-opus-5-5)\".\n  qa1 (unchanged role, control) -> `claude-opus-5-5`.\n  pipeman (unchanged role, control) -> `claude-sonnet-5`; stated \"Model: Sonnet 5\".\nInteractive, real VS Code, FC: Start All in ~/Programming/ws-0219 (operator screenshots):\n  Dev Team 1 header: \"Claude Code v2.1.280 / Opus 5.5 - Claude Max / @dev-team-1 - ~/Programming/ws-0219\".\n  Dev Team 2 header: \"Opus 5.5 - Claude Max / @dev-team-2\".\n  Pipeman header: \"Sonnet 5 - Claude Max / @pipeman\".\nSo both Dev Teams run on Opus 5.5 on both launch paths, and no role fell back silently. Worth recording for the sprint's own \"all five move together\" claim: QA1 resolved to claude-opus-5-5 as well, so the bare `opus` alias currently resolves to Opus 5.5 for every role that declares it \u2014 the property the sprint predicted, now observed rather than assumed.\n\nREQ 5 \u2014 TAB COLOURS\nMechanics (generated .vscode/tasks.json in a fresh install): Master Controller terminal.ansiBlue, Dev Team 1 terminal.ansiRed, Dev Team 2 terminal.ansiCyan, QA1 terminal.ansiYellow, Pipeman terminal.ansiGreen, LiveQA terminal.ansiMagenta. Six roles, six distinct terminal.ansi* values, no collision. `orange: 'terminal.ansiBrightYellow'` is still present in COLOR_MAP (Req 5b), unused by this framework's own roles.\nRendered, which is the evidence the sprint actually asks for since the defect was two declared colours rendering alike: the operator's FC: Start All screenshot shows all seven tabs distinguishable, with Dev Team 2's icon and its `fc:dev-team-2:ws-0219` badge rendering cyan against QA1's yellow. The two no longer read as the same colour.\n\nQA1'S RELAYED NOTES, ADDRESSED\n- The Req 5d colour test's blind spot (it catches exact duplicates, not near-miss colours): confirmed as a real limitation, and it is exactly why this round's colour evidence is a rendered screenshot rather than a JSON assertion. Nothing in this release makes the blind spot worse; the near-miss that caused the original complaint (ansiBrightYellow beside ansiYellow) is gone because no role declares orange any more. If a future role is given a colour adjacent to an existing one, the suite will still pass and a human will still have to look. That is a finding for Master Controller's backlog, not a defect in 0.2.19.\n- Reporting each Dev Team's model from the structured envelope: done, as above \u2014 modelUsage, per role, quoted.\n\nNOT CLAIMED\nThe sprint's Out of Scope removes the old Req 2a (stating what reads `model:`) and the stale `claude --model opus` example near CLAUDE.md line 75, both moved to a later sprint. I checked neither, deliberately: the build commit predates that amendment and failing a live test over it would cost a publish for documentation the sprint itself defers."
+    },
+    {
+      "ts": "2026-09-23T13:48:13+00:00",
+      "actor": "liveqa",
+      "event": "sprint_file_drift_since_audit",
+      "detail": "NOTE: sprint 44's file has changed since QA1's PASS (audited hash 9f7401bbb79a..., current 11f6970a1db2...). Recorded, not refused \u2014 see this function's own comment for why. If this sprint's own acceptance criteria changed for a real reason, that's worth a fresh /sprint-qa1 look once the live-test loop settles; if it was a cosmetic edit, this note is the whole record of it."
     }
   ],
   "last_claim": {
-    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-23T04:53:21+00:00"
+    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
+    "claude_agent": "liveqa",
+    "ts": "2026-09-23T13:48:13+00:00"
   }
 }
