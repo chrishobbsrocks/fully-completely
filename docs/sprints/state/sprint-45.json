@@ -1,16 +1,16 @@
 {
   "id": 45,
   "title": "Say what reads a role's model, stop the colour test passing on a near-miss, and name the rule the publish and close gates share",
-  "phase": "dev_build",
-  "qa1_audit_result": null,
-  "qa1_audit_file_hash": null,
-  "qa1_audit_hash_scheme": null,
-  "qa1_audited_tree_hash": null,
+  "phase": "qa1_audit",
+  "qa1_audit_result": "PASS",
+  "qa1_audit_file_hash": "3accd52f33b72a852ea1adffcd9a82b7451cacf3757e0c1a88ccb841ae3bd3b4",
+  "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
+  "qa1_audited_tree_hash": "15830331fff6d45b7ab7aa7bdc36ee36b7173e091aa7b2eda57ec76918ccbd91",
   "last_shipped_commit": null,
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
-  "audit_rounds": 0,
+  "audit_rounds": 1,
   "live_test_rounds": 0,
   "started": "2026-09-23T14:04:56+00:00",
   "completed": null,
@@ -20,11 +20,17 @@
       "actor": "system",
       "event": "sprint_started",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-23T15:22:00+00:00",
+      "actor": "qa1",
+      "event": "audit",
+      "detail": "PASS: QA1 gate-1 audit, sprint 45, round 1. Audited commit 0426b01 (on 3c2c2a9, the sprint start). The sprint file was read fresh at HEAD and is unchanged since 3c2c2a9. Verdict: PASS.\n\n1. Req 1: one statement beside the team table, naming both routes, and I checked both claims against run-role.js rather than taking the sentence on trust (the criterion says to):\n - Headless: headlessLaunchArgs builds `const definition = { description, prompt }` and then `if (meta && meta.model) definition.model = meta.model;` before `JSON.stringify({ [role.id]: definition })`. So the model genuinely is passed in the --agents JSON, as claimed.\n - Interactive: freshLaunchArgs returns ['--agent', role.id, '--session-id', uuid, '--name', sessionTitle, prompt] and resumeLaunchArgs ['--agent', role.id, '--resume', uuid, ...]. Neither passes --model, and a grep for a --model argv anywhere in run-role.js/prompts.js finds none. So \"this framework's own launcher never passes a --model flag on this path at all\" is exactly true.\n - The frontmatter-beats---model claim is attributed to sprint 12's measurement rather than re-asserted as new, which is the right provenance.\n - It is one statement in the table's own section, not six scattered comments.\n2. Req 2: the stale \"e.g. `claude --model opus`\" example is gone (0 occurrences). What replaces it tells an operator to launch with `claude --agent <id>`, says the agent file is pasted in and the declared model already applies, and explicitly warns that passing --model would describe something with no effect. Consistent with Req 1 and it does not imply the flag sets the model.\n3. Req 3: QA1 planted both cases the criterion names, each reverted after:\n - Look-alike pair: dev-team-2 back to `orange` (terminal.ansiBrightYellow) against QA1's `yellow` (terminal.ansiYellow) -- the exact defect that reached the operator, and the case that PASSED in sprint 44. It now FAILS by name: \"no two role task colors form a known look-alike pair, not just an exact collision (sprint 45, Req 3)\". That closes the gap I recorded in sprint 44.\n - Genuinely distinct colours: swapping dev-team-2 and liveqa (purple/cyan) PASSES, so the new check does not fire on any legitimate change.\n - Worth recording honestly: my first attempt at the distinct-colour plant used `green`, which pipeman already declares, so it created a real exact collision and correctly failed sprint 44's distinctness test. That was my planting error, not a defect; I redid it with a valid swap rather than counting the first run.\n - The exact-duplicate property from sprint 44 still holds (dev-team-2 to `yellow` still fails).\n - 3a: the comment states plainly that look-alike-ness is theme- and eyesight-dependent, cannot be measured in a unit test, and that the list is deliberately conservative rather than a claim about every theme. Extending it to every base/bright ANSI pair is sound: it is the same failure mode by construction, and it costs nothing since the map only uses one bright variant today.\n - 3b: the comment says the list is not a substitute for a person looking at rendered tabs, names sprint 44's screenshot as the real coverage for unlisted pairs, and frames a future report as new evidence to add rather than as proof the test should already have caught it.\n4. Req 4: the paragraph states the principle generally, names all three instances (a sprint closing, a release publishing, a role's model changing on an unattended upgrade), credits FMC's Master Controller with the date, and says which two have gates and which deliberately does not. The framing is a reason gates exist, not licence to skip one -- it ends by telling whoever designs the next gate to ask the question deliberately.\n - 4a: no gate and no behaviour change. scripts/sprint_lifecycle.py and scripts/launcher/ have a zero-line diff across the whole sprint; the only files touched are CLAUDE.md, scripts/launcher_test.js, package.json and CHANGELOG.md, which is exactly the declared scope.\n5. Req 5: npm view fully-completely version returns 0.2.19 and package.json is 0.2.20, published+1 confirmed at build time, with a CHANGELOG entry covering Reqs 1-4.\n6. Req 6: both suites at 0426b01 in a clean clone. node scripts/launcher_test.js ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh ALL SMOKE TESTS PASSED, exit 0.\n\nFOR LIVEQA. The sprint's criteria are the right set. One emphasis: Req 1's live check is the one that matters most here, because a statement about what reads `model:` is exactly the kind of claim that can be true when written and false after a refactor. Take the model from the structured envelope on both paths (interactive and headless) as sprint 44 established, and if either path stops honouring frontmatter, that is a break in the property this sprint documents, not drift."
     }
   ],
   "last_claim": {
-    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-23T14:04:56+00:00"
+    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
+    "claude_agent": "qa1",
+    "ts": "2026-09-23T15:22:00+00:00"
   }
 }
