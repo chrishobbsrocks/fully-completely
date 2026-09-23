@@ -3,7 +3,7 @@ id: 44
 title: "Move both Dev Teams to the opus alias, confirmed by launching rather than assumed"
 original_title: "Move both Dev Teams to Opus 5.5, with the alias established by launching rather than assumed"
 epic: "Role configuration: the model each role runs on is a deliberate, verified choice"
-status: todo
+status: in_progress
 created: 2026-09-22T00:00:00+00:00
 ---
 
