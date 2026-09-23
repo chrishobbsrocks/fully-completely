@@ -1,16 +1,16 @@
 {
   "id": 46,
   "title": "Publish from a worktree with its own HEAD, and make the commit wrappers refuse a detached one",
-  "phase": "dev_build",
-  "qa1_audit_result": null,
-  "qa1_audit_file_hash": null,
-  "qa1_audit_hash_scheme": null,
-  "qa1_audited_tree_hash": null,
+  "phase": "qa1_audit",
+  "qa1_audit_result": "PASS",
+  "qa1_audit_file_hash": "acad5dde52a6e8405a59c350d99561ddd6d61689a0c08de605a3152b939256cd",
+  "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
+  "qa1_audited_tree_hash": "a7f5048e493a68a8a21426b781b4244147c0e40a2f80b3813668b04a1fe27865",
   "last_shipped_commit": null,
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
-  "audit_rounds": 0,
+  "audit_rounds": 1,
   "live_test_rounds": 0,
   "started": "2026-09-23T22:54:09+00:00",
   "completed": null,
@@ -20,11 +20,17 @@
       "actor": "system",
       "event": "sprint_started",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-23T23:20:48+00:00",
+      "actor": "qa1",
+      "event": "audit",
+      "detail": "PASS: QA1 gate-1 audit, sprint 46, round 1. Audited commit 86c4ad5 (on 7982e36, the sprint start). The sprint file was read fresh at HEAD and is unchanged since 7982e36. Verdict: PASS.\n\n1. Req 2, both wrappers: verified by running them, not by reading the check.\n - Built a scratch repo with both wrappers, a registry and a real state file. On a branch: gate-commit.js committed the verdict file and mc-commit.js committed CLAUDE.md, both normally.\n - Detached at a real commit: both refuse. The message names the condition and the short commit (\"HEAD is detached, currently at aef0970 -- refusing to commit. Nothing has been committed.\"), says a publish may be in progress, and says to wait for HEAD to return to a branch.\n - 2a verified as a property, not a claim: `git status --porcelain` hashed identically before and after both refusals, the commit count was unchanged, and HEAD was still the same detached commit. Nothing was written. The check is also the first statement in main(), ahead of argument parsing, so a refusal is never preceded by other validation work.\n - 2b: no process.env read, no FORCE/--force/allow-detached anywhere in either wrapper. No override path exists.\n - `git symbolic-ref -q HEAD` is the right primitive here -- git-native, no parsing of porcelain output -- and the \"can't tell is not detached\" default in the lifecycle's own helper matches this project's established conservative shape (isPidAlive's precedent, cited in the comment).\n2. Req 3, the lifecycle warning: verified to warn without gating.\n - On a branch, a write command (start) prints no NOTE and exits 0.\n - Detached at the same commit (so the sprint files stayed intact), `qa1 --verdict PASS` printed the NOTE exactly once, exited 0, printed \"QA1 audit PASSED (round 1)\", and the phase advanced to qa1_audit with the verdict recorded. So it is a warning: no exit code changed, no transition blocked.\n - Read-only commands while detached (status, list) print no NOTE at all, which matches the requirement's intent that this fires only where a state write actually happened.\n3. Req 1, the publish technique:\n - pipeman.md documents the worktree publish (`git worktree add --detach`), and the detached-primary-checkout technique is gone rather than kept as an alternative -- greps for `git checkout <sha>` / \"detach the primary\" in that file return nothing.\n - 1a is flagged as unverified with the fallback named in the file: a throwaway clone of the repo at the audited commit, \"which sidesteps the worktree question entirely at the cost of a slower, dirtier checkout.\" Correctly left for LiveQA to prove against this sprint's own publish.\n - 1b: no stash step survives in the publish path. The only occurrence of \"stash\" anywhere in the docs is CLAUDE.md's existing prohibition describing the downstream incident.\n - 1c: cleanup rules are stated in pipeman.md, including that a publish worktree carries no commits and so has no branch to merge -- which is the point that stops someone applying Dev Team 2's merge-first rule to it.\n - 1d: CLAUDE.md carries the framework-level statement -- HEAD is one repository-wide pointer, any operation that moves it can strand another session's commit, Pipeman now publishes from a dedicated worktree, and both wrappers refuse a detached HEAD outright -- and points to pipeman.md for the steps. The exact command living in pipeman.md rather than duplicated in CLAUDE.md is the right split.\n4. Req 5, negative controls run by QA1 (each reverted after):\n - Removed the checkNotDetachedHead() call from gate-commit.js: the launcher suite FAILS on \"gate-commit.js: refuses on a detached HEAD, writes nothing, and names the detached commit\".\n - Removed it from mc-commit.js: the suite FAILS on the mc-commit equivalent.\n - Disabled the lifecycle warning (is_head_detached() -> False at its call site): the smoke suite FAILS on \"expected the detached-HEAD NOTE to fire while state was written under a detached HEAD\".\n So all three new behaviours are genuinely covered rather than merely asserted. (My first attempt at the gate-commit control appeared to pass; that was my own shell error -- a `grep -c` returning 0 exited non-zero and short-circuited the chain before the suite ran. Re-run properly, it fails as above. Recording it because a negative control that silently never ran is exactly the kind of thing that turns into a false PASS.)\n5. Req 4: package.json is 0.2.22 against published 0.2.21, with a CHANGELOG entry covering Reqs 1-3.\n6. Req 5, suites: both pass at 86c4ad5 in a clean clone. node scripts/launcher_test.js ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh ALL SMOKE TESTS PASSED, exit 0.\n7. Scope: the cumulative diff is mc-commit.js, gate-commit.js, sprint_lifecycle.py, pipeman.md, CLAUDE.md, launcher_test.js, smoke_test.sh, package.json, CHANGELOG.md and docs/sprints bookkeeping -- exactly the declared list.\n\nOBSERVATION, not a finding. The sprint's own Risks section already says it: the wrappers only cover the commit paths this framework owns, and a role or operator running plain `git commit` during a publish window is still unprotected. Req 1 is what actually closes the window; Req 2 is the backstop. That is stated honestly in both the sprint file and the wrappers' own comments, so nobody should read the refusals as complete protection.\n\nFOR LIVEQA. Req 1a is the whole risk and it cannot be proved before the publish: confirm `npm view fully-completely@0.2.22 gitHead` equals the audited commit, published from a worktree. If it does not match, the technique failed regardless of everything else here passing, and the documented fallback (a throwaway clone at that commit) is what pipeman.md already names. Also confirm from Pipeman's own report that the primary checkout never left main, and check for orphaned commits afterward."
     }
   ],
   "last_claim": {
-    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-23T22:54:09+00:00"
+    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
+    "claude_agent": "qa1",
+    "ts": "2026-09-23T23:20:48+00:00"
   }
 }
