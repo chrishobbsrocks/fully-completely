@@ -1,13 +1,13 @@
 {
   "id": 45,
   "title": "Say what reads a role's model, stop the colour test passing on a near-miss, and name the rule the publish and close gates share",
-  "phase": "liveqa_live",
+  "phase": "complete_ready",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "3accd52f33b72a852ea1adffcd9a82b7451cacf3757e0c1a88ccb841ae3bd3b4",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "15830331fff6d45b7ab7aa7bdc36ee36b7173e091aa7b2eda57ec76918ccbd91",
   "last_shipped_commit": "71ac0165b21df520eb0043a2a16c9220a5d8ab05",
-  "groundtruth_result": "FAIL",
+  "groundtruth_result": "PASS",
   "live_loop_audit_trees": [
     {
       "ts": "2026-09-23T19:04:22+00:00",
@@ -30,7 +30,7 @@
   ],
   "pre_block_phase": null,
   "audit_rounds": 1,
-  "live_test_rounds": 1,
+  "live_test_rounds": 2,
   "started": "2026-09-23T14:04:56+00:00",
   "completed": null,
   "history": [
@@ -93,11 +93,23 @@
       "actor": "pipeman",
       "event": "reshipped",
       "detail": "commit=71ac0165b21df520eb0043a2a16c9220a5d8ab05 | ci=green: 1 CI run(s) for 71ac0165b21df520eb0043a2a16c9220a5d8ab05 all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-23T22:30:35+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: LiveQA live test, sprint 45, round 2. Verdict: PASS.\nRound 1's defect is fixed and verified live in the published 0.2.21, and the corrected claim was re-measured rather than re-read \u2014 at a CLI version that moved again between rounds. No new defects. One minor observation for Master Controller at the end.\n\nENVIRONMENT\nmacOS 26.6.2 arm64, node v24.21.0, npm 11.19.0, git 2.55.0. **Claude Code CLI 2.1.281 at gate time** \u2014 round 1 ran at 2.1.280, and the shipped correction anchors itself to 2.1.280, so this round establishes the claim still holds one version on. 2026-09-23. Scratch install s45r2/proj (a real npx install of published 0.2.21) plus a clean clone at 71ac016 for the test suite. Every model result below is the structured `modelUsage` key of the run's own JSON envelope, never narration.\n\nPROVENANCE (registry, not the handoff)\nnpm dist-tags latest 0.2.21. npm view fully-completely@0.2.21 gitHead 71ac0165b21df520eb0043a2a16c9220a5d8ab05 == last_shipped_commit. dist.shasum 9c21f4bdfae338f7636620e2d90a5fc5ff90161c == the npm pack download. All 59 published files byte-identical to git show 71ac016:<path> (MISMATCHED 0, NOT-IN-COMMIT 0).\n\nROUND-1 DEFECT: FIXED, and re-measured at the current CLI\nThe two CLAUDE.md passages now state the measured behaviour:\n- Beside the team table: \"Two routes read the Model column above, and both are honored, not merely present, when no `--model` flag is also given ... An interactive launch (`claude --agent <id>`, with no `--model`) has the CLI itself read that role's own agent-file frontmatter directly \u2014 this framework's own launcher never passes a `--model` flag on this path at all.\" The false \"frontmatter wins even when one is given anyway\" parenthetical is gone.\n- The run-each-role paragraph: \"**Never add `--model` yourself when starting a role's session** \u2014 it now overrides the agent file's own frontmatter rather than being overridden by it ... so naming a value there silently changes that role's actual model instead of merely failing to have an effect\", tied explicitly to the sprint's own \"Taking a cost by default is not the same as choosing it\" principle.\nRe-measured in the installed 0.2.21 project, claude 2.1.281, 2 reps, identical both times:\n  claude --agent qa1                  -> ['claude-opus-5-5']              (frontmatter honoured)\n  claude --agent pipeman              -> ['claude-sonnet-5']              (frontmatter honoured)\n  claude --agent qa1 --model haiku    -> ['claude-haiku-4-5-20251001']    (flag wins)\n  claude --agent pipeman --model opus -> ['claude-opus-5-5']              (flag wins)\nSo the corrected statement is true at 2.1.281, in both directions, one CLI version past the one it anchors to. Grade: CONFIRMED (2/2 reps, structured envelope).\nHeadless path unchanged and still honoured: dev-team-1 -> ['claude-opus-5-5'], pipeman -> ['claude-sonnet-5'] through run-role.js's `--agents` JSON.\n\nREQ 7 (added mid-loop): every shipped copy corrected\n- scripts/launcher/agents.js (installed copy): the header comment now says `--model` given alongside `--agent` \"WINS over the frontmatter rather than being overridden by it \u2014 the opposite of what an earlier version of this comment claimed, itself measured at an earlier CLI version\", and tells the reader to treat precedence as a property of the CLI version in use.\n- scripts/launcher/run-role.js (installed copy): same correction, same version-anchored framing.\n- README.md (in the published tarball): \"**Never add `--model` yourself: it now WINS over the frontmatter, not the other way around \u2014 measured, `claude 2.1.280`**\".\n- docs/sprint-44-dev-team-opus-model-findings.md (repository; not part of the install manifest, like the other findings docs): carries an append-only correction, \"Correction, appended 23 September (sprint 45, Req 7b)\", which withdraws only the untested half and leaves the original measurement and its Dev Team 1 conclusions intact \u2014 the same discipline /sprint-correct uses.\nA grep of the whole published tarball for the withdrawn wording returns no surviving assertion of it outside the CHANGELOG (see the observation below).\nBoth launcher files changed by comment only: the non-comment diff between 0426b01 and 71ac016 for agents.js and run-role.js is empty, so Req 4a's no-behaviour-change property is intact through the fix round.\n\nEVERYTHING ELSE RE-CONFIRMED ON 0.2.21\n- Table vs frontmatter, read from the install, all six roles: master-controller opus/opus, dev-team-1 opus/opus, dev-team-2 opus/opus, qa1 opus/opus, pipeman sonnet/sonnet, liveqa opus/opus. ALL MATCH.\n- Req 4's principle paragraph is present, once, unchanged.\n- Req 3: LOOK_ALIKE_COLOR_PAIRS is present in scripts/launcher_test.js at the shipped commit, and `node scripts/launcher_test.js` in a clean clone at 71ac016 reports ALL LAUNCHER TESTS PASSED.\n- Colours in a fresh install: blue / red / cyan / yellow / green / magenta \u2014 six distinct, Dev Team 2 cyan against QA1 yellow, no listed look-alike pair.\n- Req 2's stale `claude --model opus` example remains gone.\n\nOBSERVATION FOR MASTER CONTROLLER (not a defect, not a sprint 45 requirement)\nThe CHANGELOG's own historical 0.2.20 entry still states the withdrawn claim flatly \u2014 \"frontmatter wins even when one is given anyway\" \u2014 with no marker at that entry. The 0.2.21 entry directly above it does name the reversal explicitly (\"0.2.20's own new claim about `--model`/frontmatter precedence was backwards, caught by LiveQA's live test rather than shipping unnoticed\"), and rewriting a past release's entry is not normal practice, so I am not treating this as a defect. Req 7's own list names four files and the CHANGELOG is not among them. If it matters, the cheap fix is a one-line cross-reference in the 0.2.20 entry rather than an edit to what it says.\n\nA NOTE ON PIPEMAN'S FLAG, RECORDED BECAUSE IT BEARS ON PROVENANCE\nPipeman reported that a reply to its publish-authorization question was actually a new Dev Team handoff, and that it re-verified state and asked again rather than treating it as a yes. The record supports that it ended up on the right commit: the published gitHead, last_shipped_commit, and the tree I byte-compared all agree on 71ac016, and QA1's live-loop PASS is recorded against that same commit. Nothing here was shipped on a skimmed answer."
+    },
+    {
+      "ts": "2026-09-23T22:30:35+00:00",
+      "actor": "liveqa",
+      "event": "sprint_file_drift_since_audit",
+      "detail": "NOTE: sprint 45's file has changed since QA1's PASS (audited hash 3accd52f33b7..., current 26e9b364e66a...). Recorded, not refused \u2014 see this function's own comment for why. If this sprint's own acceptance criteria changed for a real reason, that's worth a fresh /sprint-qa1 look once the live-test loop settles; if it was a cosmetic edit, this note is the whole record of it."
     }
   ],
   "last_claim": {
-    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-23T21:01:30+00:00"
+    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
+    "claude_agent": "liveqa",
+    "ts": "2026-09-23T22:30:35+00:00"
   }
 }
