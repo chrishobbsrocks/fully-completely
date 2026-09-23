@@ -110,10 +110,18 @@ one session sub-agenting another, that's forbidden absolutely (see
 `CLAUDE.md`). The six sessions are `claude --agent <id>`, where `<id>` is
 the agent's filename in `.claude/agents/` (`master-controller`,
 `dev-team-1`, `dev-team-2`, `qa1`, `pipeman`, `liveqa`). `--agent` alone is
-enough — the agent file's own `model:` frontmatter wins even over an
-explicit `--model` on the same command line (verified on the CLI this was
-built against), so frontmatter stays the single place a model is ever set.
-Nothing in this launcher passes `--model`.
+enough — with no other flags, the CLI reads that agent file's own
+`model:` frontmatter directly, and this launcher itself never passes
+`--model` on this path. **Do not add `--model` yourself**: at `claude
+2.1.280`, a `--model` flag given alongside `--agent` overrides the
+frontmatter rather than being overridden by it (measured directly; this
+project's own sprint 12 had measured the opposite at an earlier CLI
+version, so treat this precedence as a property of the CLI version
+you're running, re-verify it rather than trust this sentence indefinitely) —
+naming a value there silently changes that role's actual model instead of
+having no effect. Frontmatter stays the single place a model is meant to
+be set; a hand-typed `--model` is a way to accidentally override that, not
+a supported way to set it.
 
 **By hand:** open a terminal tab per role, `cd` into the project root, run
 `claude --agent <id>`, and you're running that role.

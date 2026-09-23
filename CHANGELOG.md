@@ -13,6 +13,40 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.21 — Sprint 45 (Corrects 0.2.20, `--model` precedence)
+
+`0.2.20`'s own new claim about `--model`/frontmatter precedence was
+backwards, caught by LiveQA's live test rather than shipping unnoticed:
+CLAUDE.md said the agent file's own `model:` frontmatter wins even over
+an explicit `--model` flag (sprint 12's own measurement, at an earlier
+CLI version). At `claude 2.1.280` it doesn't — the flag now wins.
+Reproduced independently, twice, from the structured `modelUsage` result
+field, never narration: `claude --agent qa1 --model haiku` ran as haiku;
+`claude --agent qa1` with no flag ran as opus, both directions confirmed.
+
+- **Corrects (LiveQA, round 1; re-confirmed by QA1's own live-loop
+  audit):** both CLAUDE.md passages that stated or relied on the old,
+  now-false precedence. The frontmatter-honored claim is now scoped to
+  "when no `--model` flag is given"; a new, explicitly version-anchored
+  paragraph (`claude 2.1.280`) states the flag now overrides frontmatter,
+  framed as a CLI property to re-verify at the current version rather
+  than a settled fact — this behavior has evidently changed at least once
+  already and this framework does not control it. The operator
+  instruction changed from "the flag does nothing" to "never add it — it
+  now silently overrides the role's intended model instead of being
+  harmlessly ignored," tied explicitly to this same release's own "taking
+  a cost by default is not the same as choosing it" paragraph.
+- **Corrects (QA1's live-loop audit, round 1):** `README.md` carried the
+  identical false claim (it also ships in the npm package and renders on
+  the package page — the more public of the two files, and LiveQA's own
+  0.2.20 retest was scoped to CLAUDE.md, so this would not have been
+  caught there). Corrected to the same shape as CLAUDE.md's own fix.
+
+`scripts/launcher/agents.js`'s own header comment states the same stale
+claim (a third passage, found but not fixed in this release — flagged to
+Master Controller as a decision needed, not fixed by omission, per QA1's
+own note).
+
 ## 0.2.20 — Sprint 45
 
 Four carry-overs from sprint 44, documentation and one test extension only
