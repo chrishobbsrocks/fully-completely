@@ -53,3 +53,38 @@ sprint repeats this same measurement against the published package, in a
 fresh install, for both Dev Team 1 and Dev Team 2, and on both the interactive
 and headless launch paths — this document records only the build-time check
 QA1 audits statically before anything ships.
+
+## Correction, appended 23 September (sprint 45, Req 7b)
+
+**The "wins even over an explicit `--model` flag" half of the closing
+paragraph above was never tested by this document's own table, and is
+false. This is an append-only correction, the same shape `/sprint-correct`
+(sprint 40) uses for a role's own recorded notes: the measurement above is
+left exactly as it was run, nothing in the table or its own conclusions
+about Dev Team 1 running on `opus` is edited or withdrawn. Only the one
+sentence that generalized past what was actually run is corrected, here,
+not there.**
+
+Look again at the three rows in "What was measured" above: every row
+varies exactly one thing, the agent file's own `model:` frontmatter value
+at launch time (`opus`, `opus`, then `sonnet` for the negative control).
+**Not one of the three launches passed a `--model` flag at all.** The
+probe command shape shown (`node scripts/launcher/run-role.js --headless
+--agent dev-team-1 --prompt-file ...`) never included one, in any rep.
+So this document is solid evidence that Dev Team 1's headless launch path
+correctly passes the agent file's frontmatter `model:` through to the
+real launch (the actual subject of sprint 44's own Req 3) — and it is
+**no evidence at all**, despite the closing paragraph's own claim, about
+what happens when a `--model` flag is *also* given alongside `--agent`.
+That specific question — frontmatter versus an explicit `--model` — was
+never run here; the closing paragraph's "and it wins even over an
+explicit `--model` flag" clause was a generalization from a claim already
+circulating elsewhere in this codebase (traced back to sprint 12, at an
+earlier CLI version), not from this document's own measurement, and it
+was wrong: sprint 45 found, measured directly at `claude 2.1.280`
+(`claude --agent qa1 --model haiku` ran as haiku; `claude --agent qa1`
+with no flag ran as opus), that `--model` now *wins* over the frontmatter
+when given, the opposite of what was claimed here. See CLAUDE.md's own
+team-table section for the corrected, version-anchored account — this
+document's own withdrawal is limited to the one sentence above that
+overreached its own table, nothing else in this record is in question.

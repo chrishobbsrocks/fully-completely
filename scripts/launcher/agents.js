@@ -3,10 +3,16 @@
 // lives, how to read its frontmatter, and how to map its `color:` field to
 // a VS Code terminal color. Model is deliberately NOT read or passed on the
 // command line anywhere in this launcher — `claude --agent <id>` alone puts
-// each agent's frontmatter `model:` in charge, and passing --model on top
-// would only invite the two to drift, even though frontmatter wins either
-// way (verified empirically: `--agent X --model haiku` still ran as X's
-// frontmatter model).
+// each agent's frontmatter `model:` in charge, since this launcher itself
+// never gives `--model` a chance to compete with it. Do not add one by
+// hand: sprint 45 found (`claude 2.1.280`) that `--model`, given alongside
+// `--agent`, WINS over the frontmatter rather than being overridden by
+// it — the opposite of what an earlier version of this comment claimed,
+// itself measured at an earlier CLI version. Treat this precedence as a
+// property of the CLI version in use, not a settled fact — see CLAUDE.md's
+// own team-table section for the full, version-anchored measurement.
+// Passing `--model` on top would silently change the role's actual model,
+// not merely invite the two to drift.
 const fs = require('fs');
 const path = require('path');
 

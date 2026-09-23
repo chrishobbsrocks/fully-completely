@@ -25,8 +25,16 @@
 // abandon a session.
 //
 // Model is never passed here — `--agent <id>` alone puts the agent file's
-// own frontmatter `model:` in charge (confirmed to win even over an
-// explicit --model), so frontmatter stays the single place a model is set.
+// own frontmatter `model:` in charge, since nothing on this path ever
+// gives `--model` a chance to compete with it, so frontmatter stays the
+// single place a model is set. Do not add `--model` by hand anywhere
+// downstream of this file: sprint 45 found (`claude 2.1.280`) that it
+// WINS over the frontmatter when given, not the other way around --
+// the opposite of what an earlier version of this comment claimed,
+// itself measured at an earlier CLI version. Treat that precedence as a
+// property of the CLI version in use, not a settled fact -- see
+// CLAUDE.md's own team-table section for the full, version-anchored
+// measurement.
 //
 // Sprint 11 adds a second, separate launch path, for driving a role
 // headless — no terminal, no human in the loop. The default, composed

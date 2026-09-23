@@ -20,9 +20,10 @@ backwards, caught by LiveQA's live test rather than shipping unnoticed:
 CLAUDE.md said the agent file's own `model:` frontmatter wins even over
 an explicit `--model` flag (sprint 12's own measurement, at an earlier
 CLI version). At `claude 2.1.280` it doesn't — the flag now wins.
-Reproduced independently, twice, from the structured `modelUsage` result
-field, never narration: `claude --agent qa1 --model haiku` ran as haiku;
-`claude --agent qa1` with no flag ran as opus, both directions confirmed.
+Reproduced independently, multiple times across this fix loop, always
+from the structured `modelUsage` result field, never narration: `claude
+--agent qa1 --model haiku` ran as haiku; `claude --agent qa1` with no
+flag ran as opus, both directions confirmed.
 
 - **Corrects (LiveQA, round 1; re-confirmed by QA1's own live-loop
   audit):** both CLAUDE.md passages that stated or relied on the old,
@@ -41,11 +42,21 @@ field, never narration: `claude --agent qa1 --model haiku` ran as haiku;
   the package page — the more public of the two files, and LiveQA's own
   0.2.20 retest was scoped to CLAUDE.md, so this would not have been
   caught there). Corrected to the same shape as CLAUDE.md's own fix.
-
-`scripts/launcher/agents.js`'s own header comment states the same stale
-claim (a third passage, found but not fixed in this release — flagged to
-Master Controller as a decision needed, not fixed by omission, per QA1's
-own note).
+- **Corrects (operator decision, mid-loop, sprint 45's own Req 7):** two
+  more shipped copies of the identical stale claim, found by a repo-wide
+  sweep rather than left for a later report — `scripts/launcher/agents.js`
+  and `scripts/launcher/run-role.js`'s own header comments, both
+  corrected to the same shape, keeping the still-true half (this launcher
+  deliberately never passes `--model` itself, so frontmatter is the
+  single place a model is *meant* to be set) and dropping only the
+  unsupported "and it would win anyway" half. No launcher behavior
+  changed — no code path here ever passed `--model` and none starts now.
+  `docs/sprint-44-dev-team-opus-model-findings.md` also generalized a
+  real, narrower measurement (frontmatter alone, never varying `--model`)
+  into this same false claim; corrected with an appended, dated
+  correction note rather than an edit to its own table, since the
+  measurement it actually ran was sound and only the unsupported
+  generalization is withdrawn.
 
 ## 0.2.20 — Sprint 45
 
