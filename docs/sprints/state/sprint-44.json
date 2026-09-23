@@ -1,7 +1,7 @@
 {
   "id": 44,
   "title": "Move both Dev Teams to the opus alias, and stop two role tabs reading as the same colour",
-  "phase": "complete_ready",
+  "phase": "complete",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "9f7401bbb79a3c91e6d2904652a4781311157c5b00573babb761f2c43b3f3e5c",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -13,7 +13,7 @@
   "audit_rounds": 1,
   "live_test_rounds": 1,
   "started": "2026-09-23T04:29:30+00:00",
-  "completed": null,
+  "completed": "2026-09-23T13:50:14+00:00",
   "history": [
     {
       "ts": "2026-09-23T04:29:30+00:00",
@@ -50,11 +50,17 @@
       "actor": "liveqa",
       "event": "sprint_file_drift_since_audit",
       "detail": "NOTE: sprint 44's file has changed since QA1's PASS (audited hash 9f7401bbb79a..., current 11f6970a1db2...). Recorded, not refused \u2014 see this function's own comment for why. If this sprint's own acceptance criteria changed for a real reason, that's worth a fresh /sprint-qa1 look once the live-test loop settles; if it was a cosmetic edit, this note is the whole record of it."
+    },
+    {
+      "ts": "2026-09-23T13:50:14+00:00",
+      "actor": "dev-team",
+      "event": "sprint_closed",
+      "detail": "user_said=44 close it thank you :)"
     }
   ],
   "last_claim": {
-    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
-    "claude_agent": "liveqa",
-    "ts": "2026-09-23T13:48:13+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-23T13:50:14+00:00"
   }
 }
