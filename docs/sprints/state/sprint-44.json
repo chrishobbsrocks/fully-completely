@@ -1,12 +1,12 @@
 {
   "id": 44,
   "title": "Move both Dev Teams to the opus alias, and stop two role tabs reading as the same colour",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "9f7401bbb79a3c91e6d2904652a4781311157c5b00573babb761f2c43b3f3e5c",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "7ccc8a5d5a86335c964cc8216cbe8b6bd4695e129e6491fd472a6730aa3d6c89",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "3cc6b909b4e932226abe93202ba34aecc18719d6",
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
@@ -32,11 +32,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-23T04:53:21+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=3cc6b909b4e932226abe93202ba34aecc18719d6 | ci=green: 1 CI run(s) for 3cc6b909b4e932226abe93202ba34aecc18719d6 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-23T04:46:34+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-23T04:53:21+00:00"
   }
 }
