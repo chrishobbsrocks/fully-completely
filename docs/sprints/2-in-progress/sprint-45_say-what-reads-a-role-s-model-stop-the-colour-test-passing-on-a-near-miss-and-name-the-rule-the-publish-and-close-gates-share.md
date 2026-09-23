@@ -96,12 +96,61 @@ screenshot, which is honest and does not scale.
    not a mechanism. If it suggests a mechanism to anyone, that is a finding for
    Master Controller and its own sprint.
 
-5. **Version bump to one above the currently published version**, with a
+7. **Every shipped copy of the withdrawn `--model` claim is corrected**
+   *(added 23 September, during this sprint's own live-test fix loop, at the
+   operator's decision — see the note at the end of this requirement)*. Sprint
+   45's re-measurement established the opposite of what this framework has been
+   asserting: `--model`, given by hand, WINS over an agent file's frontmatter.
+   CLAUDE.md now says so. Three other shipped files still say the reverse, two of
+   them claiming measurement, and a fourth records the unmeasured
+   generalization:
+
+   - `scripts/launcher/agents.js`, header comment: "frontmatter wins either way
+     (verified empirically: `--agent X --model haiku` still ran as X's
+     frontmatter model)".
+   - `scripts/launcher/run-role.js`, lines ~28–29: "confirmed to win even over an
+     explicit `--model`".
+   - `README.md`, ~114–117: the same claim, "measured directly".
+   - `docs/sprint-44-dev-team-opus-model-findings.md`: asserts frontmatter beats
+     `--model` "on claude 2.1.280, confirmed by running it" — QA1 established the
+     doc's own probe table never passed `--model` in any row, so a real
+     measurement was generalized into an untested claim.
+
+   **7a.** Correct the first three to state what was actually measured, matching
+   CLAUDE.md's wording rather than paraphrasing it. Where a comment's *design*
+   reasoning still holds — this launcher deliberately never passes `--model`, so
+   frontmatter is the single place a model is set — keep that and drop only the
+   unsupported "and it would win anyway" half. The behaviour is unchanged: no
+   launcher starts passing `--model`.
+
+   **7b.** Add a **dated correction note** to the findings doc rather than
+   editing its table. The measurement it ran was sound; only the generalization
+   drawn from it is withdrawn. Say which rows exist, what they varied, and what
+   therefore was never tested. This is the same shape as `/sprint-correct`
+   (sprint 40) — append, do not rewrite the record.
+
+   **7c. Sweep for others.** These four were found by one grep. Search the whole
+   repository for any other statement about what determines a role's model, in
+   any file, and correct or withdraw each. List what was checked in the handoff,
+   so the next person knows the sweep's actual coverage rather than assuming it
+   was total.
+
+   *Why this is in a sprint already past its gate, when Master Controller's own
+   rule is that sprints are not redesigned mid-flight: the operator made the call
+   explicitly (23 September) on the trade it actually is — one more QA1 round now
+   versus publishing a release whose own files contradict each other about a
+   claim this sprint exists to correct, plus a further release to fix it. The
+   distinction from sprint 44's Req 2a, which Master Controller added after that
+   sprint had passed everything and then had to withdraw, is that this is
+   discovered during an active fix loop, before the reship, and it is the same
+   defect the sprint is already correcting rather than new scope.*
+
+8. **Version bump to one above the currently published version**, with a
    CHANGELOG entry covering Reqs 1–4. Authorized by the user, 23 September.
    Confirm with `npm view fully-completely version` at build time — 0.2.19 when
    this was written; do not trust that number.
 
-6. **Tests.** Both suites pass, plus Req 3's extension.
+9. **Tests.** Both suites pass, plus Req 3's extension.
 
 ### Acceptance Criteria
 
@@ -122,9 +171,17 @@ screenshot, which is honest and does not scale.
 - **Req 4** — the paragraph states the principle generally, names all three
   instances, credits FMC, and **4a** introduces no gate: `git diff` shows no
   behaviour change in `sprint_lifecycle.py` or the launcher.
-- **Req 5** — version is published+1 at build time; CHANGELOG present.
-- **Req 6** — QA1 runs both suites itself.
-- The cumulative diff is confined to `CLAUDE.md`, `scripts/launcher_test.js`,
+- **Req 7** — **7a** all three shipped files state what was measured and agree
+  with CLAUDE.md; grep for the withdrawn claim and confirm no shipped file still
+  asserts it; confirm no launcher started passing `--model`. **7b** the findings
+  doc carries an appended, dated correction naming what its table did and did not
+  vary, with the table itself unedited. **7c** the sweep's coverage is stated in
+  the handoff; QA1 runs its own independent grep rather than trusting that list.
+- **Req 8** — version is published+1 at build time; CHANGELOG present.
+- **Req 9** — QA1 runs both suites itself.
+- The cumulative diff is confined to `CLAUDE.md`, `README.md`,
+  `scripts/launcher/agents.js`, `scripts/launcher/run-role.js`,
+  `docs/sprint-44-dev-team-opus-model-findings.md`, `scripts/launcher_test.js`,
   `package.json`, `CHANGELOG.md`, the version-derived tables the release
   regenerates, and `docs/sprints/` bookkeeping. Anything else needs a stated
   reason.
@@ -135,6 +192,10 @@ screenshot, which is honest and does not scale.
   `last_shipped_commit`.
 - Read the installed CLAUDE.md in a real install and confirm Reqs 1, 2 and 4
   arrived, and that the table still matches every agent file's frontmatter.
+- **Req 7 live:** grep the installed tree and the published tarball for the
+  withdrawn claim — no shipped file may still assert that frontmatter beats
+  `--model`. Confirm the installed `agents.js`, `run-role.js` and `README.md`
+  agree with the installed CLAUDE.md.
 - **Confirm Req 1's claim is still true rather than merely present:** launch one
   role interactively and one headless from that install and check the model each
   session actually reports, from the structured envelope where available, as
@@ -187,6 +248,10 @@ screenshot, which is honest and does not scale.
 - **Req 4 reads as licence to skip a gate rather than as a reason gates exist.**
   — The paragraph names the two gates that DO enforce it and the one case that
   deliberately does not; QA1 checks the framing.
+- **Correcting three files reintroduces the claim somewhere else, or drops the
+  design reasoning that is still true.** — Req 7a keeps the "this launcher never
+  passes `--model`" half and drops only the unsupported half; QA1 greps
+  independently of Dev Team's stated sweep.
 - **Scope creep from four small items into a fifth.** — Pipeman's publish defect
   is explicitly Out of Scope with its own sprint named; sprint 44's own history
   is the argument against absorbing anything mid-flight.
