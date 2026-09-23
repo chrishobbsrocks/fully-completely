@@ -1,7 +1,7 @@
 ---
 name: dev-team-1
 description: Use this agent to implement the code for a sprint, write tests, and fix issues raised by QA1 or LiveQA. Use during the build phase of a sprint and during both fix loops.
-model: sonnet
+model: opus
 color: red
 ---
 

@@ -725,6 +725,7 @@ test('auth: parseLoggedIn reads only the loggedIn field, ignoring authMethod ent
 // generate-tasks.js: buildTasks()
 // -------------------------------------------------------------------------
 const { buildTasks } = require('./launcher/generate-tasks');
+const { ROLES: GENERATE_TASKS_ROLES } = require('./launcher/agents');
 
 test('buildTasks: exactly one task per role, plus Shell and FC: Start All', () => {
   const { tasks } = buildTasks(REPO_ROOT);
@@ -752,6 +753,34 @@ test('buildTasks: role colors come from each agent file\'s frontmatter', () => {
   const { tasks } = buildTasks(REPO_ROOT);
   const mc = tasks.find((t) => t.label === 'Master Controller');
   assert.strictEqual(mc.icon.color, 'terminal.ansiBlue'); // master-controller.md: color: blue
+});
+
+// Sprint 44, Req 5d: the property the operator actually wants is not "one
+// named role has its own named color" (the test above), it's that all six
+// role tabs are DISTINGUISHABLE from each other -- the real defect this
+// sprint fixes was two distinct declared colors (dev-team-2's old `orange`
+// and qa1's `yellow`) resolving to the same visible terminal.ansi* value,
+// which the test above would never have caught, since it only ever checked
+// Master Controller in isolation. Asserts uniqueness across all six
+// resolved values, derived from the real agent files, not a hardcoded list
+// of what those values happen to be today -- so a future colour change
+// that reintroduces a collision fails here regardless of which two roles
+// it involves.
+test('buildTasks: all six role task colors resolve to six DISTINCT terminal.ansi* values -- no two role tabs read alike (sprint 44, Req 5d)', () => {
+  const { tasks } = buildTasks(REPO_ROOT);
+  const roleLabels = GENERATE_TASKS_ROLES.map((r) => r.label);
+  const resolvedColors = roleLabels.map((label) => {
+    const t = tasks.find((task) => task.label === label);
+    assert.ok(t, `no task found for role label "${label}"`);
+    assert.ok(t.icon && t.icon.color, `role "${label}" resolved no icon color at all`);
+    return t.icon.color;
+  });
+  const distinct = new Set(resolvedColors);
+  assert.strictEqual(
+    distinct.size,
+    resolvedColors.length,
+    `expected ${resolvedColors.length} distinct role colors, got ${distinct.size} -- two or more roles resolve to the same terminal.ansi* value and would read as the same color: ${roleLabels.map((l, i) => `${l}=${resolvedColors[i]}`).join(', ')}`
+  );
 });
 
 test('buildTasks: FC: Start All depends on every role task plus Shell', () => {
@@ -2283,6 +2312,46 @@ test('run-role: headlessLaunchArgs supplies the persona via --agents JSON (--bar
   assert.strictEqual(agentsJson.qa1.description, meta.description);
   assert.strictEqual(agentsJson.qa1.prompt, body);
   assert.strictEqual(agentsJson.qa1.model, meta.model);
+});
+
+// Sprint 44, Req 7: CLAUDE.md's own "## The team" table is a second,
+// independent statement of which role runs on which model -- the exact
+// "documentation quietly false" shape sprint 43 built a structural test
+// against, applied here to the team table instead of a permission grant.
+// Parses the REAL table out of CLAUDE.md and cross-checks each row's
+// Model column against that role's own agent-file frontmatter, rather
+// than hardcoding either side as a literal -- a literal here is exactly
+// what would have made this test itself go stale the moment this sprint
+// changed two roles' models (sonnet -> opus) without anyone needing to
+// remember to update a hardcoded expectation in the test alongside it.
+function parseClaudeMdTeamTable(claudeMdText) {
+  const rows = [];
+  // Matches a markdown table data row of exactly 5 columns whose third
+  // column is a backtick-wrapped `.claude/agents/<id>.md` path -- this
+  // shape is specific enough not to also match the header/separator
+  // rows (neither has a backtick-wrapped agent-file path) or any other
+  // table in the document.
+  const rowRe = /^\|[^|]+\|[^|]+\|\s*`\.claude\/agents\/([a-z0-9-]+)\.md`\s*\|\s*([a-z0-9.-]+)\s*\|/gm;
+  let m;
+  while ((m = rowRe.exec(claudeMdText))) {
+    rows.push({ roleId: m[1], model: m[2] });
+  }
+  return rows;
+}
+
+test('CLAUDE.md: the team table\'s Model column matches each role\'s own agent-file frontmatter -- parsed from the real table, not hardcoded (sprint 44, Req 7)', () => {
+  const claudeMdText = fs.readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf8');
+  const rows = parseClaudeMdTeamTable(claudeMdText);
+  // A sanity floor, not a hardcoded role list -- if the table's own shape
+  // ever stops matching the parser (a reformatted table, a renamed
+  // column), this fails loudly here rather than the test silently
+  // checking zero rows and passing vacuously.
+  assert.strictEqual(rows.length, RUN_ROLE_ROLES.length, `expected one team-table row per real role (${RUN_ROLE_ROLES.length}); parsed ${rows.length} -- the table's own shape may have changed`);
+  for (const { roleId, model } of rows) {
+    const meta = readAgentMeta(roleId);
+    assert.ok(meta && meta.model, `${roleId}: agent file frontmatter has no model -- cannot cross-check against CLAUDE.md's table`);
+    assert.strictEqual(model, meta.model, `CLAUDE.md's team table says ${roleId} runs on "${model}", but .claude/agents/${roleId}.md's own frontmatter says "${meta.model}" -- these must agree`);
+  }
 });
 
 // Req 4, amended round 3: the DEFAULT shape (no options, or {}) now runs on

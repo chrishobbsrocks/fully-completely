@@ -26,8 +26,21 @@ const ROLES = [
 
 // VS Code task icons only accept `terminal.ansi*` theme colors (see
 // https://code.visualstudio.com/updates/v1_69, "Task icons"). There is no
-// true ANSI orange or purple, so Dev Team 2 (orange) and LiveQA (purple)
-// map to the closest available shade rather than an exact one.
+// true ANSI purple, so LiveQA (purple) maps to the closest available shade
+// (`terminal.ansiMagenta`) rather than an exact one.
+//
+// Sprint 44, Req 5: `orange` used to be this framework's own approximation
+// for Dev Team 2 too (`terminal.ansiBrightYellow`), and that was the actual
+// defect the operator reported — `terminal.ansiBrightYellow` sits beside
+// QA1's own `terminal.ansiYellow` and reads as the same color in most
+// themes, so two of the six role tabs looked alike even though their agent
+// files were never confused with each other. Dev Team 2 now declares
+// `color: cyan` (`terminal.ansiCyan`, a real, distinct ANSI color, no
+// approximation needed) instead. `orange` stays in this map even though no
+// role this framework ships uses it any more: a downstream project may have
+// its own agent file declaring `color: orange`, and removing the entry
+// would silently break that project's own task color for no gain to
+// anyone — this map is additive, not pruned to only what's currently used.
 const COLOR_MAP = {
   blue: 'terminal.ansiBlue',
   red: 'terminal.ansiRed',
@@ -35,6 +48,7 @@ const COLOR_MAP = {
   yellow: 'terminal.ansiYellow',
   green: 'terminal.ansiGreen',
   purple: 'terminal.ansiMagenta',
+  cyan: 'terminal.ansiCyan',
 };
 
 function agentFilePath(roleId) {

@@ -62,8 +62,8 @@ bump is no longer routine bookkeeping in a sprint's own requirements.
 | Role | Shorthand | Agent file | Model | Job |
 |---|---|---|---|---|
 | Master Controller | MC | `.claude/agents/master-controller.md` | opus | Plans sprints, checks status read-only |
-| Dev Team 1 | Dev1 | `.claude/agents/dev-team-1.md` | sonnet | Starts, builds, tests, fixes, closes its own sprint |
-| Dev Team 2 | Dev2 | `.claude/agents/dev-team-2.md` | sonnet | Runs a separate, independent sprint in parallel, in its own git worktree |
+| Dev Team 1 | Dev1 | `.claude/agents/dev-team-1.md` | opus | Starts, builds, tests, fixes, closes its own sprint |
+| Dev Team 2 | Dev2 | `.claude/agents/dev-team-2.md` | opus | Runs a separate, independent sprint in parallel, in its own git worktree |
 | QA1 | QA1 | `.claude/agents/qa1.md` | opus | Static code audit (the only gate) |
 | Pipeman | PM | `.claude/agents/pipeman.md` | sonnet | Only one who pushes to remote |
 | LiveQA | LQ | `.claude/agents/liveqa.md` | opus | Live verification of the released artifact after every push — a browser is the common case, not the definition |

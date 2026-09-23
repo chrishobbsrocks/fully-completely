@@ -13,6 +13,44 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.19 — Sprint 44
+
+The operator's decision, 22 September: Dev Team 1 and Dev Team 2 now run on
+Opus (the bare `opus` alias, never a pinned version string) instead of
+Sonnet — cheaper than Opus 5 and comparable in capability at the time this
+was decided. `opus` already resolves to Opus 5.5, so writing the bare alias
+rather than a pinned string keeps the framework tracking whatever Anthropic
+currently ships as Opus, and means all four of Master Controller, QA1,
+LiveQA and now both Dev Teams share the same alias.
+
+- `.claude/agents/dev-team-1.md` and `.claude/agents/dev-team-2.md`:
+  `model: sonnet` → `model: opus`. CLAUDE.md's own team table updated to
+  match.
+- Confirmed by launching, not assumed: two real headless Dev Team 1
+  launches, `claude 2.1.280`, both report `claude-opus-5-5` in the CLI's own
+  structured `modelUsage` result field — never the model's own narration. A
+  negative control (briefly reverting to `model: sonnet` for one launch,
+  then restoring) reported `claude-sonnet-5` instead, confirming the
+  measurement actually distinguishes between the two rather than reporting
+  the same value regardless of the frontmatter. Full record:
+  `docs/sprint-44-dev-team-opus-model-findings.md`.
+- Pipeman, Master Controller, QA1, and LiveQA are unchanged — Pipeman stays
+  on `sonnet`; the other three already ran `opus`.
+- **Corrects a real rendering collision, reported by the operator mid-sprint:
+  Dev Team 2's terminal tab read as QA1's.** The cause was the color map,
+  not the agent files: VS Code task icons accept only `terminal.ansi*`
+  theme colors, and `orange` mapped to `terminal.ansiBrightYellow`, which
+  sits beside QA1's own `terminal.ansiYellow` and reads alike in most
+  themes. `dev-team-2.md` now declares `color: cyan`
+  (`terminal.ansiCyan`, a real, distinct ANSI color — no approximation
+  needed), and `COLOR_MAP` in `scripts/launcher/agents.js` gains that
+  entry. `orange` stays in the map for a downstream project's own agent
+  file that may still declare it — removing it would silently break that
+  project's own tab color for no gain here. The role-color test now
+  asserts all six roles resolve to six *distinct* values, not just that
+  Master Controller is blue, so a future collision (a literal duplicate
+  color name across two roles) fails the suite instead of shipping quietly.
+
 ## 0.2.18 — Sprint 43
 
 Documentation and tests only — no permission grant or other code change.
