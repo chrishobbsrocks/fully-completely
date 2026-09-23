@@ -57,6 +57,25 @@ green. See `.claude/agents/pipeman.md` for how this applies to Pipeman's
 own process, and `.claude/agents/master-controller.md` for why a version
 bump is no longer routine bookkeeping in a sprint's own requirements.
 
+**Taking a cost by default is not the same as choosing it** (sprint 45,
+credited to FMC's Master Controller, 22 September) — the general
+principle the two rules just above are both instances of, stated once
+because it will keep applying to cases neither rule names. A sprint
+closing, a release publishing, or a role's model changing under an
+unattended run on an upgrade are all costs a system can incur by simply
+proceeding, with nobody at any point having actually decided to accept
+them; `--user-said` and the publish-authorization rule each close that
+gap for one specific cost, by requiring the human's own real-time word
+before it's paid. Not every such cost has a gate, and this one
+deliberately doesn't: nothing in this framework mechanically stops an
+agent-file `model:` change from taking effect the next time a role
+launches, the same way sprint 44's own change did, on purpose, without
+anyone re-authorizing each individual launch. That absence is not an
+oversight, and this sprint does not close it — it's named here so whoever
+designs the next gate can ask, deliberately, whether a given default cost
+needs one, rather than discovering the question only after the cost has
+already been paid by default often enough to notice.
+
 ## The team
 
 | Role | Shorthand | Agent file | Model | Job |
@@ -70,11 +89,31 @@ bump is no longer routine bookkeeping in a sprint's own requirements.
 
 Shorthand is for conversation only, never for file names or commands.
 
+**Two routes read the Model column above, and both are honored, not
+merely present** (sprint 12; re-verified live against the real launcher
+in sprint 44). An interactive launch (`claude --agent <id>`) has the CLI
+itself read that role's own agent-file frontmatter directly — this
+framework's own launcher never passes a `--model` flag on this path at
+all, and frontmatter wins even when one is given anyway (measured:
+`--agent <id> --model haiku` still ran as `<id>`'s own frontmatter model,
+not haiku). A headless launch passes it explicitly instead:
+`scripts/launcher/run-role.js`'s `headlessLaunchArgs()` sets `model` in
+the `--agents` JSON definition it builds for the child process. Sprint 44
+confirmed, from the structured result envelope of a real launch rather
+than narration, that both Dev Teams actually ran on the intended model
+through both paths — a frontmatter string that parses is not itself
+evidence a role runs on it; this is the mechanism that makes it true, and
+a future change that stops passing it on either path is a real break in
+this property, not benign drift.
+
 Run each role as its own dedicated Claude Code session, always, no
-exceptions, a separate terminal tab is the simplest setup, pasting the
-relevant agent file as that session's system prompt. Start each session
-with the model listed above, e.g. `claude --model opus` for Master
-Controller, QA1, or LiveQA.
+exceptions, a separate terminal tab is the simplest setup: `claude --agent
+<id>` (e.g. `claude --agent qa1`) pastes the relevant agent file in as
+that session's system prompt for you, and already starts it on the model
+declared above — never pass `--model` yourself to select it, the flag
+exists but does not override the agent file's own frontmatter (see the
+paragraph just above), so naming a value there would describe something
+with no effect.
 
 **Never invoke another role via the Task/Agent tool as a substitute for
 that role running in its own session, ever, regardless of which role's

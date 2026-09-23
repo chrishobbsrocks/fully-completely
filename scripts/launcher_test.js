@@ -783,6 +783,64 @@ test('buildTasks: all six role task colors resolve to six DISTINCT terminal.ansi
   );
 });
 
+// Sprint 45, Req 3: the distinctness test above catches an EXACT
+// collision (two roles resolving to the identical terminal.ansi* string)
+// but not the real defect that actually reached an operator: `orange`
+// and `yellow` were always distinct strings (`terminal.ansiBrightYellow`
+// vs `terminal.ansiYellow`) -- they rendered ALIKE. Which pairs look
+// alike is theme- and eyesight-dependent and cannot be measured in a
+// unit test (Req 3a's own instruction) -- so this is a deliberately
+// CONSERVATIVE, hand-maintained list of pairs known (or obviously implied
+// by the same reasoning) to render alike, not a claim about every theme
+// or every possible pair. Seeded with the one confirmed pair
+// (yellow/bright-yellow, the actual sprint 44 defect) plus every other
+// standard ANSI color's own base/bright pair, since "a color and its own
+// bright variant" is the identical failure mode by construction, whether
+// or not this framework's own COLOR_MAP happens to use that particular
+// bright variant today.
+//
+// Req 3b: this list is not a substitute for a human actually looking at
+// the rendered tabs, and never claims to be -- it only ever catches a
+// pair already named here. Sprint 44's own screenshot evidence (a person
+// confirming Dev Team 2 renders visibly distinct from QA1) remains the
+// only real coverage for any pair this list doesn't name; if a future
+// report finds two tabs reading alike that aren't listed below, that is
+// new evidence to add to this list, not proof this test was supposed to
+// catch it already.
+const LOOK_ALIKE_COLOR_PAIRS = [
+  ['terminal.ansiBlack', 'terminal.ansiBrightBlack'],
+  ['terminal.ansiRed', 'terminal.ansiBrightRed'],
+  ['terminal.ansiGreen', 'terminal.ansiBrightGreen'],
+  ['terminal.ansiYellow', 'terminal.ansiBrightYellow'], // the confirmed pair -- sprint 44's own defect
+  ['terminal.ansiBlue', 'terminal.ansiBrightBlue'],
+  ['terminal.ansiMagenta', 'terminal.ansiBrightMagenta'],
+  ['terminal.ansiCyan', 'terminal.ansiBrightCyan'],
+  ['terminal.ansiWhite', 'terminal.ansiBrightWhite'],
+];
+
+test('buildTasks: no two role task colors form a known look-alike pair, not just an exact collision (sprint 45, Req 3)', () => {
+  const { tasks } = buildTasks(REPO_ROOT);
+  const roleLabels = GENERATE_TASKS_ROLES.map((r) => r.label);
+  const resolvedColors = roleLabels.map((label) => {
+    const t = tasks.find((task) => task.label === label);
+    assert.ok(t && t.icon && t.icon.color, `role "${label}" resolved no icon color at all`);
+    return { label, color: t.icon.color };
+  });
+  for (let i = 0; i < resolvedColors.length; i++) {
+    for (let j = i + 1; j < resolvedColors.length; j++) {
+      const a = resolvedColors[i];
+      const b = resolvedColors[j];
+      const isLookAlike = LOOK_ALIKE_COLOR_PAIRS.some(
+        ([x, y]) => (a.color === x && b.color === y) || (a.color === y && b.color === x)
+      );
+      assert.ok(
+        !isLookAlike,
+        `${a.label} (${a.color}) and ${b.label} (${b.color}) are a known look-alike pair -- these will render alike in most themes even though the strings differ`
+      );
+    }
+  }
+});
+
 test('buildTasks: FC: Start All depends on every role task plus Shell', () => {
   const { tasks } = buildTasks(REPO_ROOT);
   const startAll = tasks.find((t) => t.label === 'FC: Start All');

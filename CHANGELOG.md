@@ -13,6 +13,48 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.20 — Sprint 45
+
+Four carry-overs from sprint 44, documentation and one test extension only
+— no permission grant or other behavior change.
+
+- **States, beside CLAUDE.md's own team table, what actually reads
+  `model:`.** An interactive launch (`claude --agent <id>`) has the CLI
+  itself read that role's own agent-file frontmatter — this framework's
+  launcher never passes `--model` on that path, and frontmatter wins even
+  when one is given anyway. A headless launch passes it explicitly, in
+  `headlessLaunchArgs()`'s own `--agents` JSON. Both were confirmed live
+  in sprint 44, from the structured result envelope of a real launch, not
+  narration — a frontmatter string that parses is not itself evidence a
+  role runs on it.
+- **Corrects a stale example** that CLAUDE.md's own team-table change
+  orphaned: "Start each session... e.g. `claude --model opus` for Master
+  Controller, QA1, or LiveQA" implied the `--model` flag is what sets a
+  role's model, and was already wrong about which roles use `opus` (five,
+  not three). Replaced with what actually determines it: `claude --agent
+  <id>`.
+- **The role-color test now catches a near-miss, not only an exact
+  collision.** Sprint 44's test asserted six distinct resolved
+  `terminal.ansi*` values, which would not have caught the actual defect
+  that reached an operator — `orange` and `yellow` were always distinct
+  strings (`terminal.ansiBrightYellow` vs `terminal.ansiYellow`); they
+  *rendered* alike. A new test checks resolved colors against a
+  deliberately conservative, hand-maintained list of pairs known (or
+  obviously implied by the same reasoning — a color and its own bright
+  variant) to look alike, seeded with the confirmed pair. Stated plainly
+  in the test's own comment: this list is judgment, not a claim about
+  every theme, and a person actually looking at the rendered tabs (sprint
+  44's own screenshot) remains the only real coverage for a pair this
+  list doesn't name.
+- **CLAUDE.md gains one general paragraph**, credited to FMC's Master
+  Controller: taking a cost by default is not the same as choosing it.
+  `--user-said` and the publish-authorization rule are both instances of
+  it; a role's model changing under an unattended run on an upgrade is
+  named as the case that has no gate and does not get one here — stated
+  so whoever designs the next gate can ask the question deliberately,
+  rather than discovering it only after the cost has already been paid
+  by default. Introduces no mechanism and no behavior change.
+
 ## 0.2.19 — Sprint 44
 
 The operator's decision, 22 September: Dev Team 1 and Dev Team 2 now run on
