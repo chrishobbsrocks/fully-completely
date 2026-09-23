@@ -90,13 +90,13 @@ already been paid by default often enough to notice.
 Shorthand is for conversation only, never for file names or commands.
 
 **Two routes read the Model column above, and both are honored, not
-merely present** (sprint 12; re-verified live against the real launcher
-in sprint 44). An interactive launch (`claude --agent <id>`) has the CLI
+merely present, when no `--model` flag is also given** (sprint 12;
+re-verified live against the real launcher in sprint 44; the flag's own
+precedence corrected below in sprint 45's fix round, LiveQA round 1). An
+interactive launch (`claude --agent <id>`, with no `--model`) has the CLI
 itself read that role's own agent-file frontmatter directly — this
 framework's own launcher never passes a `--model` flag on this path at
-all, and frontmatter wins even when one is given anyway (measured:
-`--agent <id> --model haiku` still ran as `<id>`'s own frontmatter model,
-not haiku). A headless launch passes it explicitly instead:
+all. A headless launch passes it explicitly instead:
 `scripts/launcher/run-role.js`'s `headlessLaunchArgs()` sets `model` in
 the `--agents` JSON definition it builds for the child process. Sprint 44
 confirmed, from the structured result envelope of a real launch rather
@@ -106,14 +106,31 @@ evidence a role runs on it; this is the mechanism that makes it true, and
 a future change that stops passing it on either path is a real break in
 this property, not benign drift.
 
+**`--model`, if given by hand, now WINS over the frontmatter, not the
+other way around — measured, `claude 2.1.280`** (a real regression from
+sprint 12's own measurement at an earlier CLI version, caught live by
+LiveQA rather than assumed still true): `claude --agent qa1 --model
+haiku` actually ran as haiku, and `claude --agent pipeman --model opus`
+actually ran as opus, both confirmed from the structured `modelUsage`
+result field, 2 reps, both directions, never from narration. This CLI
+behavior has evidently changed at least once already and this framework
+does not control it — treat this precedence as a property to re-verify
+at the current CLI version, the same way sprint 21's own version-anchor
+discipline treats every other measured permission or model claim here,
+not as a settled fact.
+
 Run each role as its own dedicated Claude Code session, always, no
 exceptions, a separate terminal tab is the simplest setup: `claude --agent
-<id>` (e.g. `claude --agent qa1`) pastes the relevant agent file in as
-that session's system prompt for you, and already starts it on the model
-declared above — never pass `--model` yourself to select it, the flag
-exists but does not override the agent file's own frontmatter (see the
-paragraph just above), so naming a value there would describe something
-with no effect.
+<id>` (e.g. `claude --agent qa1`), with no `--model` flag, pastes the
+relevant agent file in as that session's system prompt for you and
+already starts it on the model declared above. **Never add `--model`
+yourself when starting a role's session** — it now overrides the agent
+file's own frontmatter rather than being overridden by it (see the
+paragraph just above), so naming a value there silently changes that
+role's actual model instead of merely failing to have an effect — exactly
+the kind of default cost "Taking a cost by default is not the same as
+choosing it" (above) names: nothing stops this at the command line, the
+only guard is not typing the flag.
 
 **Never invoke another role via the Task/Agent tool as a substitute for
 that role running in its own session, ever, regardless of which role's
