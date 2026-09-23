@@ -2,7 +2,7 @@
 id: 46
 title: "Publish from a worktree with its own HEAD, and make the commit wrappers refuse a detached one"
 epic: "Shared-checkout safety: no role's operation may silently change what another role commits onto"
-status: todo
+status: in_progress
 created: 2026-09-23T00:00:00+00:00
 ---
 

@@ -276,8 +276,8 @@
     "46": {
       "title": "Publish from a worktree with its own HEAD, and make the commit wrappers refuse a detached one",
       "epic": "Shared-checkout safety: no role's operation may silently change what another role commits onto",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-46_publish-from-a-worktree-with-its-own-head-and-make-the-commit-wrappers-refuse-a-detached-one.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-46_publish-from-a-worktree-with-its-own-head-and-make-the-commit-wrappers-refuse-a-detached-one.md"
     }
   }
 }
