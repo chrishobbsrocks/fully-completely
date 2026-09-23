@@ -1,7 +1,7 @@
 {
   "id": 44,
   "title": "Move both Dev Teams to the opus alias, and stop two role tabs reading as the same colour",
-  "phase": "qa1_audit",
+  "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "9f7401bbb79a3c91e6d2904652a4781311157c5b00573babb761f2c43b3f3e5c",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -26,11 +26,17 @@
       "actor": "qa1",
       "event": "audit",
       "detail": "PASS: QA1 gate-1 audit, sprint 44, round 1. Audited commit 3cc6b90 (on fbdaa5f, the sprint start). The sprint file was read fresh at HEAD: it was renamed and amended mid-build (60ed528 added Req 5), and this audit is against the current text. Verdict: PASS.\n\n1. Req 1: both Dev Team agent files now read `model: opus`, the bare alias. The diff across .claude/agents/ contains exactly two model: line changes (sonnet -> opus, one per Dev Team file) and one color: line change. No pinned form anywhere. dev-team-1.md's only change is the model line; dev-team-2.md's second change is Req 5a's own color line, which the mid-build amendment requires.\n2. Req 2: CLAUDE.md's table reads opus for both Dev Teams, string-for-string with the frontmatter, with Master Controller/QA1/LiveQA on opus and Pipeman on sonnet.\n3. Req 3: the findings doc (docs/sprint-44-dev-team-opus-model-findings.md) meets the \"didn't error is not evidence\" bar. Version anchor claude 2.1.280; launches go through the real run-role.js headless path rather than a hand-built argv; the verdict comes from the JSON result envelope's own modelUsage/canonicalModel, explicitly not from the model's self-report; two reps on opus both report claude-opus-5-5; and the negative control (temporarily reverting to sonnet) reports claude-sonnet-5, which is what makes the measurement discriminating rather than merely affirmative. Graded CONFIRMED, correctly for a structured, non-model-mediated signal.\n4. Req 4: no other agent file's model: line appears in the diff. Pipeman stays sonnet.\n5. Req 5:\n - 5a: dev-team-2.md declares cyan and COLOR_MAP gains cyan: 'terminal.ansiCyan'. QA1 keeps yellow; no other role's color moved.\n - 5b: orange stays in the map, with the reason stated (a downstream agent file may declare it; the map is additive, not pruned to current use).\n - 5c: the comment is accurate after the change -- it no longer claims orange is this framework's approximation for Dev Team 2, and now records what the actual defect was (ansiBrightYellow beside QA1's ansiYellow).\n - 5d: QA1 planted, as the criterion requires. Reverting dev-team-2.md to `color: yellow` (a literal duplicate of QA1's) FAILS the new six-distinct test by name. Restored, the suite passes.\n6. Req 7: QA1 planted both directions. Editing CLAUDE.md's Dev Team 1 row to sonnet FAILS the new table-vs-frontmatter test, which parses the real table rather than comparing against a hardcoded literal. Changing dev-team-1.md's frontmatter to claude-opus-5-5 also FAILS (one test). So table and frontmatter are genuinely checked against each other, in both directions.\n7. Req 6: npm view fully-completely version returns 0.2.18 and package.json is 0.2.19 -- published+1 confirmed at build time -- with a CHANGELOG entry covering Reqs 1-5.\n8. Suites at 3cc6b90 in a clean clone: node scripts/launcher_test.js ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh ALL SMOKE TESTS PASSED, exit 0.\n9. The rename leftover Dev Team flagged is exactly what it was described as: the old sprint-44 path is deleted in this commit, git ls-files shows only the current renamed path tracked, and the commit message names the cleanup. Nothing else rode along.\n\nOBSERVATION, not a finding -- but LiveQA should carry it. The Req 5d test asserts six distinct RESOLVED terminal.ansi* values, which is exactly what 5d asks for, and it catches a literal duplicate. It does not catch a near-collision: I planted dev-team-2.md back to `color: orange` and the suite PASSED, because orange resolves to terminal.ansiBrightYellow and QA1's yellow to terminal.ansiYellow -- two distinct values that are the very pair the operator reported as looking alike. This is not a defect in the build: the sprint file's own Risks section already says the test catches declared collisions while only the operator's eyes catch a rendering one, and routes that to LiveQA's live criterion. Recording it so the limit is explicit rather than assumed away, and so nobody later reads a green suite as proof the tabs are visually distinct. If a future sprint wants it mechanical, the shape would be a small set of known-confusable ANSI pairs (yellow/brightYellow being the first), not a broader rule.\n\nFOR LIVEQA. The sprint's own criteria are right, and the screenshot requirement for Req 5 is the correct call given the above. Two additions: report each Dev Team session's model from the structured envelope rather than asking the session what it thinks it is (the findings doc's own method), and include the headless path, since the sprint file asks for it and the headless launcher builds its own arguments."
+    },
+    {
+      "ts": "2026-09-23T04:46:34+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-23T04:45:07+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-23T04:46:34+00:00"
   }
 }
