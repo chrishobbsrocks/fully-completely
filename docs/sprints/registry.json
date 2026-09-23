@@ -1,5 +1,5 @@
 {
-  "next_id": 44,
+  "next_id": 45,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -259,6 +259,12 @@
       "epic": "Headless parity: a role running headless can follow the same rules as one at a keyboard",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-43_say-which-gate-role-s-confinement-is-enforced-and-which-is-instructional-and-record-the-measurement-that-settles-it--done.md"
+    },
+    "44": {
+      "title": "Move both Dev Teams to Opus 5.5, with the alias established by launching rather than assumed",
+      "epic": "Role configuration: the model each role runs on is a deliberate, verified choice",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-44_move-both-dev-teams-to-opus-5-5-with-the-alias-established-by-launching-rather-than-assumed.md"
     }
   }
 }
