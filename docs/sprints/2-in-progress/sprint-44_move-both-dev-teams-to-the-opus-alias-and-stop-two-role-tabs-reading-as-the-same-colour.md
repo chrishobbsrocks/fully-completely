@@ -53,22 +53,6 @@ moved.
    disagreeing with the frontmatter is exactly the "documentation quietly false"
    shape sprint 43 built a test against.
 
-2a. **Say, where the field is set, what actually reads it** *(added 22
-   September, after `/sprint-start`, from FMC's finding — re-read this file)*.
-   FMC discovered their own orchestrator loads a role's model config and passes
-   it to nothing, so every role there has run on the CLI default while looking
-   fully configured; they found it only by reading a launcher's source. Our own
-   paths do carry it — interactive launches `claude --agent <id>` so the CLI
-   reads the file itself (and sprint 12 measured frontmatter beating an explicit
-   `--model`), and `headlessLaunchArgs()` puts `meta.model` into the `--agents`
-   JSON, which a previous sprint verified is honoured — but nothing in the agent
-   file, the tests, or an upgrade notice says so. Add a short comment beside the
-   team table in CLAUDE.md naming both routes, so an operator setting `model:`
-   can tell it is a supported control rather than decoration, and so a future
-   change that stops passing it is visibly a break rather than a silent one.
-   **Do not add a per-file comment to all six agent files** — one statement in
-   the table's own section, where the models are already listed.
-
 3. **Confirm by launching that a Dev Team actually runs on Opus.** Launch Dev
    Team 1 for real after the change and confirm from the session's own reported
    model that it is Opus — not merely that the launch did not error. Record the
@@ -127,9 +111,6 @@ moved.
   string is a FAIL even if it would work.
 - **Req 2** — both CLAUDE.md rows read `opus`, matching the frontmatter string
   for string.
-- **Req 2a** — CLAUDE.md names both routes (the CLI reading the agent file on an
-  interactive launch, and `headlessLaunchArgs()`'s `--agents` JSON headless) in
-  one place beside the table, not scattered through six agent files.
 - **Req 3** — the findings entry exists, names the CLI version, and records what
   a real launched session reported. **"It didn't error" is not evidence and is a
   FAIL**; the session's own reported model is.
@@ -165,6 +146,19 @@ moved.
 - Per `liveqa.md` step 7: run every runnable check before recording.
 
 ### Out of Scope
+
+- **Stating what reads `model:` (was Req 2a), REMOVED 22 September.** Master
+  Controller added it after this sprint had already been built, audited by QA1,
+  and passed through `/sprint-dev-done` — the build commit predates the
+  amendment, so it was never in scope for anything that shipped as 0.2.19.
+  Failing the live test over a sentence added after the build would cost a fix
+  round and a second publish for documentation that is not urgent. It moves, with
+  the same wording, to the next sprint, together with the stale
+  `claude --model opus` example at CLAUDE.md line ~75 that this sprint's own
+  table change left behind (it names three roles as the opus ones; there are now
+  five). Recorded here rather than silently dropped, and the requirement text and
+  its acceptance criterion are both removed above rather than left describing
+  work nobody will do.
 
 - **Re-picking every role's colour.** Only the collision is in scope; four roles
   keep what they have and QA1 keeps yellow.
@@ -217,11 +211,12 @@ moved.
 - **All four `opus` roles move together whenever the alias moves.** — Stated in
   Context as a property of this choice, not a defect; pinning any role is a
   separate decision the operator was offered and declined.
-- **A future change stops passing `model:` and nobody notices.** — Req 2a makes
-  the routes explicit, and Req 3 plus LiveQA's live launches check the model a
-  session actually reports rather than what the file declares. FMC's own
-  orchestrator ran every role on a default for weeks with a validated, tested,
-  unread config; the defence is checking the session, not the file.
+- **A future change stops passing `model:` and nobody notices.** — Req 3 and
+  LiveQA's live launches check the model a session actually reports rather than
+  what the file declares. FMC's own orchestrator ran every role on a default with
+  a validated, tested, unread config; the defence is checking the session, not the
+  file. (The documentation half of this defence moved out with Req 2a — see Out
+  of Scope.)
 - **The table and the frontmatter drift apart.** — Req 3 and Req 6 check them
   against each other, the shape sprint 43 established.
 - **The opus roles have already moved without anyone choosing it.** — Req 4a
