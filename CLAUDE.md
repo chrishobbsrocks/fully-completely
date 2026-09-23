@@ -549,6 +549,28 @@ was actually audited, regardless of which path a re-file took.
 
 `/sprint-correct` (sprint 40) is an append-only correction to a role's own recorded notes, never a verdict, gate, or phase change — FMC's own finding motivated it: LiveQA recorded a sound verdict whose notes contained a factual error of LiveQA's own making, with no route to say so that a later reader of the original record would ever see. It appends exactly one new history event (`--event-index <N>` names which earlier event it corrects, by its 0-based position as `/sprint-status --verbose` prints it) and touches nothing else — no phase restriction, deliberately, because it has to remain possible after a sprint closes. Only the role that recorded the target event may correct it: the command compares the correcting actor against the target event's own recorded actor and refuses on any mismatch, naming both, and refuses outright if `CLAUDE_CODE_AGENT` isn't set at all. A role that believes the *verdict* is wrong, not just its evidence, still re-runs its own gate (`/sprint-qa1`, `/sprint-liveqa`) — this command never substitutes for that, by design. `/sprint-status --verbose` shows a correction attached to (immediately after) the event it corrects, and the plain summary names that a correction exists even without `--verbose`.
 
+**`HEAD` is one repository-wide pointer, not a per-session one** (sprint
+46, named by Pipeman from a real incident: a sprint 44 publish detached
+the primary checkout to force `npm view`'s `gitHead` to match the audited
+commit, and a commit another session made in that same window attached to
+the detached commit instead of main, reachable from no branch at all —
+recovered by luck, not by design). Master Controller, Dev Team 1, QA1,
+LiveQA, and Pipeman all normally share the one primary checkout; only Dev
+Team 2 has a standing convention (`/sprint-worktree`, above) that gives it
+its own. Any operation that moves this shared `HEAD` — even briefly, even
+with the intention of moving it back — can strand a commit another
+session makes in that window, because `git commit` always attaches to
+wherever `HEAD` currently resolves, regardless of which session's work it
+actually is. Two fixes close this for the one operation that used to need
+it: Pipeman now publishes from a dedicated worktree pinned to the audited
+commit rather than detaching this checkout at all (see
+`.claude/agents/pipeman.md`'s own publish steps) — the primary checkout's
+`HEAD` never moves for a publish, so nothing anyone else commits there
+during it is mislaid — and both commit wrappers (`mc-commit.js`, `gate-commit.js`)
+refuse outright, no override, to commit onto a detached `HEAD` at all,
+since that is never something either legitimately does and it is the
+exact shape the incident took.
+
 ## Sprint data persistence
 
 `docs/sprints/` content (sprint files, `state/`, `registry.json`) is

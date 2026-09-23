@@ -606,6 +606,30 @@ def git_commit_sha(ref: str) -> Optional[str]:
         return None
 
 
+def is_head_detached() -> bool:
+    """True only when HEAD is CONFIRMED detached (`git symbolic-ref -q
+    HEAD` fails, which is git's own native way to ask this -- succeeds,
+    printing the ref, only when HEAD is a real branch). False both when
+    HEAD is a real branch AND when the check itself can't be run for some
+    other reason (git missing, an OS-level failure) -- "can't tell" is
+    not the same as "detached," the same conservative default this file
+    already uses elsewhere for undeterminable states (see e.g.
+    isPidAlive's own precedent in role-claims.js for the identical shape
+    of judgment call). Sprint 46, Req 3: read for a WARNING only, never a
+    gate -- see main()'s own finally block, and never called from
+    anywhere that could turn a positive result into a refusal."""
+    try:
+        subprocess.run(  # nosec B603 B607
+            ["git", "symbolic-ref", "-q", "HEAD"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        )
+        return False
+    except subprocess.CalledProcessError:
+        return True
+    except (FileNotFoundError, OSError):
+        return False
+
+
 def is_commit_reachable(commit: str, ref: str = "HEAD") -> bool:
     """Sprint 28, Req 2: is `commit` actually reachable from `ref` (an
     ancestor of it, or equal to it)? A commit already unreachable at ship
@@ -4094,6 +4118,31 @@ def main() -> None:
                 "design. Commit these before handing off (CLAUDE.md's own commit rule).",
                 file=sys.stderr,
             )
+            # Sprint 46, Req 3: a warning, not a refusal, and scoped to the
+            # identical condition as the receipt above (this invocation
+            # actually wrote something) — a read-only command (status,
+            # list, gates) never reaches here at all. Writing state while
+            # HEAD is detached is not itself wrong (state files are
+            # written, not committed), but it is a strong signal that a
+            # publish may be under way in this checkout (sprint 46's own
+            # incident: Pipeman detaching the PRIMARY checkout to publish,
+            # in the same window another session committed and stranded)
+            # — worth surfacing so whoever runs the commit this state
+            # write will need checks HEAD first, not something to gate a
+            # lifecycle transition on: a refusal here would block a gate
+            # role during a legitimate publish window for no benefit
+            # (Req 3's own instruction). is_head_detached() only returns
+            # True on a confirmed detached HEAD, never on "can't tell."
+            if is_head_detached():
+                print(
+                    "NOTE: HEAD is currently detached in this checkout — a publish may be in "
+                    "progress (see CLAUDE.md's worktree-publish rule, sprint 46). Committing the "
+                    "state just written now, in this checkout, would attach to the detached commit, "
+                    "not to a branch — confirm HEAD is back on a branch before committing, or use "
+                    "the appropriate wrapper (mc-commit.js/gate-commit.js), which refuses this "
+                    "outright.",
+                    file=sys.stderr,
+                )
 
 
 if __name__ == "__main__":

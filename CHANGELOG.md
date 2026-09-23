@@ -13,6 +13,46 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.22 — Sprint 46
+
+Closes the window that stranded a Master Controller commit during sprint
+44's own publish: Pipeman detached the primary checkout to force
+`npm view`'s `gitHead` to match the audited commit, and a commit another
+session made in that same window attached to the detached commit instead
+of main — reachable from no branch at all. Recovered by luck (git's own
+"leaving 1 commit behind" warning, read and acted on by hand), not by
+design. Root cause, named by Pipeman: `HEAD` is one repository-wide
+pointer, shared by five of the six roles working in the one primary
+checkout, and any operation that moves it can strand a commit made by
+another session during that window.
+
+- **Pipeman now publishes from a dedicated worktree pinned to the exact
+  audited commit, never by detaching the primary checkout.** `git
+  worktree add --detach <path> <audited-commit>` gives that directory its
+  own `HEAD`; the primary checkout stays on its branch for the whole
+  publish window, however long an OTP round trip takes, so nothing
+  anyone else commits there is mislaid. No stash anywhere in the publish
+  path. The worktree carries no commits of its own, so there is nothing
+  to merge before removing it — Dev Team 2's own merge-first worktree
+  rule does not apply here. `.claude/agents/pipeman.md`'s publish steps
+  and CLAUDE.md now describe this technique in place of the detached-
+  checkout one.
+- **Both commit wrappers (`mc-commit.js`, `gate-commit.js`) now refuse
+  outright, before any git write, to commit onto a detached `HEAD`** —
+  the exact shape the incident took, and never something either
+  legitimately does. The refusal names the detached commit, states
+  nothing has been committed, and has no override: no flag or
+  environment variable commits anyway. A real regression test: both
+  wrappers still commit normally the moment `HEAD` is back on a branch.
+- **`sprint_lifecycle.py` now prints a warning — never a refusal — when a
+  command writes state while `HEAD` is detached**, in the same style as
+  the existing uncommitted-bookkeeping receipt: a strong signal a publish
+  may be under way in this checkout, worth surfacing to whoever commits
+  the state just written, but never a reason to block a gate role's own
+  transition during a legitimate publish window. A read-only command
+  never fires it, and firing it changes neither the command's exit code
+  nor the resulting phase.
+
 ## 0.2.21 — Sprint 45 (Corrects 0.2.20, `--model` precedence)
 
 `0.2.20`'s own new claim about `--model`/frontmatter precedence was

@@ -5159,18 +5159,57 @@ test('mc-commit.js: never reaches a remote -- a real bare remote receives nothin
   });
 });
 
-test('mc-commit.js: source-level check -- the only git subcommands this file ever passes to spawnSync are "add" and "commit", never "push", and no bare "-a"/"-A"/"--all"/"."  argv element exists anywhere', () => {
+test('mc-commit.js: source-level check -- the only git subcommands this file ever passes to spawnSync are "add", "commit", "symbolic-ref", and "rev-parse" (sprint 46\'s detached-HEAD check), never "push", and no bare "-a"/"-A"/"--all"/"."  argv element exists anywhere', () => {
   const src = fs.readFileSync(MC_COMMIT_PATH, 'utf8');
   const spawnCalls = [...src.matchAll(/spawnSync\('git',\s*\[([^\]]*)\]/g)].map((m) => m[1]);
-  assert.strictEqual(spawnCalls.length, 2, `expected exactly two spawnSync('git', [...]) call sites, found ${spawnCalls.length}`);
+  assert.strictEqual(spawnCalls.length, 4, `expected exactly four spawnSync('git', [...]) call sites, found ${spawnCalls.length}`);
   assert.ok(spawnCalls.some((argsSrc) => /'add'/.test(argsSrc)), 'expected one call to pass "add"');
   assert.ok(spawnCalls.some((argsSrc) => /'commit'/.test(argsSrc)), 'expected one call to pass "commit"');
+  assert.ok(spawnCalls.some((argsSrc) => /'symbolic-ref'/.test(argsSrc)), 'expected one call to pass "symbolic-ref" (sprint 46, Req 2: the detached-HEAD check)');
+  assert.ok(spawnCalls.some((argsSrc) => /'rev-parse'/.test(argsSrc)), 'expected one call to pass "rev-parse" (sprint 46, Req 2: naming the detached commit in the refusal message)');
   for (const argsSrc of spawnCalls) {
     assert.ok(!/'push'/.test(argsSrc), 'no spawnSync(\'git\', [...]) call may ever pass "push"');
     for (const forbidden of ["'-a'", "'-A'", "'--all'", "'.'", "'-am'"]) {
       assert.ok(!argsSrc.includes(forbidden), `no spawnSync('git', [...]) call may ever pass ${forbidden}`);
     }
   }
+});
+
+// Sprint 46, Req 2: mc-commit.js refuses outright, before any git write,
+// when the fixture's own HEAD is detached -- the exact shape that
+// stranded a real commit during sprint 44's publish. Real subprocess
+// tests, same fixture and helpers as every other mc-commit.js test above.
+test('mc-commit.js: refuses on a detached HEAD, writes nothing, and names the detached commit in the message (sprint 46, Req 2/2a)', () => {
+  withMcCommitFixture((dir) => {
+    const beforeLog = gitLog(dir);
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    const detachedCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    execFileSync('git', ['checkout', '-q', detachedCommit], { cwd: dir });
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-99.json'), '{}\n');
+    const statusBefore = execFileSync('git', ['status', '--short'], { cwd: dir, encoding: 'utf8' });
+    const result = runMcCommit(dir, ['--message', 'x', '--', 'docs/sprints/state/sprint-99.json']);
+    assert.notStrictEqual(result.status, 0, 'must refuse on a detached HEAD');
+    assert.match(result.stderr, /HEAD is detached/, 'the refusal must name the condition');
+    assert.ok(result.stderr.includes(detachedCommit.slice(0, 7)), `the refusal must name the detached commit (${detachedCommit.slice(0, 7)}); got: ${result.stderr}`);
+    assert.match(result.stderr, /Nothing has been committed/);
+    const statusAfter = execFileSync('git', ['status', '--short'], { cwd: dir, encoding: 'utf8' });
+    assert.strictEqual(statusAfter, statusBefore, 'the working tree/index must be byte-identical before and after the refused call');
+    execFileSync('git', ['checkout', '-q', branch], { cwd: dir });
+    assert.strictEqual(gitLog(dir), beforeLog, 'no commit must have landed anywhere');
+  });
+});
+
+test('mc-commit.js: still commits normally once back on a real branch, after a detached-HEAD refusal (sprint 46, Req 2)', () => {
+  withMcCommitFixture((dir) => {
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    const detachedCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    execFileSync('git', ['checkout', '-q', detachedCommit], { cwd: dir });
+    execFileSync('git', ['checkout', '-q', branch], { cwd: dir });
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json'), '{}\n');
+    const result = runMcCommit(dir, ['--message', 'legit after return', '--', 'docs/sprints/state/sprint-1.json']);
+    assert.strictEqual(result.status, 0, `expected success once back on a branch, got: ${result.stderr}`);
+    assert.match(gitLog(dir), /legit after return/);
+  });
 });
 
 // -------------------------------------------------------------------------
@@ -5412,15 +5451,51 @@ test('gate-commit.js: source-level check -- no code path reads process.env to bu
   assert.doesNotMatch(src, /process\.env/, 'gate-commit.js must never read any environment variable');
 });
 
-test('gate-commit.js: source-level check -- the only git subcommand this file ever passes to spawnSync is "commit" (never "add", "push", "-a", "-A", "--all", or ".")', () => {
+test('gate-commit.js: source-level check -- the only git subcommands this file ever passes to spawnSync are "commit", "symbolic-ref", and "rev-parse" (sprint 46\'s detached-HEAD check) (never "add", "push", "-a", "-A", "--all", or ".")', () => {
   const src = fs.readFileSync(GATE_COMMIT_PATH, 'utf8');
   const spawnCalls = [...src.matchAll(/spawnSync\('git',\s*\[([^\]]*)\]/g)].map((m) => m[1]);
-  assert.strictEqual(spawnCalls.length, 1, `expected exactly one spawnSync('git', [...]) call site, found ${spawnCalls.length}`);
-  const argsSrc = spawnCalls[0];
-  assert.ok(/'commit'/.test(argsSrc), 'expected the one call to pass "commit"');
-  for (const forbidden of ["'add'", "'push'", "'-a'", "'-A'", "'--all'", "'.'", "'-am'", "'--amend'"]) {
-    assert.ok(!argsSrc.includes(forbidden), `no spawnSync('git', [...]) call may ever pass ${forbidden}`);
+  assert.strictEqual(spawnCalls.length, 3, `expected exactly three spawnSync('git', [...]) call sites, found ${spawnCalls.length}`);
+  assert.ok(spawnCalls.some((argsSrc) => /'commit'/.test(argsSrc)), 'expected one call to pass "commit"');
+  assert.ok(spawnCalls.some((argsSrc) => /'symbolic-ref'/.test(argsSrc)), 'expected one call to pass "symbolic-ref" (sprint 46, Req 2: the detached-HEAD check)');
+  assert.ok(spawnCalls.some((argsSrc) => /'rev-parse'/.test(argsSrc)), 'expected one call to pass "rev-parse" (sprint 46, Req 2: naming the detached commit in the refusal message)');
+  for (const argsSrc of spawnCalls) {
+    for (const forbidden of ["'add'", "'push'", "'-a'", "'-A'", "'--all'", "'.'", "'-am'", "'--amend'"]) {
+      assert.ok(!argsSrc.includes(forbidden), `no spawnSync('git', [...]) call may ever pass ${forbidden}`);
+    }
   }
+});
+
+test('gate-commit.js: refuses on a detached HEAD, writes nothing, and names the detached commit in the message (sprint 46, Req 2/2a)', () => {
+  withGateCommitFixture((dir) => {
+    const before = gateCommitGitLog(dir);
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    const detachedCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    execFileSync('git', ['checkout', '-q', detachedCommit], { cwd: dir });
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json'), JSON.stringify({ changed: true }) + '\n');
+    const statusBefore = execFileSync('git', ['status', '--short'], { cwd: dir, encoding: 'utf8' });
+    const result = runGateCommit(dir, ['--message', 'x', '--', 'docs/sprints/state/sprint-1.json']);
+    assert.notStrictEqual(result.status, 0, 'must refuse on a detached HEAD');
+    assert.match(result.stderr, /HEAD is detached/, 'the refusal must name the condition');
+    assert.ok(result.stderr.includes(detachedCommit.slice(0, 7)), `the refusal must name the detached commit (${detachedCommit.slice(0, 7)}); got: ${result.stderr}`);
+    assert.match(result.stderr, /Nothing has been committed/);
+    const statusAfter = execFileSync('git', ['status', '--short'], { cwd: dir, encoding: 'utf8' });
+    assert.strictEqual(statusAfter, statusBefore, 'the working tree/index must be byte-identical before and after the refused call');
+    execFileSync('git', ['checkout', '-q', branch], { cwd: dir });
+    assert.strictEqual(gateCommitGitLog(dir), before, 'no commit must have landed anywhere');
+  });
+});
+
+test('gate-commit.js: still commits normally once back on a real branch, after a detached-HEAD refusal (sprint 46, Req 2)', () => {
+  withGateCommitFixture((dir) => {
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    const detachedCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    execFileSync('git', ['checkout', '-q', detachedCommit], { cwd: dir });
+    execFileSync('git', ['checkout', '-q', branch], { cwd: dir });
+    fs.writeFileSync(path.join(dir, 'docs', 'sprints', 'state', 'sprint-1.json'), JSON.stringify({ changed: true }) + '\n');
+    const result = runGateCommit(dir, ['--message', 'legit after return', '--', 'docs/sprints/state/sprint-1.json']);
+    assert.strictEqual(result.status, 0, `expected success once back on a branch, got: ${result.stderr}`);
+    assert.match(gateCommitGitLog(dir), /legit after return/);
+  });
 });
 
 if (failures > 0) {

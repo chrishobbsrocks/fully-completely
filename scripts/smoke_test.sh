@@ -2693,4 +2693,40 @@ assert len(final['history']) == len(after_one_correction['history']) + 1, \
     f\"a refused correction attempt must never append anything -- expected {len(after_one_correction['history']) + 1} events, got {len(final['history'])}\"
 "
 
+echo "== sprint 46, Req 3: a command that writes state while HEAD is detached prints a NOTE naming it, and still succeeds -- a warning, not a gate =="
+SPRINT_DETACHED=$(new_sprint "Detached HEAD sprint")
+DETACHED_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+# `--detach` with NO target ref -- stays at the exact current commit,
+# only changes whether HEAD is a branch pointer or a raw commit. This
+# sandbox has been accumulating uncommitted sprint bookkeeping since its
+# own baseline commit for the whole rest of this file (by design --
+# sprint_lifecycle.py never commits anything itself), so checking out any
+# OTHER specific commit here would conflict with that real, expected
+# dirt; detaching in place needs to discard nothing.
+git checkout -q --detach
+# Plain, not `cmd && fail ... || true` -- this command is expected to
+# SUCCEED (set -e's own default behaviour is the exit-code assertion
+# here: if the NOTE below ever changed the exit code, this line would
+# abort the whole suite instead of reaching the checks that follow).
+DETACHED_OUT=$($SCRIPT start "$SPRINT_DETACHED" 2>&1)
+echo "$DETACHED_OUT" | grep -q "NOTE: HEAD is currently detached" || \
+  fail "expected the detached-HEAD NOTE to fire while state was written under a detached HEAD -- output: $DETACHED_OUT"
+git checkout -q "$DETACHED_BRANCH"
+DETACHED_PHASE=$(python3 -c "import json; print(json.load(open('docs/sprints/state/sprint-${SPRINT_DETACHED}.json'))['phase'])")
+[ "$DETACHED_PHASE" = "dev_build" ] || \
+  fail "expected phase dev_build after start even with the detached-HEAD NOTE firing -- got '$DETACHED_PHASE'"
+
+echo "== sprint 46, Req 3: the identical command, HEAD NOT detached, prints no such NOTE =="
+SPRINT_NOT_DETACHED=$(new_sprint "Not detached sprint")
+NOT_DETACHED_OUT=$($SCRIPT start "$SPRINT_NOT_DETACHED" 2>&1)
+echo "$NOT_DETACHED_OUT" | grep -q "NOTE: HEAD is currently detached" && \
+  fail "the detached-HEAD NOTE must not fire when HEAD is on a real branch -- output: $NOT_DETACHED_OUT" || true
+
+echo "== sprint 46, Req 3: a genuinely READ-ONLY command (status) never fires the NOTE even while detached, since it writes nothing =="
+git checkout -q --detach
+READONLY_DETACHED_OUT=$($SCRIPT status "$SPRINT_DETACHED" 2>&1)
+echo "$READONLY_DETACHED_OUT" | grep -q "NOTE: HEAD is currently detached" && \
+  fail "a read-only command must never fire the detached-HEAD NOTE -- it writes nothing, so there is nothing to warn about -- output: $READONLY_DETACHED_OUT" || true
+git checkout -q "$DETACHED_BRANCH"
+
 echo "ALL SMOKE TESTS PASSED"

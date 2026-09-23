@@ -381,7 +381,42 @@ function resolveOwnedPath(p) {
   return null;
 }
 
+// Sprint 46, Req 2: refuses outright, before any git write, if this
+// checkout's HEAD is detached right now -- committing onto a detached
+// HEAD is never something this wrapper's own caller (Master Controller)
+// legitimately does, and it is the exact shape that stranded a real
+// commit during sprint 44's publish: Pipeman detached the PRIMARY
+// checkout to publish (so npm would stamp `gitHead` with the audited
+// commit rather than main's drifted tip), and a commit made by another
+// session in that same window attached to the detached commit instead of
+// main -- reachable from no branch at all. `git symbolic-ref -q HEAD`
+// succeeds (prints the ref, e.g. refs/heads/main) only when HEAD is a
+// real branch; it exits non-zero with nothing on stdout when HEAD is
+// detached -- the standard, git-native way to ask this question, no
+// string-parsing of `git status` output required. Req 2b: no flag or
+// environment variable overrides this -- if a legitimate detached-HEAD
+// commit case ever appears, that is a finding for Master Controller, not
+// a switch here. Sprint 46, Req 1, is the actual fix (Pipeman now
+// publishes from a dedicated worktree, never by detaching this checkout);
+// this is the backstop for the paths this framework owns, not the fix
+// for every way a commit can be made.
+function checkNotDetachedHead() {
+  const symbolicResult = spawnSync('git', ['symbolic-ref', '-q', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }); // nosec B603 B607
+  if (symbolicResult.status === 0) return; // HEAD is a real branch
+  const headResult = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }); // nosec B603 B607
+  const commit = headResult.status === 0 ? headResult.stdout.trim() : '(unknown commit)';
+  die(
+    `HEAD is detached, currently at ${commit} -- refusing to commit. Nothing has been committed. ` +
+    'A publish may be in progress in this checkout (see CLAUDE.md\'s worktree-publish rule, sprint 46) ' +
+    '-- wait for HEAD to return to a branch, then retry.'
+  );
+}
+
 function main() {
+  // Before anything else, including argument parsing -- the cheapest
+  // possible fail-fast, and it means a detached-HEAD refusal is never
+  // preceded by any other validation work.
+  checkNotDetachedHead();
   const opts = parseArgs(process.argv.slice(2));
 
   let message = opts.message;
