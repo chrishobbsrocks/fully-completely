@@ -1,7 +1,7 @@
 {
   "id": 45,
   "title": "Say what reads a role's model, stop the colour test passing on a near-miss, and name the rule the publish and close gates share",
-  "phase": "complete_ready",
+  "phase": "complete",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "3accd52f33b72a852ea1adffcd9a82b7451cacf3757e0c1a88ccb841ae3bd3b4",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -32,7 +32,7 @@
   "audit_rounds": 1,
   "live_test_rounds": 2,
   "started": "2026-09-23T14:04:56+00:00",
-  "completed": null,
+  "completed": "2026-09-23T22:46:02+00:00",
   "history": [
     {
       "ts": "2026-09-23T14:04:56+00:00",
@@ -105,11 +105,17 @@
       "actor": "liveqa",
       "event": "sprint_file_drift_since_audit",
       "detail": "NOTE: sprint 45's file has changed since QA1's PASS (audited hash 3accd52f33b7..., current 26e9b364e66a...). Recorded, not refused \u2014 see this function's own comment for why. If this sprint's own acceptance criteria changed for a real reason, that's worth a fresh /sprint-qa1 look once the live-test loop settles; if it was a cosmetic edit, this note is the whole record of it."
+    },
+    {
+      "ts": "2026-09-23T22:46:02+00:00",
+      "actor": "dev-team",
+      "event": "sprint_closed",
+      "detail": "user_said=/sprint-complete 45"
     }
   ],
   "last_claim": {
-    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
-    "claude_agent": "liveqa",
-    "ts": "2026-09-23T22:30:35+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-23T22:46:02+00:00"
   }
 }
