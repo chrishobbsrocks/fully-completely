@@ -1,5 +1,5 @@
 {
-  "next_id": 45,
+  "next_id": 46,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -266,6 +266,12 @@
       "status": "done",
       "file": "docs/sprints/3-done/sprint-44_move-both-dev-teams-to-the-opus-alias-and-stop-two-role-tabs-reading-as-the-same-colour--done.md",
       "original_title": "Move both Dev Teams to Opus 5.5, with the alias established by launching rather than assumed"
+    },
+    "45": {
+      "title": "Say what reads a role's model, stop the colour test passing on a near-miss, and name the rule the publish and close gates share",
+      "epic": "Role configuration: the model each role runs on is a deliberate, verified choice",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-45_say-what-reads-a-role-s-model-stop-the-colour-test-passing-on-a-near-miss-and-name-the-rule-the-publish-and-close-gates-share.md"
     }
   }
 }
