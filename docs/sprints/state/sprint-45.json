@@ -6,7 +6,7 @@
   "qa1_audit_file_hash": "3accd52f33b72a852ea1adffcd9a82b7451cacf3757e0c1a88ccb841ae3bd3b4",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "15830331fff6d45b7ab7aa7bdc36ee36b7173e091aa7b2eda57ec76918ccbd91",
-  "last_shipped_commit": "0426b018ee192cde6da79d818fe77dade876f998",
+  "last_shipped_commit": "71ac0165b21df520eb0043a2a16c9220a5d8ab05",
   "groundtruth_result": "FAIL",
   "live_loop_audit_trees": [
     {
@@ -87,11 +87,17 @@
       "actor": "qa1",
       "event": "live_loop_audit",
       "detail": "PASS: QA1 live-loop audit, sprint 45, commit 71ac016. Verdict: PASS for reship of this exact tree.\n\nRECORDING NOTE, so the history reads correctly: this sprint is in liveqa_live, so /sprint-qa1 records a live-loop audit rather than a gate-1 verdict. I first ran it without --commit, which recorded a PASS tied to no artifact and therefore satisfying /sprint-reship's tree gate for nothing. That record stands (the mechanism is append-only, by design) but should be read as superseded by this one, which carries the commit. My error, not Dev Team's, and the content of both is the same audit.\n\nSCOPE. The delta f4b5985..71ac016 outside bookkeeping: CHANGELOG.md, README.md, docs/sprint-44-dev-team-opus-model-findings.md, scripts/launcher/agents.js, scripts/launcher/run-role.js. The sprint file gained Req 7 mid-loop (600ccb4) after my previous live-loop audit, and this audit is against that current text.\n\n1. Req 7a: all three shipped files now state what was actually measured, and keep the half that is still true.\n - agents.js and run-role.js keep the real design reasoning (this launcher never passes --model, so frontmatter is the single place a model is set) and replace only the withdrawn half with the sprint 45 finding, anchored to claude 2.1.280 and framed as a CLI-version property rather than a settled fact. Both say plainly that an earlier version of the same comment claimed the opposite, measured at an earlier CLI version.\n - README keeps \"this launcher never passes --model on this path \u2014 frontmatter stays the single place a model is set\" and carries the corrected precedence in CLAUDE.md's own wording rather than a paraphrase.\n - Behaviour unchanged, checked not assumed: the diff of agents.js and run-role.js contains no non-comment lines at all, and a grep for a '--model' argv anywhere under scripts/ (excluding tests) returns nothing.\n2. Req 7b: the findings doc carries an appended, dated correction naming exactly what the table varied, what was therefore never tested, and withdrawing only the generalizing sentence. Table and measurement untouched, and the note says so, citing /sprint-correct's append-don't-rewrite shape.\n - Observation, not a finding: a reader who stops at the closing paragraph meets the withdrawn sentence before the correction two sections later. Append-only is what Req 7b requires, so I am not asking for an inline edit; a one-line \"corrected below, 23 September\" pointer would cost nothing if a future sprint wants it.\n3. Req 7c: I ran my own sweep rather than trusting the stated one, as the criterion requires. Case-insensitive grep across every *.md/*.js/*.py/*.sh/*.json outside node_modules/.git for the withdrawn claim's phrasings returns only: the corrected statements in CLAUDE.md, README.md, agents.js, run-role.js (all the new direction); CHANGELOG line 20 quoting what 0.2.20 got wrong inside the 0.2.21 entry, and line 69, the 0.2.20 entry left as history; the findings doc's original paragraph plus its own appended correction; and sprint state/sprint files, which are audit trail. Nothing shipped still asserts the withdrawn claim. run-role.js line 51's \"wins over --sprint\" is about --prompt-file precedence, unrelated.\n4. Req 8: package.json is 0.2.21 against published 0.2.20. Revising the unpublished 0.2.21 entry in place is correct; the published 0.2.20 entry stays as history.\n5. Req 9: both suites at 71ac016 in a clean clone. node scripts/launcher_test.js ALL LAUNCHER TESTS PASSED, exit 0. bash scripts/smoke_test.sh ALL SMOKE TESTS PASSED, exit 0.\n6. Cumulative sprint scope matches the amended criteria: CLAUDE.md, README.md, the two launcher files, the findings doc, launcher_test.js, package.json, CHANGELOG.md, the baseline table (Pipeman's 0.2.20 regen) and docs/sprints bookkeeping.\n7. The mid-loop amendment records the operator's decision, the date, the reasoning for allowing it inside an active fix loop, and the distinction from sprint 44's withdrawn Req 2a. Recording that reasoning where the next reader meets it is the right handling.\n\nFOR LIVEQA. Req 7's own live criterion is the right check: grep the installed tree and the published tarball for the withdrawn claim, and confirm the installed agents.js, run-role.js and README agree with the installed CLAUDE.md. Add the two-probe measurement (with and without --model) at whatever CLI version is current at gate time and record that version; if the precedence has moved again, that is new evidence for the version-anchored paragraphs, not a pass or fail on its own. | commit=71ac0165b21df520eb0043a2a16c9220a5d8ab05"
+    },
+    {
+      "ts": "2026-09-23T21:01:30+00:00",
+      "actor": "pipeman",
+      "event": "reshipped",
+      "detail": "commit=71ac0165b21df520eb0043a2a16c9220a5d8ab05 | ci=green: 1 CI run(s) for 71ac0165b21df520eb0043a2a16c9220a5d8ab05 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-23T20:50:56+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-23T21:01:30+00:00"
   }
 }
