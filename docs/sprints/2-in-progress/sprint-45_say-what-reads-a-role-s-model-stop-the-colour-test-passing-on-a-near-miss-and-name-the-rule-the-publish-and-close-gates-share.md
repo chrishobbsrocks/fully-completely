@@ -2,7 +2,7 @@
 id: 45
 title: "Say what reads a role's model, stop the colour test passing on a near-miss, and name the rule the publish and close gates share"
 epic: "Role configuration: the model each role runs on is a deliberate, verified choice"
-status: todo
+status: in_progress
 created: 2026-09-23T00:00:00+00:00
 ---
 
