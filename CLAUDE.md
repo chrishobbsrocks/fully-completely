@@ -562,7 +562,11 @@ with the intention of moving it back — can strand a commit another
 session makes in that window, because `git commit` always attaches to
 wherever `HEAD` currently resolves, regardless of which session's work it
 actually is. Two fixes close this for the one operation that used to need
-it: Pipeman now publishes from a throwaway `git clone` pinned to the
+it — **the publish-isolation rule**, the name this project's own code
+comments now use to point here without naming a sprint number that will
+outlive what it once described (sprint 47, after three such pointers
+went stale mid-flight when the technique changed underneath them):
+Pipeman now publishes from a throwaway `git clone` pinned to the
 audited commit rather than detaching this checkout at all (see
 `.claude/agents/pipeman.md`'s own publish steps) — the primary checkout's
 `HEAD` never moves for a publish, so nothing anyone else commits there

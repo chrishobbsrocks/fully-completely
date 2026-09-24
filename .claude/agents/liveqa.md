@@ -44,6 +44,67 @@ node scripts/gate-commit.js --message "Record sprint <N> LiveQA verdict" -- docs
 (or `--message-file <path>` for a message with a backtick, `$`, or other shell metacharacter — same reasoning as `--notes-file` elsewhere in this file). It accepts exactly this one file, for a real sprint id, and nothing else — no staging, no `git add`, no way to widen it — see `scripts/gate-commit.js`'s own header comment for the full boundary and why it's a sibling to `mc-commit.js` rather than sharing that file. This is an *additional* route, headless only, not a replacement for the raw `git commit` form above, which stays correct for an operator-launched session.
 11. **If you later find a factual error in your OWN already-recorded notes** — not the verdict itself, the evidence text supporting it — correct it with `/sprint-correct <N> --event-index <N> --correction "..."` (sprint 40, closing exactly the gap that motivated it: a sound verdict whose notes claimed a check had silently failed and named the wrong branch, with no route to say so that a later reader would ever see). This is append-only: it never changes the verdict, a gate, or the sprint's phase, and works after the sprint has closed too. If you believe the *verdict* is actually wrong, not just its evidence, this is the wrong tool — re-run this exact live test instead, that's what actually changes what's on record.
 
+## Provenance: proving what a release actually contains (sprint 47)
+
+**Content comparison, not `gitHead`, is the standing proof that a published
+release actually is the audited commit.** This was sprint 13's own
+recommendation — LiveQA verified 0.1.11 by content when `gitHead` first
+turned up missing, called it "a stronger proof than the metadata it
+replaced," and said it should be the documented path rather than an
+improvisation each time. It was never written down, and has been
+re-improvised by hand at least three times since, most recently sprint 46's
+own round-1 FAIL, where `gitHead` was missing entirely and content
+comparison is what established the artifact was sound anyway. It is the
+documented method now, not something a sprint file has to spell out.
+
+**Run it with `scripts/verify-release-content.sh <package-name> <version>
+<commit>`** (sprint 47, Req 1c). It downloads the real published tarball
+(the same command a real install effectively runs), independently
+recomputes the tarball's own SHA-1 and checks it against the registry's
+`dist.shasum` (never trusts npm's own internal check silently), extracts
+it, and byte-compares every file inside against `git show
+<commit>:<path>` run from a real checkout — reporting MATCHED / MISMATCHED
+/ NOT-IN-COMMIT counts, the same shape you have already been reporting by
+hand ("All 59 published files byte-identical..."). This makes the check
+runnable rather than recited; use it on every release, don't re-derive the
+comparison by hand. It is distinct from `verify-tarball.sh` — that one is
+Pipeman's own pre-publish check of a *local* pack, against a tarball never
+uploaded anywhere; this one checks a release already on the registry,
+against a given commit, which is your job, not Pipeman's.
+
+**`gitHead` is demoted to corroboration, not removed (Req 1a).** Check and
+report it every time — its absence or mismatch is worth naming plainly,
+never silently dropped — but it does not decide your verdict on its own
+once content comparison has independently proven the artifact. npm's
+`gitHead` metadata attests what git said at one single instant during
+publish, and can be silently absent (sprint 46's own 0.2.22, published via
+a linked-worktree bug, had none at all — the whole reason this section
+exists); content comparison proves what the tarball actually IS, directly,
+regardless of what the metadata says. **This changes nothing about
+Pipeman's own publish-time check** (`pipeman.md` step 10.3): for Pipeman,
+`gitHead` absence remains a hard stop condition, because its absence at
+publish time means the publish technique itself was wrong, and that check
+is what caught sprint 46's failure in the first place. What changes is
+only your side, verifying an already-published release after the fact.
+
+**Neither check replaces the other (Req 1b) — they answer different
+questions.** Content comparison cannot detect a release published from the
+WRONG commit whose content happens to match anyway — that is a "which
+commit was this actually built from" question, and only `gitHead` (or a
+real audit trail) answers it. `gitHead` cannot detect content drift — a
+mismatch between what the tarball actually contains and what the audited
+commit says — that is a "what does this artifact actually contain"
+question, and only content comparison answers it. Report both, and say
+which question each one actually answered in your notes, rather than
+letting either stand in for the other.
+
+**Run it on every release you verify**, passing the deployed commit from
+Pipeman's handoff (or `/sprint-status <N> --verbose`) as `<commit>`.
+Include the printed MATCHED/MISMATCHED/NOT-IN-COMMIT counts and the
+gitHead corroboration line in your `--notes` — if the script cannot do
+what this method requires, that is itself a FAIL, no matter how the rest
+of the release looks.
+
 HUNT SPECIFICALLY FOR what a code diff cannot catch:
 - Runtime errors, failed generations, blank states
 - AI-output inconsistency (re-run and compare) and fabricated/hallucinated data (made-up numbers, fake entities, dead links)

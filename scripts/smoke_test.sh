@@ -2729,4 +2729,158 @@ echo "$READONLY_DETACHED_OUT" | grep -q "NOTE: HEAD is currently detached" && \
   fail "a read-only command must never fire the detached-HEAD NOTE -- it writes nothing, so there is nothing to warn about -- output: $READONLY_DETACHED_OUT" || true
 git checkout -q "$DETACHED_BRANCH"
 
+echo "== sprint 47, Req 5: verify-release-content.sh's own three behaviours, against a throwaway sandbox git repo (never this repo's own real history) =="
+
+# A dedicated nested repo, separate from $SANDBOX's own sprint-lifecycle
+# state -- this script needs a real commit with real tracked files to diff
+# a "published tarball" against, and planting that inside this repo's own
+# actual git history would be exactly the kind of destructive-sandbox
+# mistake this file's own header (above) warns against.
+VRC_REPO="$SANDBOX/.vrc-repo"
+mkdir -p "$VRC_REPO/sub"
+(
+  cd "$VRC_REPO"
+  git init -q
+  git config user.email "vrc-test@example.com"
+  git config user.name "VRC Test"
+  echo "hello from file one" > file-one.txt
+  echo "hello from file two" > sub/file-two.txt
+  git add -A
+  git commit -q -m "vrc baseline"
+)
+VRC_COMMIT="$(cd "$VRC_REPO" && git rev-parse HEAD)"
+
+# A fake `npm`, controlled entirely by env vars set per invocation below --
+# same shape as this file's own $FAKE_GH_DIR precedent (withFakeClaude /
+# fake gh): a real executable prepended to PATH only for the specific
+# command line under test, never left in place for anything else in this
+# file. Keeps this suite offline and deterministic; the real script has
+# already been verified live against the real npm registry (sprint 47
+# build notes) -- this is the permanent regression coverage for its own
+# logic, not a substitute for that live verification.
+FAKE_NPM_DIR="$SANDBOX/.fake-npm"
+mkdir -p "$FAKE_NPM_DIR"
+cat > "$FAKE_NPM_DIR/npm" <<'FAKENPM'
+#!/usr/bin/env bash
+case "$1" in
+  view)
+    field="$3"
+    case "$field" in
+      gitHead)
+        if [ -n "${FAKE_NPM_GITHEAD:-}" ]; then echo "$FAKE_NPM_GITHEAD"; fi
+        # absent -> print nothing, matching real npm's own behaviour for a
+        # version published with no gitHead recorded (sprint 46's 0.2.22)
+        ;;
+      dist.shasum)
+        echo "${FAKE_NPM_SHASUM:?FAKE_NPM_SHASUM must be set by the test}"
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+    ;;
+  pack)
+    : "${FAKE_NPM_TARBALL:?FAKE_NPM_TARBALL must be set by the test}"
+    cp "$FAKE_NPM_TARBALL" "./$(basename "$FAKE_NPM_TARBALL")"
+    echo "$(basename "$FAKE_NPM_TARBALL")"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+FAKENPM
+chmod +x "$FAKE_NPM_DIR/npm"
+
+# A "published tarball" whose package/ directory mirrors the commit's own
+# tracked files exactly -- the matching case.
+VRC_MATCH_STAGE="$SANDBOX/.vrc-match-stage"
+mkdir -p "$VRC_MATCH_STAGE/package/sub"
+cp "$VRC_REPO/file-one.txt" "$VRC_MATCH_STAGE/package/"
+cp "$VRC_REPO/sub/file-two.txt" "$VRC_MATCH_STAGE/package/sub/"
+VRC_MATCH_TARBALL="$SANDBOX/.vrc-match.tgz"
+tar -czf "$VRC_MATCH_TARBALL" -C "$VRC_MATCH_STAGE" package
+VRC_MATCH_SHASUM="$(shasum "$VRC_MATCH_TARBALL" | awk '{print $1}')"
+
+echo "== Req 5: a matching release passes, gitHead present and matching =="
+VRC_OUT_MATCH=$(
+  PATH="$FAKE_NPM_DIR:$PATH" \
+  VERIFY_RELEASE_CONTENT_REPO_ROOT="$VRC_REPO" \
+  FAKE_NPM_TARBALL="$VRC_MATCH_TARBALL" \
+  FAKE_NPM_SHASUM="$VRC_MATCH_SHASUM" \
+  FAKE_NPM_GITHEAD="$VRC_COMMIT" \
+  bash "$REPO_ROOT/scripts/verify-release-content.sh" fake-pkg 1.0.0 "$VRC_COMMIT" 2>&1
+) || fail "expected the matching-content run to PASS -- output: $VRC_OUT_MATCH"
+echo "$VRC_OUT_MATCH" | grep -q "RELEASE CONTENT VERIFICATION PASSED" || \
+  fail "matching run did not report PASSED -- output: $VRC_OUT_MATCH"
+echo "$VRC_OUT_MATCH" | grep -q "present and matches: $VRC_COMMIT" || \
+  fail "matching run's gitHead line did not report a match -- output: $VRC_OUT_MATCH"
+echo "$VRC_OUT_MATCH" | grep -q "^MATCHED: 2$" || \
+  fail "matching run should report both files matched -- output: $VRC_OUT_MATCH"
+echo "$VRC_OUT_MATCH" | grep -q "^MISMATCHED: 0$" || \
+  fail "matching run should report zero mismatches -- output: $VRC_OUT_MATCH"
+
+echo "== Req 5 / Req 1a: a missing gitHead is reported plainly but does NOT fail the content check =="
+VRC_OUT_NOHEAD=$(
+  PATH="$FAKE_NPM_DIR:$PATH" \
+  VERIFY_RELEASE_CONTENT_REPO_ROOT="$VRC_REPO" \
+  FAKE_NPM_TARBALL="$VRC_MATCH_TARBALL" \
+  FAKE_NPM_SHASUM="$VRC_MATCH_SHASUM" \
+  bash "$REPO_ROOT/scripts/verify-release-content.sh" fake-pkg 1.0.0 "$VRC_COMMIT" 2>&1
+) || fail "a missing gitHead alone must never fail this script -- output: $VRC_OUT_NOHEAD"
+echo "$VRC_OUT_NOHEAD" | grep -q "ABSENT" || \
+  fail "expected the ABSENT gitHead line -- output: $VRC_OUT_NOHEAD"
+echo "$VRC_OUT_NOHEAD" | grep -q "RELEASE CONTENT VERIFICATION PASSED" || \
+  fail "content comparison must still pass with gitHead absent -- output: $VRC_OUT_NOHEAD"
+
+# A planted mismatch: one file's content in the "published tarball" now
+# differs from what the commit actually has at that path -- the exact
+# shape sprint 47's own build-time negative control exercised live
+# against a real registry (fully-completely 0.2.23 vs. a deliberately
+# wrong commit), now made a permanent regression test.
+VRC_MISMATCH_STAGE="$SANDBOX/.vrc-mismatch-stage"
+mkdir -p "$VRC_MISMATCH_STAGE/package/sub"
+cp "$VRC_REPO/file-one.txt" "$VRC_MISMATCH_STAGE/package/"
+echo "this content was never committed" > "$VRC_MISMATCH_STAGE/package/sub/file-two.txt"
+VRC_MISMATCH_TARBALL="$SANDBOX/.vrc-mismatch.tgz"
+tar -czf "$VRC_MISMATCH_TARBALL" -C "$VRC_MISMATCH_STAGE" package
+VRC_MISMATCH_SHASUM="$(shasum "$VRC_MISMATCH_TARBALL" | awk '{print $1}')"
+
+echo "== Req 5: a planted content mismatch fails, real (non-piped) exit code 1, names the mismatched file =="
+set +e
+VRC_OUT_MISMATCH=$(
+  PATH="$FAKE_NPM_DIR:$PATH" \
+  VERIFY_RELEASE_CONTENT_REPO_ROOT="$VRC_REPO" \
+  FAKE_NPM_TARBALL="$VRC_MISMATCH_TARBALL" \
+  FAKE_NPM_SHASUM="$VRC_MISMATCH_SHASUM" \
+  FAKE_NPM_GITHEAD="$VRC_COMMIT" \
+  bash "$REPO_ROOT/scripts/verify-release-content.sh" fake-pkg 1.0.0 "$VRC_COMMIT" 2>&1
+)
+VRC_MISMATCH_EXIT=$?
+set -e
+[ "$VRC_MISMATCH_EXIT" -eq 1 ] || \
+  fail "expected exit code 1 on a real content mismatch, got $VRC_MISMATCH_EXIT -- output: $VRC_OUT_MISMATCH"
+echo "$VRC_OUT_MISMATCH" | grep -q "RELEASE CONTENT VERIFICATION FAILED" || \
+  fail "mismatch run did not report FAILED -- output: $VRC_OUT_MISMATCH"
+echo "$VRC_OUT_MISMATCH" | grep -q "MISMATCHED: sub/file-two.txt" || \
+  fail "mismatch run did not name the actual mismatched file -- output: $VRC_OUT_MISMATCH"
+echo "$VRC_OUT_MISMATCH" | grep -q "^MISMATCHED: 1$" || \
+  fail "mismatch run should report exactly one mismatch -- output: $VRC_OUT_MISMATCH"
+
+# Req 5's other named test: no shipped file references a rule by a sprint
+# number whose content no longer matches. This is NOT automated as a
+# content-diff check here -- there is no mechanical way to know, from a
+# sprint number alone, what content it "should" still match without
+# re-deriving the same judgment call Req 2b's own sweep already made by
+# hand (is this a navigational pointer or a historical attribution?).
+# What IS automated, permanently, below: no shipped file names the one
+# rule this sprint knows went stale (sprint 46's worktree-publish
+# technique) by its old sprint-number form ever again -- a regression
+# test for the exact defect found, not a general staleness prover.
+echo "== sprint 47, Req 5: no shipped file regresses to the old, now-stale 'sprint 46' pointer form for the publish-isolation rule =="
+VRC_STALE_GREP=$(grep -rn "worktree-publish rule, sprint 46" \
+  --include="*.js" --include="*.py" --include="*.md" \
+  "$REPO_ROOT/.claude" "$REPO_ROOT/scripts" "$REPO_ROOT/CLAUDE.md" 2>/dev/null || true)
+[ -z "$VRC_STALE_GREP" ] || \
+  fail "found a regression to the old stale 'worktree-publish rule, sprint 46' pointer -- $VRC_STALE_GREP"
+
 echo "ALL SMOKE TESTS PASSED"

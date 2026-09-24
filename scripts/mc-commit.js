@@ -407,8 +407,9 @@ function checkNotDetachedHead() {
   const commit = headResult.status === 0 ? headResult.stdout.trim() : '(unknown commit)';
   die(
     `HEAD is detached, currently at ${commit} -- refusing to commit. Nothing has been committed. ` +
-    'A publish may be in progress in this checkout (see CLAUDE.md\'s worktree-publish rule, sprint 46) ' +
-    '-- wait for HEAD to return to a branch, then retry.'
+    'A publish may be in progress in this checkout (see CLAUDE.md\'s publish-isolation rule: Pipeman ' +
+    'publishes from a throwaway clone, never from this checkout) -- wait for HEAD to return to a branch, ' +
+    'then retry.'
   );
 }
 

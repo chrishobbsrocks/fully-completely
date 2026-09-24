@@ -4136,7 +4136,8 @@ def main() -> None:
             if is_head_detached():
                 print(
                     "NOTE: HEAD is currently detached in this checkout — a publish may be in "
-                    "progress (see CLAUDE.md's worktree-publish rule, sprint 46). Committing the "
+                    "progress (see CLAUDE.md's publish-isolation rule: Pipeman publishes from a "
+                    "throwaway clone, never from this checkout). Committing the "
                     "state just written now, in this checkout, would attach to the detached commit, "
                     "not to a branch — confirm HEAD is back on a branch before committing, or use "
                     "the appropriate wrapper (mc-commit.js/gate-commit.js), which refuses this "

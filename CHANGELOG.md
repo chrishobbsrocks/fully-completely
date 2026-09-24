@@ -13,6 +13,48 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.24 — Sprint 47 (content as the documented proof of what shipped)
+
+Three findings, all the same shape: a pointer that outlived what it
+pointed at. Sprint 13 recommended, and never documented, that content
+comparison — not `gitHead` — is the real proof of what a published release
+contains; three shipped files pointed readers at "CLAUDE.md's
+worktree-publish rule, sprint 46" after sprint 46's own fix round renamed
+the technique out from under them; and Master Controller's own planning
+had no step telling it to check this repository's history before calling
+something unverified, the gap that cost sprint 46 a wasted release.
+
+- **Content comparison is now the documented provenance method, in
+  `.claude/agents/liveqa.md`'s own new "Provenance" section, with a
+  runnable script.** `scripts/verify-release-content.sh <package> <version>
+  <commit>` downloads the real published tarball, checks it against the
+  registry's `dist.shasum`, and byte-compares every file against `git show
+  <commit>:<path>`, reporting matched/mismatched/not-in-commit counts —
+  the same comparison LiveQA had been improvising by hand at least three
+  times. `gitHead` is demoted to corroboration on LiveQA's side only:
+  Pipeman's own publish-time `gitHead` check (`pipeman.md` step 10.3) is
+  unchanged and remains a hard stop condition, since its absence is what
+  caught sprint 46's own failure in the first place.
+- **The three stale "sprint 46" pointers in `gate-commit.js`,
+  `mc-commit.js`, and `sprint_lifecycle.py` now name the rule by what it
+  is** ("CLAUDE.md's publish-isolation rule: publish from a clone, never
+  from this checkout") instead of by a sprint number whose own content
+  changed underneath it. A repo-wide sweep for the same shape of stale
+  reference found no other instance — see sprint 47's own QA1 handoff for
+  the exact grep coverage.
+- **`master-controller.md` gains a planning step**: before writing a
+  FLAGGED ASSUMPTION or calling a behaviour unverified, search sprint
+  files (including closed ones), `docs/` findings, the CHANGELOG, and
+  annotated git tags first — the last of which is where `0.1.11`'s root
+  cause lived, unread, for twenty days. Planning discipline only, no
+  command gained a mechanical gate over it.
+- New regression tests for `verify-release-content.sh`'s own three
+  behaviours (a matching release passes; a planted mismatch fails, real
+  exit code 1; a missing `gitHead` is reported without failing the content
+  check) and for the specific stale-pointer regression this sprint fixed,
+  all against a throwaway sandbox git repo and a faked `npm`, never this
+  repository's own real history or registry.
+
 ## 0.2.23 — Sprint 46 fix round (Corrects 0.2.22, publish from a clone, not a worktree)
 
 `0.2.22`'s own new publish technique — a linked worktree pinned to the
