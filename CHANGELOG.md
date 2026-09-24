@@ -13,6 +13,35 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.23 — Sprint 46 fix round (Corrects 0.2.22, publish from a clone, not a worktree)
+
+`0.2.22`'s own new publish technique — a linked worktree pinned to the
+audited commit — measurably dropped `gitHead` from the published release
+entirely: `npm publish` reads `.git/HEAD` as a plain file, and a linked
+worktree's own `.git` is a pointer file elsewhere, not that file, so the
+read fails silently. Caught by LiveQA's live test of `0.2.22` itself
+(`npm view fully-completely@0.2.22 gitHead` is absent), and traced to a
+cause this project had already found and fixed once before: the `v0.1.11`
+tag annotation records the identical root cause, and `v0.1.12`/`v0.1.14`
+record the switch to a real clone as the fix — knowledge that survived in
+tag annotations nobody reads and was lost by the time `0.2.22` reached
+for a worktree again, four months later.
+
+- **Corrects (LiveQA, round 1):** Pipeman now publishes from a throwaway
+  `git clone` of the checkout, pinned to the exact audited commit,
+  instead of a linked worktree or a detached primary checkout — both of
+  which are now removed from `pipeman.md`'s and CLAUDE.md's own
+  documentation entirely, not offered as alternatives. The root cause is
+  recorded directly beside the publish steps in `pipeman.md`, citing both
+  measurements (`v0.1.11`, `0.2.22`), specifically so it stays where the
+  next person reaching for a worktree here will actually read it, rather
+  than surviving only in a git tag annotation the way it did the first
+  time.
+- Reqs 2 and 3 (both commit wrappers refusing a detached `HEAD`; the
+  lifecycle script's own warning) already passed QA1's static audit and
+  LiveQA's live test in `0.2.22` and are unchanged here — this release is
+  the publish-technique fix and nothing else.
+
 ## 0.2.22 — Sprint 46
 
 Closes the window that stranded a Master Controller commit during sprint

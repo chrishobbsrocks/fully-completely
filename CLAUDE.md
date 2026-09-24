@@ -562,14 +562,22 @@ with the intention of moving it back — can strand a commit another
 session makes in that window, because `git commit` always attaches to
 wherever `HEAD` currently resolves, regardless of which session's work it
 actually is. Two fixes close this for the one operation that used to need
-it: Pipeman now publishes from a dedicated worktree pinned to the audited
-commit rather than detaching this checkout at all (see
+it: Pipeman now publishes from a throwaway `git clone` pinned to the
+audited commit rather than detaching this checkout at all (see
 `.claude/agents/pipeman.md`'s own publish steps) — the primary checkout's
 `HEAD` never moves for a publish, so nothing anyone else commits there
 during it is mislaid — and both commit wrappers (`mc-commit.js`, `gate-commit.js`)
 refuse outright, no override, to commit onto a detached `HEAD` at all,
 since that is never something either legitimately does and it is the
-exact shape the incident took.
+exact shape the incident took. **A linked worktree is deliberately not
+this fix, and is not offered as an alternative** — this sprint's own
+first attempt tried one and it measurably dropped `gitHead` from the
+published release entirely (`npm publish` reads `.git/HEAD` as a plain
+file, and a linked worktree's own `.git` is a pointer file elsewhere, not
+that file — a cause this project had already found once, in a `v0.1.11`
+tag annotation, and lost); see `pipeman.md`'s own publish steps for the
+full account, recorded there specifically so it stays where the next
+person reaching for a worktree will actually read it.
 
 ## Sprint data persistence
 
