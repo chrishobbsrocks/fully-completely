@@ -6,7 +6,7 @@
   "qa1_audit_file_hash": "acad5dde52a6e8405a59c350d99561ddd6d61689a0c08de605a3152b939256cd",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "a7f5048e493a68a8a21426b781b4244147c0e40a2f80b3813668b04a1fe27865",
-  "last_shipped_commit": "86c4ad5e6bcd29458e4087435164deb7f01be84d",
+  "last_shipped_commit": "460210822833398515b9b5d5f25d0351323eeac0",
   "groundtruth_result": "FAIL",
   "live_loop_audit_trees": [
     {
@@ -69,11 +69,17 @@
       "actor": "qa1",
       "event": "live_loop_audit",
       "detail": "PASS: QA1 live-loop audit, sprint 46, commit 4602108. Verdict: PASS for reship of this exact tree.\n\nWHAT THIS COVERS. The delta 5d9f3c1..4602108 outside bookkeeping: .claude/agents/pipeman.md and CHANGELOG.md. The sprint file was re-read fresh; it was amended again (fce54ae) to record the same correction in the sprint's own record, and this audit is against that current text.\n\n1. Both false claims from my previous round are corrected, verified by exact grep rather than by reading the diff prose:\n - \"nobody reads\" and \"survived in tag annotations\": 0 occurrences in pipeman.md. The passage now reads \"and it was not only there: sprint 13's own sprint file states it too, in this project's primary document type, which is where LiveQA actually found it this time.\"\n - \"four months\": every remaining occurrence in the repository is the correction explicitly contrasting against it (\"twenty days later, not four months\"), in CHANGELOG and the sprint file. No file still asserts it.\n - The interval is now stated with both dates (v0.1.11 tagged 2026-09-03, 0.2.22 shipped 2026-09-23), so a reader can check it rather than take it.\n2. The mechanism paragraph is genuinely untouched, as instructed: the npm-reads-.git/HEAD-as-a-plain-file sentences hash identically between 5d9f3c1 and 4602108. Only the provenance and interval moved.\n3. The sharper conclusion I asked for is kept and stated where it belongs: the knowledge was in two places, one of them a primary document, and still did not reach this sprint's planning; a third recording is necessary but was demonstrably not sufficient the second time; and the planning-time gap is named as Master Controller's to close rather than something the paragraph can fix by existing. That is a more useful lesson than the first version's, and it is now the version that ships.\n4. Unchanged and still correct from the previous round: the clone publish technique in pipeman.md and CLAUDE.md, with both the detached-checkout and linked-worktree techniques removed rather than offered as alternatives; verify-tarball.sh run from inside the clone; clone removal described as throwaway with no branch to merge. Reqs 2 and 3 are untouched by this fix round and were verified by running them in the gate-1 audit (both wrappers refuse a detached HEAD and write nothing; the lifecycle warns without gating).\n5. Version: package.json is 0.2.23 against published 0.2.22, with the \"Corrects 0.2.22\" entry and 0.2.22's own entry left as history.\n6. Both suites pass at 4602108 in a clean clone: node scripts/launcher_test.js ALL LAUNCHER TESTS PASSED, exit 0; bash scripts/smoke_test.sh ALL SMOKE TESTS PASSED, exit 0.\n\nFOR MASTER CONTROLLER, carried from the previous round and now recorded in the sprint file itself: Req 1a called the worktree behaviour unverified when this repository had already measured and recorded it in two places twenty days earlier. That cost the 0.2.22 release and two fix rounds. The planning-time check that would have caught it is the thing worth designing from this instance.\n\nFOR LIVEQA'S RETEST, against 0.2.23 published from a clone: npm view fully-completely@0.2.23 gitHead must be present and equal to the audited commit -- that is Req 1a's whole risk and the reason this release exists. Also confirm the primary checkout never left main during the publish and that no orphaned commits exist afterward, as in round 1, and re-read the installed pipeman.md to confirm the corrected passage arrived. | commit=460210822833398515b9b5d5f25d0351323eeac0"
+    },
+    {
+      "ts": "2026-09-24T02:17:32+00:00",
+      "actor": "pipeman",
+      "event": "reshipped",
+      "detail": "commit=460210822833398515b9b5d5f25d0351323eeac0 | ci=green: 1 CI run(s) for 460210822833398515b9b5d5f25d0351323eeac0 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
-    "claude_agent": "qa1",
-    "ts": "2026-09-24T02:10:47+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-24T02:17:32+00:00"
   }
 }
