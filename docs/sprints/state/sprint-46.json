@@ -1,7 +1,7 @@
 {
   "id": 46,
   "title": "Publish from a worktree with its own HEAD, and make the commit wrappers refuse a detached one",
-  "phase": "complete_ready",
+  "phase": "complete",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "acad5dde52a6e8405a59c350d99561ddd6d61689a0c08de605a3152b939256cd",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -26,7 +26,7 @@
   "audit_rounds": 1,
   "live_test_rounds": 2,
   "started": "2026-09-23T22:54:09+00:00",
-  "completed": null,
+  "completed": "2026-09-24T03:05:07+00:00",
   "history": [
     {
       "ts": "2026-09-23T22:54:09+00:00",
@@ -87,11 +87,17 @@
       "actor": "liveqa",
       "event": "sprint_file_drift_since_audit",
       "detail": "NOTE: sprint 46's file has changed since QA1's PASS (audited hash acad5dde52a6..., current 2a4c14535e8b...). Recorded, not refused \u2014 see this function's own comment for why. If this sprint's own acceptance criteria changed for a real reason, that's worth a fresh /sprint-qa1 look once the live-test loop settles; if it was a cosmetic edit, this note is the whole record of it."
+    },
+    {
+      "ts": "2026-09-24T03:05:07+00:00",
+      "actor": "dev-team",
+      "event": "sprint_closed",
+      "detail": "user_said=/sprint-complete 46"
     }
   ],
   "last_claim": {
-    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
-    "claude_agent": "liveqa",
-    "ts": "2026-09-24T02:34:34+00:00"
+    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-24T03:05:07+00:00"
   }
 }
