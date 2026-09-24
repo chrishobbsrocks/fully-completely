@@ -1,17 +1,17 @@
 {
   "id": 47,
   "title": "Make content the documented proof of what shipped, fix three pointers to a renamed rule, and check for a prior measurement before calling one unverified",
-  "phase": "liveqa_live",
+  "phase": "complete_ready",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "b8e31c95de51e773823a533bd963870aae0235aa8c0b68e97a822b05f221261e",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "444b3d1c37084d9a9b9744f1d8790837e824dbb90d92e6c765a2ec6a1bc1ab31",
   "last_shipped_commit": "8ff398875c981e7cef7af15bc04cbcca96c41935",
-  "groundtruth_result": null,
+  "groundtruth_result": "PASS",
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
   "audit_rounds": 1,
-  "live_test_rounds": 0,
+  "live_test_rounds": 1,
   "started": "2026-09-24T03:19:25+00:00",
   "completed": null,
   "history": [
@@ -38,11 +38,17 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=8ff398875c981e7cef7af15bc04cbcca96c41935 | ci=green: 1 CI run(s) for 8ff398875c981e7cef7af15bc04cbcca96c41935 all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-24T03:57:57+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: LiveQA live test, sprint 47, round 1. Verdict: PASS.\nEvery LiveQA criterion was run against the published 0.2.24. The headline requirement \u2014 that the new script performs the provenance method end to end, on this very release \u2014 passed, and I proved it can fail as well as pass rather than accepting a single green run. No defects.\n\nENVIRONMENT\nmacOS 26.6.2 arm64, node v24.21.0, npm 11.19.0, git 2.55.0, Claude Code CLI 2.1.281. 2026-09-24. A clean clone at the shipped commit (the script is this repo's own dev tooling, not in package.json's `files`, same as verify-tarball.sh) and a real npx install of 0.2.24 for the shipped documentation.\n\nREQ 1c \u2014 THE SCRIPT, RUN ON THIS RELEASE (the criterion's own words: \"that is the point of Req 1c\")\n  bash scripts/verify-release-content.sh fully-completely 0.2.24 8ff398875c981e7cef7af15bc04cbcca96c41935\nOutput, verbatim in substance:\n  gitHead (corroboration only -- Req 1a: reported, never decides pass/fail on its own): present and matches 8ff398875c981e7cef7af15bc04cbcca96c41935\n  tarball SHA-1 recomputed independently of npm's own check: matches ba12b6ba29460ee3a32b42e3a22f6c7c855e4334\n  MATCHED: 59   MISMATCHED: 0   NOT-IN-COMMIT: 0\n  RELEASE CONTENT VERIFICATION PASSED\n  exit 0\nThe three counts are reported as the requirement asks, and gitHead is labelled corroboration in the script's own output rather than by convention.\n\nI DID NOT ACCEPT ONE GREEN RUN AS EVIDENCE THE SCRIPT WORKS\nA verifier that only ever passes proves nothing, so I ran the cases that must fail and the case the sprint exists because of:\n- Same release, WRONG commit (0.2.24 against 4602108, the previous release's commit): exit 1, with real per-file mismatches listed (CHANGELOG.md, .claude/agents/master-controller.md, .claude/agents/liveqa.md, package.json, scripts/mc-commit.js, scripts/sprint_lifecycle.py). So the comparison is real, not a rubber stamp.\n- 0.2.22 \u2014 the release sprint 46 published with NO gitHead \u2014 against its audited commit 86c4ad5: exit 0, content PASSED (59/0/0), with gitHead reported \"ABSENT -- the registry has no gitHead recorded for this version (this is exactly sprint 46's own 0.2.22 failure mode -- not a reason to fail this script, but reported plainly)\". That is Req 1a's asymmetry demonstrated on the real artifact that motivated it, not asserted.\n- Nonexistent version (9.9.9): exit 1, failing cleanly at the download rather than passing vacuously.\n\nREQ 1a/1b \u2014 THE TWO CHECKS, AND WHAT EACH ANSWERS\ngitHead for 0.2.24 is present and equals last_shipped_commit (8ff3988\u2026). Content comparison independently proves the tarball is that commit's files. I report them as answering different questions, which is what the criterion asks: gitHead attests what git said at one instant and cannot detect content drift; content comparison proves what the tarball actually is and cannot detect a release published from the wrong commit whose content happens to match. The installed liveqa.md states exactly this at lines 90-91 (\"Neither check replaces the other (Req 1b) \u2014 they answer different questions\").\nReq 1a's other half \u2014 that Pipeman's publish-time stop condition is unchanged \u2014 holds by diff: git diff 4602108..8ff3988 over .claude/agents/pipeman.md is ZERO lines. Nothing about Pipeman's own gitHead check was weakened to accommodate LiveQA's demotion of it.\n\nREQ 1 \u2014 THE METHOD IS NOW STANDING, NOT PER-SPRINT\nInstalled liveqa.md carries it as its own Provenance section (\"Content comparison, not `gitHead`, is the standing proof that a published release contains what was audited\"), cites sprint 13's unimplemented recommendation as its origin, and names the script at line 60 with its invocation. That is the improvisation-to-documented-path change the sprint set out to make; I have improvised this same comparison in every round since sprint 35, and this round I ran the shipped script instead.\n\nREQ 2 \u2014 THE THREE POINTERS, READ AS A USER MEETS THEM\nNot read from source, but triggered live in a 0.2.24 install with HEAD detached:\n- gate-commit.js and mc-commit.js both refuse with: \"ERROR: HEAD is detached, currently at f0c58dd -- refusing to commit. Nothing has been committed. A publish may be in progress in this checkout (see CLAUDE.md's publish-isolation rule: Pipeman publishes from a throwaway clone, never from this checkout) -- wait for HEAD to return to a branch, then retry.\"\n- sprint_lifecycle.py's warning names the same rule the same way.\n2a is satisfied: the reference is by what the rule IS, not by sprint number, and CLAUDE.md contains that name.\n2b, my own independent sweep rather than trusting the reported coverage: grep across scripts/ and .claude/ for a message naming a CLAUDE.md rule by sprint number returns one hit, mc-commit.js:90, \"CLAUDE.md's own real content, sprint 36 established\". That is a citation of what sprint 36 measured, not a signpost to a renamed rule, and it is still true \u2014 correctly left alone rather than swept up. The only surviving occurrence of the old \"worktree-publish rule, sprint 46\" string in the install is inside smoke_test.sh, where it is the regression test that fails if the stale pointer ever returns.\n\nREQ 3 \u2014 THE PLANNING STEP\nInstalled master-controller.md names the four places to search before calling something unverified, including the one nothing else in this framework mentions: \"sprint files, including CLOSED ones (`docs/sprints/3-done/`, `4-blocked/`, `5-abandoned/`) \u2014 a finding doesn't stop existing when its sprint closes\", through to annotated tags. And it states the cost concretely rather than as principle: \"Writing 'unverified' instead of looking cost a real release (0.2.22, published with no `gitHead` at all), a LiveQA FAIL round, and a full fix round, all to re-arrive at a fact already on record.\" Req 3b holds \u2014 nothing gained a gate; this is planning discipline and the diff shows no command refusing anything new.\n\nONE OBSERVATION, NOT A DEFECT\nThe script lives in the repository, not in an install (package.json's `files` excludes it, exactly as it excludes verify-tarball.sh and the findings docs). That is consistent and deliberate \u2014 it verifies THIS package's own releases \u2014 but it means a downstream LiveQA verifying its own project's release has the documented method in liveqa.md and no runnable tool, which is the state this sprint just fixed for us. Worth a thought if downstream installs ever need the same proof; not a sprint 47 requirement, and not something I would change without asking."
     }
   ],
   "last_claim": {
-    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-24T03:50:10+00:00"
+    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
+    "claude_agent": "liveqa",
+    "ts": "2026-09-24T03:57:57+00:00"
   }
 }
