@@ -1,16 +1,16 @@
 {
   "id": 47,
   "title": "Make content the documented proof of what shipped, fix three pointers to a renamed rule, and check for a prior measurement before calling one unverified",
-  "phase": "dev_build",
-  "qa1_audit_result": null,
-  "qa1_audit_file_hash": null,
-  "qa1_audit_hash_scheme": null,
-  "qa1_audited_tree_hash": null,
+  "phase": "qa1_audit",
+  "qa1_audit_result": "PASS",
+  "qa1_audit_file_hash": "b8e31c95de51e773823a533bd963870aae0235aa8c0b68e97a822b05f221261e",
+  "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
+  "qa1_audited_tree_hash": "444b3d1c37084d9a9b9744f1d8790837e824dbb90d92e6c765a2ec6a1bc1ab31",
   "last_shipped_commit": null,
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
-  "audit_rounds": 0,
+  "audit_rounds": 1,
   "live_test_rounds": 0,
   "started": "2026-09-24T03:19:25+00:00",
   "completed": null,
@@ -20,11 +20,17 @@
       "actor": "system",
       "event": "sprint_started",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-24T03:44:52+00:00",
+      "actor": "qa1",
+      "event": "audit",
+      "detail": "PASS: QA1 gate-1 audit, sprint 47, round 1. Audited commit 8ff3988 (on 20cb32c, the sprint start). The sprint file was read fresh at HEAD and is unchanged since 20cb32c. Verdict: PASS.\n\n1. Req 1 / 1a / 1b: liveqa.md carries a Provenance section making content comparison the standing check, with gitHead demoted to corroboration and the asymmetry stated (metadata attests what git said at one instant; content proves what the tarball is), and both questions named \u2014 content comparison cannot catch a right-content/wrong-commit publish, gitHead cannot catch content drift.\n - 1a's real risk was weakening Pipeman's publish-time stop condition. It is untouched: .claude/agents/pipeman.md has a zero-line diff across this whole sprint. The demotion is confined to LiveQA's side, exactly as required.\n2. Req 1c: the script exists, is distinct from verify-tarball.sh (that one packs and checks a LOCAL pack; this one downloads a PUBLISHED release), and liveqa.md references it. I ran it myself against real releases rather than trusting the handoff:\n - 0.2.23 against its own audited commit 4602108: recomputes the tarball SHA-1 independently of npm's own check, then reports MATCHED 59, MISMATCHED 0, NOT-IN-COMMIT 0, PASSED, exit 0.\n - 0.2.23 against a deliberately WRONG commit (5d9f3c1): MATCHED 57, MISMATCHED 2 (CHANGELOG.md and pipeman.md, which are exactly the files that differ between those commits), FAILED, exit 1. So it detects real drift and names the files.\n - 0.2.22, the release with no gitHead at all: the script reports \"gitHead ABSENT ... not a reason to fail this script\" and still PASSES the content check on 59 files, exit 0. That is Req 1a's behaviour demonstrated end to end against the actual failed release, which is the best possible test case for it.\n3. Req 2 / 2a: all three messages now name the rule by identity (\"CLAUDE.md's publish-isolation rule: Pipeman publishes from a throwaway clone, never from this checkout\"), and the anchor phrase exists in CLAUDE.md.\n - 2b: I ran my own sweep, and then falsified it, which matters more than the sweep itself. My first pattern returned nothing \u2014 but it also returned nothing when run against the PRE-FIX commit, where the three known stale pointers demonstrably existed, so it was vacuous (the character class excluded the dot in \"CLAUDE.md\"). Corrected pattern, re-run: at 20cb32c it finds exactly the three known pointers (mc-commit.js:410, sprint_lifecycle.py:4139, gate-commit.js:237); at 8ff3988 the only remaining hits are the CHANGELOG describing the fix, the smoke test's own literal asserting the string is gone, and the sprint file quoting the defect. A wider scan of every \"sprint N's own ...\" reference in shipped files turned up nothing pointing at content that has moved.\n4. Req 3 / 3a / 3b: master-controller.md gains step 11 naming all four places (sprint files including closed ones, docs/ findings, CHANGELOG, and annotated tags with the actual commands to read them), requiring a prior measurement to be cited with a statement of whether it still applies, and re-measurement rather than a never-measured flag when it is wrong. 3a states the cost concretely: sprint 46's 0.2.22 published with no gitHead, a FAIL round and a fix round, from a fact recorded twice twenty days earlier. 3b holds: sprint_lifecycle.py's only change in this sprint is comment/message text, no command gained a gate.\n5. Req 5: I confirmed the new tests actually exercise a planted mismatch, per the acceptance criterion, and my first attempt at that control was invalid \u2014 worth recording, because an invalid negative control is how a vacuous test passes review. I first edited a line that turned out to be the MISMATCHED initializer, which the increments below simply overwrote; the suite passed and proved nothing. Breaking the real comparison branch instead (forcing the diff test to always report a match) makes the script wrongly report PASSED on the known-mismatch case, and the smoke suite then FAILS with \"expected exit code 1 on a real content mismatch, got 0\". So the coverage is genuine.\n - The smoke coverage runs against a throwaway sandbox with a faked npm binary, never this repository's real history or the live registry, which is the right isolation for a test that would otherwise depend on the network and on published state.\n6. Req 4: package.json is 0.2.24 against published 0.2.23, with a CHANGELOG entry covering Reqs 1-3.\n7. Both suites pass at 8ff3988 in a clean clone: node scripts/launcher_test.js ALL LAUNCHER TESTS PASSED, exit 0; bash scripts/smoke_test.sh ALL SMOKE TESTS PASSED, exit 0.\n\nON THE TWO STATED LIMITATIONS, both correctly disclosed and neither blocking:\n - No standing CI guard that pipeman.md's step 10.3 never changes. Correct that this is a one-time confirmation; I verified the zero-line diff myself this round, and a future sprint touching that file would be visible in its own diff.\n - The stale-pointer test is a regression test for this specific string, not a general staleness prover, and says so in its own comment. That is the honest scope, and the alternative (a general \"is this reference still true\" mechanism) is explicitly Out of Scope here.\n\nFOR LIVEQA. The sprint's own criterion is the right one and it is the whole point of Req 1c: run scripts/verify-release-content.sh against the published 0.2.24 and the audited commit, and report the three counts. I have already demonstrated the script's three behaviours against real releases at build time, so a failure at gate time means something changed in the release, not that the script is unproven. Also confirm gitHead is present and correct for 0.2.24 (Pipeman's check is unchanged), and report the two as answering different questions rather than one standing in for the other."
     }
   ],
   "last_claim": {
-    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-24T03:19:25+00:00"
+    "claude_session_id": "6f40f6d7-7669-5fd2-a92b-6d69e72ba681",
+    "claude_agent": "qa1",
+    "ts": "2026-09-24T03:44:52+00:00"
   }
 }
