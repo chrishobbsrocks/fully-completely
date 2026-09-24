@@ -1,5 +1,5 @@
 {
-  "next_id": 47,
+  "next_id": 48,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -278,6 +278,12 @@
       "epic": "Shared-checkout safety: no role's operation may silently change what another role commits onto",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-46_publish-from-a-worktree-with-its-own-head-and-make-the-commit-wrappers-refuse-a-detached-one--done.md"
+    },
+    "47": {
+      "title": "Make content the documented proof of what shipped, fix three pointers to a renamed rule, and check for a prior measurement before calling one unverified",
+      "epic": "Knowledge that survives: a record is only as good as whether the next person finds it",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-47_make-content-the-documented-proof-of-what-shipped-fix-three-pointers-to-a-renamed-rule-and-check-for-a-prior-measurement-before-calling-one-unverified.md"
     }
   }
 }
