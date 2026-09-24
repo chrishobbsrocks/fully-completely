@@ -282,8 +282,8 @@
     "47": {
       "title": "Make content the documented proof of what shipped, fix three pointers to a renamed rule, and check for a prior measurement before calling one unverified",
       "epic": "Knowledge that survives: a record is only as good as whether the next person finds it",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-47_make-content-the-documented-proof-of-what-shipped-fix-three-pointers-to-a-renamed-rule-and-check-for-a-prior-measurement-before-calling-one-unverified.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-47_make-content-the-documented-proof-of-what-shipped-fix-three-pointers-to-a-renamed-rule-and-check-for-a-prior-measurement-before-calling-one-unverified--done.md"
     }
   }
 }
