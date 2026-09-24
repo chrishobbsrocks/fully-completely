@@ -2,7 +2,7 @@
 id: 47
 title: "Make content the documented proof of what shipped, fix three pointers to a renamed rule, and check for a prior measurement before calling one unverified"
 epic: "Knowledge that survives: a record is only as good as whether the next person finds it"
-status: todo
+status: in_progress
 created: 2026-09-24T00:00:00+00:00
 ---
 
