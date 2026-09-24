@@ -1,12 +1,12 @@
 {
   "id": 47,
   "title": "Make content the documented proof of what shipped, fix three pointers to a renamed rule, and check for a prior measurement before calling one unverified",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "b8e31c95de51e773823a533bd963870aae0235aa8c0b68e97a822b05f221261e",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "444b3d1c37084d9a9b9744f1d8790837e824dbb90d92e6c765a2ec6a1bc1ab31",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "8ff398875c981e7cef7af15bc04cbcca96c41935",
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
@@ -32,11 +32,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-24T03:50:10+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=8ff398875c981e7cef7af15bc04cbcca96c41935 | ci=green: 1 CI run(s) for 8ff398875c981e7cef7af15bc04cbcca96c41935 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "ac796773-b859-5a41-b2c8-644f477a9c95",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-24T03:45:18+00:00"
+    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-24T03:50:10+00:00"
   }
 }
