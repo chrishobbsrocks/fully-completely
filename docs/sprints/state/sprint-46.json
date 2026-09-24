@@ -1,13 +1,13 @@
 {
   "id": 46,
   "title": "Publish from a worktree with its own HEAD, and make the commit wrappers refuse a detached one",
-  "phase": "liveqa_live",
+  "phase": "complete_ready",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "acad5dde52a6e8405a59c350d99561ddd6d61689a0c08de605a3152b939256cd",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "a7f5048e493a68a8a21426b781b4244147c0e40a2f80b3813668b04a1fe27865",
   "last_shipped_commit": "460210822833398515b9b5d5f25d0351323eeac0",
-  "groundtruth_result": "FAIL",
+  "groundtruth_result": "PASS",
   "live_loop_audit_trees": [
     {
       "ts": "2026-09-24T01:57:26+00:00",
@@ -24,7 +24,7 @@
   ],
   "pre_block_phase": null,
   "audit_rounds": 1,
-  "live_test_rounds": 1,
+  "live_test_rounds": 2,
   "started": "2026-09-23T22:54:09+00:00",
   "completed": null,
   "history": [
@@ -75,11 +75,23 @@
       "actor": "pipeman",
       "event": "reshipped",
       "detail": "commit=460210822833398515b9b5d5f25d0351323eeac0 | ci=green: 1 CI run(s) for 460210822833398515b9b5d5f25d0351323eeac0 all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-24T02:34:34+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: LiveQA live test, sprint 46, round 2. Verdict: PASS.\nRound 1's failure \u2014 a worktree publish stamping no gitHead at all \u2014 is fixed by the clone technique and verified live in the published 0.2.23. Everything else re-confirmed. One stale cross-reference found, recorded as an observation rather than a defect; reasoning below.\n\nENVIRONMENT\nmacOS 26.6.2 arm64, node v24.21.0, npm 11.19.0, git 2.55.0, Claude Code CLI 2.1.281. 2026-09-23. Scratch install s46r2/proj (a real npx install of published 0.2.23); the primary checkout was read, never written.\n\nPROVENANCE \u2014 BOTH WAYS, DELIBERATELY\ngitHead is back and correct: npm view fully-completely@0.2.23 gitHead = 460210822833398515b9b5d5f25d0351323eeac0, equal to this sprint's recorded last_shipped_commit. That is Req 1a satisfied, by the fallback technique the requirement itself named.\nI also ran sprint 13's content method again rather than trusting the metadata now that it is present, because it is the stronger proof and round 1 is the reason I have it:\n  registry dist.shasum 73eb59415c2179ab689671612cad84d19b740d3a == shasum of the downloaded tarball.\n  All 59 published files byte-identical to `git show 4602108:<path>` \u2014 MISMATCHED 0, NOT-IN-COMMIT 0.\nSo the registry's own attestation and the content agree, independently.\n\nTHE COLLISION PROPERTY HELD\ngit fsck in the primary checkout shows no dangling commit from this publish window. The newest are still sprint 45's two stash artifacts from earlier the same day (08:40 and 14:04, both labelled \"before detached-publish\"); the reship landed at 19:23 and left nothing behind. Consistent with Pipeman's report that the primary checkout's HEAD never moved, and with Req 1b \u2014 a clone needs no stash, so there is no stash artifact either.\nWorth recording for the history: the worktree attempt also kept HEAD still. Its defect was narrower than \"the technique doesn't isolate\" \u2014 npm reads a plain-file .git/HEAD and a linked worktree has a pointer file there instead, so it found nothing to stamp. The clone has a real .git directory, which is why it works. That distinction is now in pipeman.md's own root-cause note, which is where it needed to be.\n\nQA1'S CHECK: THE DOCUMENTATION ARRIVED (read from the install, not the repo)\n.claude/agents/pipeman.md step 10 now reads \"**Publish from a throwaway `git clone` of this checkout, pinned to the exact audited commit \u2014 never by detaching this (the primary) checkout, and never from a linked worktree**\", followed by a ROOT CAUSE paragraph recorded, in its own words, \"because it was already known once and became unfindable\". Step 11 adds \"Establish `gitHead` from the registry, never from what you meant to ship\" \u2014 report the npm view value, not the intended one.\nCLAUDE.md (line 565) matches: \"Pipeman now publishes from a throwaway `git clone` pinned to the audited commit rather than detaching this checkout at all ... the primary checkout's `HEAD` never moves for a publish\".\nThe failed technique is gone rather than offered as an alternative: `grep -n 'worktree add --detach'` across pipeman.md and CLAUDE.md returns nothing.\n\nREQS 2 AND 3 \u2014 RE-CONFIRMED IN THE SHIPPED PACKAGE\nThe code did not change (git diff 86c4ad5..4602108 over gate-commit.js, mc-commit.js and sprint_lifecycle.py is ZERO lines), but I re-ran the behaviour in the 0.2.23 install rather than reasoning from the diff, since packaging is its own failure mode:\n- On a branch: gate-commit.js committed normally (\"[main 84f0089] Record sprint 1 QA1 audit\").\n- Detached: gate-commit exit=1, mc-commit exit=1, both with \"ERROR: HEAD is detached, currently at 84f0089 -- refusing to commit. Nothing has been committed. ... wait for HEAD to return to a branch, then retry.\" git status, `git write-tree` and HEAD all unchanged afterwards.\n- Detached lifecycle command: the NOTE fired, `/sprint-dev-done` still succeeded, and the phase read dev_agreed_done. A warning, not a gate.\n\nOBSERVATION FOR MASTER CONTROLLER (not a defect; no requirement covers it)\nThree shipped files \u2014 scripts/gate-commit.js, scripts/mc-commit.js and scripts/sprint_lifecycle.py \u2014 still tell the reader to \"see CLAUDE.md's worktree-publish rule, sprint 46\". CLAUDE.md now contains zero occurrences of \"worktree-publish\": the rule it describes is the clone technique. So the pointer names a rule that no longer exists under that name, in the three places a person actually meets it (a refused commit, or a lifecycle warning during a publish).\nNot recorded as a defect: Req 2's message requirements are all met \u2014 it says HEAD is detached, names the commit, says nothing was committed, and says to wait \u2014 and the advice is correct regardless of what the referenced section is called. It is a one-word staleness of exactly the kind this sprint's own root-cause note is about (knowledge that stops matching where it points), so it is worth a line in whatever sprint next touches those files rather than a release of its own.\n\nA NOTE ON PUBLISH-THEN-TEST, SINCE PIPEMAN RAISED IT\nPipeman's restatement is correct for this repository and matches CLAUDE.md's own \"Changes to this repo's own tooling\" section: this framework's released artifact is the npm package, so LiveQA's live test is installing the published version. There is nothing for me to test before a publish, and publishing first is the documented order here, not a shortcut past my gate. The publish still required the user's own authorization in Pipeman's session, which is a separate rule and unaffected by this one."
+    },
+    {
+      "ts": "2026-09-24T02:34:34+00:00",
+      "actor": "liveqa",
+      "event": "sprint_file_drift_since_audit",
+      "detail": "NOTE: sprint 46's file has changed since QA1's PASS (audited hash acad5dde52a6..., current 2a4c14535e8b...). Recorded, not refused \u2014 see this function's own comment for why. If this sprint's own acceptance criteria changed for a real reason, that's worth a fresh /sprint-qa1 look once the live-test loop settles; if it was a cosmetic edit, this note is the whole record of it."
     }
   ],
   "last_claim": {
-    "claude_session_id": "9c19abd5-aa24-58cc-ba34-2d2df8eef88f",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-24T02:17:32+00:00"
+    "claude_session_id": "1f76aae7-7bbd-51bc-bf08-5626c2fdc125",
+    "claude_agent": "liveqa",
+    "ts": "2026-09-24T02:34:34+00:00"
   }
 }
