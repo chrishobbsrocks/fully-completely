@@ -69,21 +69,39 @@ the window without closing it.
    wrong `gitHead` — was followed exactly, and Master Controller's decision is to
    adopt the named fallback, the clone.
 
-   **This was already known here and the knowledge was unfindable.** The v0.1.11
-   tag annotation records the root cause — npm reads `.git/HEAD` as a plain file,
-   and in a linked worktree `.git` is a gitdir-pointer file, so the read fails
-   silently — and v0.1.12 and v0.1.14 record the switch to a real clone with
-   `gitHead` "correct by construction". It survived in tag annotations and
-   nowhere a reader looks. Master Controller wrote Req 1 for a worktree without
-   finding it; so did everyone else who touched this sprint.
+   **This was already known here, in two places, twenty days ago** *(corrected
+   23 September after QA1's round-1 live-loop audit caught two false claims in
+   the first version of this passage — both Master Controller's own, and the
+   accuracy matters because this passage exists to explain a knowledge-loss
+   failure)*. The v0.1.11 tag annotation (tagged 2026-09-03) records the root
+   cause — npm reads `.git/HEAD` as a plain file, and in a linked worktree `.git`
+   is a gitdir-pointer file, so the read fails silently — and v0.1.12 and v0.1.14
+   record the switch to a real clone with `gitHead` "correct by construction".
+   0.2.22 shipped 2026-09-23: **twenty days, not four months.**
+
+   And it was not only in a tag annotation. **Sprint 13's own sprint file says
+   it**, in this project's primary document type: "`gitHead` can be absent
+   entirely, and was on 0.1.11 … The likely cause is publishing from a **linked
+   git worktree** rather than a real clone." That is where LiveQA found it. So
+   the comfortable lesson — "it was buried in a tag annotation, put it in an
+   agent file" — is not the true one. It was in a sprint file, and still did not
+   reach this sprint's planning twenty days later. **Req 1a-i is necessary and
+   demonstrably not sufficient**; what would have caught it is a planning check
+   that asks whether this repository has already measured the thing about to be
+   flagged as unverified, which is Master Controller's own gap and belongs in
+   `master-controller.md`, not here (see Out of Scope).
 
    **1a-i. Record the root cause where the next person will actually find it.**
    In `pipeman.md`, beside the publish steps, state: the clone is required
    because npm reads `.git/HEAD` as a plain file and a linked worktree's `.git`
    is a pointer file, so publishing from one silently produces a release with no
-   `gitHead`; verified at 0.1.11 and again at 0.2.22. A rejected technique needs
-   its reason recorded next to the technique that replaced it, or it gets
-   re-proposed — this sprint is the second time, four months apart.
+   `gitHead`; verified at 0.1.11 (2026-09-03) and again at 0.2.22 (2026-09-23).
+   A rejected technique needs its reason recorded next to the technique that
+   replaced it, or it gets re-proposed — this sprint is the second time, twenty
+   days apart. **Do not claim the knowledge existed only in a tag annotation:**
+   sprint 13's own sprint file states it too, and saying otherwise makes the
+   lesson comfortable and wrong. The same correction applies to the CHANGELOG
+   entry for this release.
 
    **1b. No stash of other sessions' work.** The old technique stashed an
    uncommitted state-file write. A worktree needs no stash at all, and Pipeman
@@ -195,6 +213,20 @@ the window without closing it.
 - **A lock or "publish in progress" marker.** A refusal that names the likely
   cause is enough; a lock file is state that can go stale, which is the failure
   mode sprint 25 rejected for role claims.
+- **A Master Controller planning check for "has this already been measured
+  here?"** QA1's round-1 finding, and the thing that would actually have
+  prevented this sprint's wasted release: Req 1a called the worktree behaviour
+  unverified when this repository had measured it twice, twenty days earlier, in
+  a tag annotation and in sprint 13's own sprint file. That is a discipline gap
+  in `master-controller.md`, not in Pipeman's publish steps, and it gets its own
+  sprint rather than being bolted onto this one mid-loop.
+- **Whether `gitHead` should remain the primary provenance check.** LiveQA's
+  round-1 question, and sprint 13's own unimplemented recommendation: content
+  comparison (registry `dist.shasum` against the tarball, every published file
+  byte-compared to the audited commit) "is a stronger proof than the metadata it
+  replaced, and it should be the documented path rather than an improvisation
+  each time." Three years of releases later it is still improvised each time.
+  Its own sprint.
 - **Recovering already-stranded commits.** None exist; `93b8071` was recovered as
   `91794a0` and is in main's history.
 
