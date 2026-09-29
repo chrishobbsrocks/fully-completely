@@ -1,17 +1,17 @@
 {
   "id": 48,
   "title": "Ship the files that shipped instructions name, as 0.2.26",
-  "phase": "liveqa_live",
+  "phase": "complete_ready",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "6b16199b4b4aac942c0ba936a3bba021cedc360b31080afbbc0e8eeead3bf0b5",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "fea5a7b5963fa3792afa2befc65a24ecb1bc3845f8d3bdafc5a73b5932b7898f",
   "last_shipped_commit": "66efa81da09c7f427746940dbb7f6c53dc453645",
-  "groundtruth_result": null,
+  "groundtruth_result": "PASS",
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
   "audit_rounds": 2,
-  "live_test_rounds": 0,
+  "live_test_rounds": 1,
   "started": "2026-09-29T18:51:29+00:00",
   "completed": null,
   "history": [
@@ -56,11 +56,17 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=66efa81 | ci=green: 1 CI run(s) for 66efa81da09c7f427746940dbb7f6c53dc453645 all completed successfully with real steps executed."
+    },
+    {
+      "ts": "2026-09-29T19:59:04+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: LiveQA live test, sprint 48 round 2: PASS. Tested published fully-completely@0.2.26 from the npm registry, installed fresh into real scratch projects (macOS Darwin 25.6.0, node v26.10.0, npm 11.19.1, claude 2.1.285). Deployed record 66efa81. Code commit 76fd27a. The only diff between 66efa81 and 76fd27a is docs/sprints/ bookkeeping (the sprint file and state/sprint-48.json), measured with git diff --stat.\n\nREGISTRY (npm view): latest dist-tag = 0.2.26; `npm view fully-completely version` = 0.2.26 (Req 4). gitHead = 76fd27a6d17f4604303ec62e3e21176f93d35a51. That is exactly the audited code commit, so round 1's wrong-gitHead defect did NOT repeat. dist.shasum = 7fe983c492d519a743f5d661168123abdef2746f. The registry has no dependencies field for 0.2.26 (Req 5).\n\nPROVENANCE, the deciding check. I ran the INSTALLED copy of scripts/verify-release-content.sh from the scratch project, unmodified and without the VERIFY_RELEASE_CONTENT_REPO_ROOT override. Command: `bash scripts/verify-release-content.sh fully-completely 0.2.26 76fd27a`. Output:\n  gitHead: present and matches: 76fd27a6d17f4604303ec62e3e21176f93d35a51\n  shasum recomputed, matches: 7fe983c492d519a743f5d661168123abdef2746f\n  MATCHED: 62 / MISMATCHED: 0 / NOT-IN-COMMIT: 0\n  RELEASE CONTENT VERIFICATION PASSED -- 62 file(s) byte-identical to git show 76fd27a...:<path>\npackage.json is among the 62 matched, so it is byte-identical to the audited commit's copy. A repeat run gave the identical result.\nWhich question each check answered: gitHead answered \"which commit was this built from\", and the answer is 76fd27a. Content comparison answered \"what does the artifact contain\", and it contains exactly 76fd27a's files.\nHow the script was run (this is not a defect): the script takes its repo from its own location, `$(dirname \"$0\")/..`, not from cwd. Run from an installed copy, that is the scratch project, which has no fully-completely history. So the first run failed cleanly with \"RELEASE CONTENT VERIFICATION FAILED: '76fd27a' does not resolve to a real commit in this checkout -- fetch it first if it isn't local yet\". That happened even though cwd was a real clone pinned to 76fd27a. Per the sprint's Risks section, I supplied the source: a real git clone of origin, pinned to 76fd27a. I ran `git init` in the scratch project and `git fetch <clone> 76fd27a...`, exactly what the script's own error says to do, then reran the installed script unmodified. The instruction resolves. A consumer verifying its OWN package from its own repo would not hit this at all.\n\nNEGATIVE CONTROLS (the check has teeth), same installed script:\n  0.2.25 vs 76fd27a: gitHead DOES NOT MATCH (registry 03b3ab8f...), MISMATCHED: CHANGELOG.md, package.json, scripts/baselines/user-owned-content.json; MATCHED 59; FAILED.\n  0.2.25 vs e0f8847 (round-1 audited): gitHead DOES NOT MATCH (03b3ab8f...), MISMATCHED: package.json only; MATCHED 61; FAILED.\nSo this check would have failed 0.2.25, and it isolates the leaked self-dependency to package.json alone.\n\nREQ 2b / REQ 3, fresh install (npm init -y; npm install fully-completely@0.2.26; npx fully-completely):\n  scripts/check_user_said_guard.py (12540 B), scripts/check_user_said_history.py (3184 B), scripts/verify-release-content.sh (6898 B, -rwxr-xr-x): all 3 present after the real installer ran.\n  .claude/fully-completely-version = 0.2.26. Installed node_modules/fully-completely/package.json: version 0.2.26, dependencies undefined (Req 5).\n  npm ls fully-completely --all: \"fresh@1.0.0 ... \u2514\u2500\u2500 fully-completely@0.2.26\"\n  bash scripts/smoke_test.sh: exit 0. Tail:\n    == sprint 47, Req 5: verify-release-content.sh's own three behaviours, against a throwaway sandbox git repo (never this repo's own real history) ==\n    == Req 5: a matching release passes, gitHead present and matching ==\n    == Req 5 / Req 1a: a missing gitHead is reported plainly but does NOT fail the content check ==\n    == Req 5: a planted content mismatch fails, real (non-piped) exit code 1, names the mismatched file ==\n    == sprint 47, Req 5: no shipped file regresses to the old, now-stale 'sprint 46' pointer form for the publish-isolation rule ==\n    ALL SMOKE TESTS PASSED\n  I grepped the log for \"fail\" (30 hits). Every one is a test section title or the expected \"could not determine CI status ... no git remotes found\" warning. None is a failed assertion.\n\nUPGRADE FROM 0.2.25 (round-2 criterion), in a fresh scratch project:\n  Installed published 0.2.25 and ran npx fully-completely: exit 0, version file 0.2.25. npm ls on 0.2.25 showed \"\u2514\u2500\u252c fully-completely@0.2.25 / \u2514\u2500\u2500 fully-completely@0.2.25 deduped\" (the self-dependency, confirmed live).\n  Then ran npm install fully-completely@0.2.26 and npx fully-completely again: exit 0. The output said \"Upgraded 0.2.25 -> 0.2.26\", and its only section was \"Already present, unchanged (58)\". There were no locally-modified or conflict lines, and the three new scripts were listed as present.\n  npm ls fully-completely --all after the upgrade:\n    up@1.0.0 /private/tmp/.../scratchpad/lq48/up\n    \u2514\u2500\u2500 fully-completely@0.2.26\n  There is a single copy and nothing nested; node_modules/fully-completely/node_modules does not exist. The version file reads 0.2.26.\n  The installed scripts/smoke_test.sh after the upgrade: exit 0, tail \"ALL SMOKE TESTS PASSED\".\n  A second npx fully-completely run was idempotent: \"Already present, unchanged (58)\" again, with no modified or conflict lines.\n\nISSUES: none against the release.\nObservation for Master Controller, not a defect, and outside the frozen scope. liveqa.md tells a role to run verify-release-content.sh \"from a real checkout\", but the script's repo resolution follows the script's own location, not the cwd. Anyone who runs an installed copy against a different package's source clone (as this framework's own LiveQA does) has to fetch the commit into the install's repo first. The script's own error message says so clearly, so the path is recoverable, not broken."
     }
   ],
   "last_claim": {
-    "claude_session_id": "8f400fbb-aaaa-5975-add0-6e135c156163",
-    "claude_agent": "pipeman",
-    "ts": "2026-09-29T19:54:37+00:00"
+    "claude_session_id": "faffb545-e75a-5772-9f8c-85be5c7f43a1",
+    "claude_agent": "liveqa",
+    "ts": "2026-09-29T19:59:04+00:00"
   }
 }
