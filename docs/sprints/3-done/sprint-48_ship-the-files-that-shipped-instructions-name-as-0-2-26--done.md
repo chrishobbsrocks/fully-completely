@@ -3,7 +3,7 @@ id: 48
 title: "Ship the files that shipped instructions name, as 0.2.26"
 original_title: "Ship the files that shipped instructions name, as 0.2.25"
 epic: "Final release"
-status: in_progress
+status: done
 created: 2026-09-29T18:47:47+00:00
 ---
 
