@@ -13,6 +13,21 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.26 — Sprint 48, round 2 (Corrects 0.2.25, unintended self-dependency)
+
+**If you are on 0.2.25, upgrade to 0.2.26.**
+
+- **Corrects 0.2.25:** the published `package.json` of 0.2.25 carried an
+  unintended `"dependencies": {"fully-completely": "^0.2.24"}`, a
+  dependency on this package itself. It was never in the reviewed source.
+  0.2.25 was packed from a working checkout that had it as an uncommitted
+  edit, instead of from a clean copy of the reviewed commit. On a fresh
+  install npm resolves that dependency to 0.2.25 itself and dedupes it, so
+  no second copy is installed, but the entry was never meant to ship.
+- 0.2.26 is 0.2.25's intended content (the entry below) without that
+  dependency. `scripts/baselines/user-owned-content.json` also now covers
+  0.2.25, so an upgrade from it is recognised like any other release.
+
 ## 0.2.25 — Sprint 48 (Corrects 0.2.16 and 0.2.24, files a shipped instruction runs are now shipped)
 
 FMC's finding 15: a shipped file ran, or told a role to run, a file that
