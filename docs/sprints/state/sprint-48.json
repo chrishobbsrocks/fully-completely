@@ -1,7 +1,7 @@
 {
   "id": 48,
   "title": "Ship the files that shipped instructions name, as 0.2.26",
-  "phase": "qa1_audit",
+  "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "6b16199b4b4aac942c0ba936a3bba021cedc360b31080afbbc0e8eeead3bf0b5",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
@@ -44,11 +44,17 @@
       "actor": "qa1",
       "event": "correction",
       "detail": "target_index=1 | target_event=audit | target_ts=2026-09-29T19:14:40+00:00 | Correction to QA1's round-1 Req 5 evidence. The sentence \"Pipeman publishes from a clone, so that is not a release risk\" stated as fact something I never verified: it was an expectation drawn from pipeman.md, not a measurement. It proved false. 0.2.25 was packed from the primary checkout (registry gitHead 03b3ab8), and the uncommitted self-dependency I had named shipped in it. The verdict on the audited code (e0f8847) stands: published 0.2.25 is byte-identical to e0f8847 in every file except package.json, checked in round 2. The risk assessment in that sentence was wrong, though. The correct handling would have been to name the uncommitted self-dependency plainly in the handoff as a release risk that depended on Pipeman following the clone-based publish, not to dismiss it."
+    },
+    {
+      "ts": "2026-09-29T19:41:51+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
     }
   ],
   "last_claim": {
-    "claude_session_id": "153f1d67-f5f4-5290-9774-909fc0c200b7",
-    "claude_agent": "qa1",
-    "ts": "2026-09-29T19:40:13+00:00"
+    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
+    "claude_agent": "dev-team-1",
+    "ts": "2026-09-29T19:41:51+00:00"
   }
 }
