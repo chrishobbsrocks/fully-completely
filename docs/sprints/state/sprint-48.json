@@ -1,16 +1,16 @@
 {
   "id": 48,
   "title": "Ship the files that shipped instructions name, as 0.2.26",
-  "phase": "dev_agreed_done",
+  "phase": "qa1_audit",
   "qa1_audit_result": "PASS",
-  "qa1_audit_file_hash": "2d693d466092faad831eeba2f352b3a15885138beb973493d6fea5a945379cdd",
+  "qa1_audit_file_hash": "6b16199b4b4aac942c0ba936a3bba021cedc360b31080afbbc0e8eeead3bf0b5",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
-  "qa1_audited_tree_hash": "656f54cd091f249ea5af459becc86a6cf8e4de9018a6f606a4346b46a41ff3df",
+  "qa1_audited_tree_hash": "fea5a7b5963fa3792afa2befc65a24ecb1bc3845f8d3bdafc5a73b5932b7898f",
   "last_shipped_commit": null,
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
-  "audit_rounds": 1,
+  "audit_rounds": 2,
   "live_test_rounds": 0,
   "started": "2026-09-29T18:51:29+00:00",
   "completed": null,
@@ -32,11 +32,23 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-29T19:40:13+00:00",
+      "actor": "qa1",
+      "event": "audit",
+      "detail": "PASS: QA1 gate-1 audit, sprint 48 round 2 -- PASS. Audited HEAD 1fd31f7 (code in 76fd27a; 1fd31f7 adds only Round 2 Build notes). The sprint file was re-read fresh at HEAD, including Master Controller's round-2 amendment (5a80cc9: the title/version is now 0.2.26, Req 4 was rewritten, Req 5 is now discard, Req 6 is new, and the Round 2 override criteria were added). The primary checkout's working tree is clean. Every check below ran on a clean `git archive 76fd27a` export.\n\nDiff since round 1 (e0f8847..76fd27a, excluding docs/sprints/): package.json (version only), CHANGELOG.md (new 0.2.26 entry above an untouched 0.2.25 entry), and scripts/baselines/user-owned-content.json. install.js is unchanged, and so is everything round 1 audited.\n\nReq 1 / 2b -- still MET. The round-1 derivation stands and none of those files changed. launcher_test.js exits 0.\n\nReq 2 (baseline: published 0.2.24 tarball, per the Round 2 override). File-list diff, published 0.2.24 -> 76fd27a:\n  > scripts/check_user_said_guard.py\n  > scripts/check_user_said_history.py\n  > scripts/verify-release-content.sh\nThere are no removals, and no role-claims.json, verify-tarball.sh, launcher_test.js or permission-gate-repro*.js. Content changes: CHANGELOG.md, package.json, install.js, baselines table -- all within the override's allowed set.\nRound 2 addition, vs published 0.2.25: the file lists are IDENTICAL. Content differs only in CHANGELOG.md, package.json and the baselines table. The package.json diff is only \"version\" 0.2.25 -> 0.2.26 and the removed dependencies block naming fully-completely ^0.2.24.\nAlso checked: published 0.2.25 is byte-identical to my round-1 audited e0f8847 in every file except package.json. The self-dependency was the only thing that leaked; nothing else unaudited shipped in 0.2.25.\n\nReq 3 -- MET. In-repo smoke_test.sh exit 0 (ALL SMOKE TESTS PASSED), and worktree_test.sh exits 0. For a fresh install of the packed 0.2.26 (npm install of the tgz, then npx fully-completely), the installed smoke_test.sh exits 0.\n\nReq 4 -- MET. The version is 0.2.26, and npm view reports 0.2.25 as current. The 0.2.26 entry names the unintended self-dependency, says how it got there (packed from a working checkout, not the reviewed commit), says 0.2.26 is 0.2.25's intended content without it, and says to upgrade from 0.2.25. It has no freeze or roadmap language, and the 0.2.25 entry is untouched. I measured the entry's dedupe claim independently: a fresh `npm install fully-completely@0.2.25` then `npm ls --all` shows \"fully-completely@0.2.25 deduped\", and there is no nested node_modules. The claim is accurate.\n\nReq 5 -- MET. `git show 76fd27a:package.json` has no dependencies key. `git status --short` in the primary checkout is empty, so the leak source is gone.\n\nReq 6 -- MET. baselines:check exits 0 (\"through 0.2.25\"). The table gained 0.2.25 for all 7 user-owned paths. I recomputed each sha256 from the actual published 0.2.25 tarball bytes, and all 7 match the table.\n\nUpgrade path rehearsal (LiveQA owns the live version): published 0.2.25 plus the installer, then the packed 0.2.26 tgz plus the installer. Result: \"Upgraded 0.2.25 -> 0.2.26\", \"Already present, unchanged (58)\", with no modified or conflict lines. npm ls shows a single fully-completely@0.2.26 with nothing nested, and the installed package.json has no dependencies key. The installed smoke_test.sh exits 0.\n\nFindings: none against the code. For Pipeman and LiveQA: the audited code is clean, and round 1's defect was in how it was packed. The round-2 criteria already make the byte comparison of package.json against the audited commit the deciding check, and that is the check that catches a repeat.\n\nRound-1 QA1 finding 2 (launcher_test.js quote pairing) is now owned: Master Controller recorded it as out of scope and a backlog item (round-2 Out of Scope). It is no longer unowned."
+    },
+    {
+      "ts": "2026-09-29T19:40:13+00:00",
+      "actor": "qa1",
+      "event": "correction",
+      "detail": "target_index=1 | target_event=audit | target_ts=2026-09-29T19:14:40+00:00 | Correction to QA1's round-1 Req 5 evidence. The sentence \"Pipeman publishes from a clone, so that is not a release risk\" stated as fact something I never verified: it was an expectation drawn from pipeman.md, not a measurement. It proved false. 0.2.25 was packed from the primary checkout (registry gitHead 03b3ab8), and the uncommitted self-dependency I had named shipped in it. The verdict on the audited code (e0f8847) stands: published 0.2.25 is byte-identical to e0f8847 in every file except package.json, checked in round 2. The risk assessment in that sentence was wrong, though. The correct handling would have been to name the uncommitted self-dependency plainly in the handoff as a release risk that depended on Pipeman following the clone-based publish, not to dismiss it."
     }
   ],
   "last_claim": {
-    "claude_session_id": "182aea37-618b-558b-bdfb-7000f6fe45bc",
-    "claude_agent": "master-controller",
-    "ts": "2026-09-29T19:28:44+00:00"
+    "claude_session_id": "153f1d67-f5f4-5290-9774-909fc0c200b7",
+    "claude_agent": "qa1",
+    "ts": "2026-09-29T19:40:13+00:00"
   }
 }
