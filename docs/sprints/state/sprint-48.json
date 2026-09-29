@@ -1,12 +1,12 @@
 {
   "id": 48,
   "title": "Ship the files that shipped instructions name, as 0.2.26",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "6b16199b4b4aac942c0ba936a3bba021cedc360b31080afbbc0e8eeead3bf0b5",
   "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
   "qa1_audited_tree_hash": "fea5a7b5963fa3792afa2befc65a24ecb1bc3845f8d3bdafc5a73b5932b7898f",
-  "last_shipped_commit": null,
+  "last_shipped_commit": "66efa81da09c7f427746940dbb7f6c53dc453645",
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
@@ -50,11 +50,17 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-29T19:54:37+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=66efa81 | ci=green: 1 CI run(s) for 66efa81da09c7f427746940dbb7f6c53dc453645 all completed successfully with real steps executed."
     }
   ],
   "last_claim": {
-    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-29T19:41:51+00:00"
+    "claude_session_id": "8f400fbb-aaaa-5975-add0-6e135c156163",
+    "claude_agent": "pipeman",
+    "ts": "2026-09-29T19:54:37+00:00"
   }
 }
