@@ -105,3 +105,22 @@ This matches Master Controller's expected list. The one addition is the extra `s
 **Req 4.** `npm view fully-completely version` returned `0.2.24` on 2026-09-29. Bumped to `0.2.25`. The CHANGELOG entry is labeled "Corrects 0.2.16 and 0.2.24" (0.2.16 is when sprint 41 wired `check_user_said_*.py` into the smoke test). It contains no freeze or roadmap language.
 
 **Req 5.** The user chose "set aside, restore after." I saved the uncommitted self-dependency diff to Dev Team 1's scratchpad and built on a clean `package.json`. All commits are pathspec-only, and the self-dependency edit is re-applied, uncommitted, afterward. `.gitignore`, `node_modules/`, `package-lock.json` and `.claude/fully-completely-{manifest.json,version}` were never touched or committed.
+
+### Build notes — Round 2
+*(Dev Team 1, 2026-09-29. Code commit `76fd27a`; round 1's `e0f8847` is unchanged underneath it.)*
+
+**Req 5 (discard).** `package.json` and `.gitignore` were reverted to HEAD, and `node_modules/`, `package-lock.json` and `.claude/fully-completely-{manifest.json,version}` were deleted. Round 1's scratchpad patch and backup of the self-dependency are deleted too. `git status --short` was empty before building, and it is empty after committing. The registry confirms Master Controller's read: 0.2.25 has `gitHead` `03b3ab8` and `dependencies: {"fully-completely": "^0.2.24"}`.
+
+**Req 4.** `npm view fully-completely version` returned `0.2.25` on 2026-09-29. Bumped to `0.2.26`. A new 0.2.26 entry sits above the untouched 0.2.25 entry. I measured one claim before writing it: a fresh `npm install fully-completely@0.2.25` shows `fully-completely@0.2.25 deduped` under itself in `npm ls --all`. npm resolves the self-dependency to the same copy, so **no nested second copy is installed**. My first draft said the opposite; I corrected it before committing. The entry says the dependency was unintended and harmless on a fresh install, and tells anyone on 0.2.25 to upgrade.
+
+**Req 6.** `npm run baselines:generate` added `0.2.25` to `versions` and a `0.2.25` hash for all 7 user-owned paths. Every one is identical to that path's 0.2.24 hash, which is expected: neither release changed user-owned content. `generatedAt` also changed. `npm run baselines:check` reports: "OK … covers every published version (through 0.2.25)."
+
+**Pack diffs at `76fd27a`:**
+- **vs published 0.2.24:** the file-list diff is `+ scripts/check_user_said_guard.py`, `+ scripts/check_user_said_history.py`, `+ scripts/verify-release-content.sh`, with no removals. Changed content: `CHANGELOG.md`, `package.json`, `scripts/baselines/user-owned-content.json`, `scripts/install.js`.
+- **vs published 0.2.25:** the file lists are identical. Changed content: only `CHANGELOG.md`, `package.json` and `scripts/baselines/user-owned-content.json`. The `package.json` diff is only `"version"` 0.2.25 → 0.2.26 and the removed `dependencies` block.
+
+**Tests (repo).** `smoke_test.sh`, `worktree_test.sh`, `launcher_test.js` and `baselines:check` all exit 0.
+
+**Rehearsal of LiveQA's checks against the packed candidate (not the registry):**
+- **Fresh install** (`npm install <0.2.26 tgz>`, `npx fully-completely`): the three files are in `scripts/`, and the installed `smoke_test.sh` exits 0 with `ALL SMOKE TESTS PASSED`.
+- **Upgrade** (published 0.2.25 + installer, then the 0.2.26 tgz + installer): the installer prints `Upgraded 0.2.25 -> 0.2.26`, and its only section is "Already present, unchanged (58)", with no modified or conflict lines. `npm ls fully-completely --all` shows a single `fully-completely@0.2.26` with nothing nested. The installed `smoke_test.sh` exits 0.
