@@ -182,6 +182,15 @@ const FRAMEWORK_OWNED = [
   // only path to git.
   'scripts/gate-commit.js',
   'scripts/smoke_test.sh',
+  // Sprint 48, Req 2b: executed by the shipped smoke_test.sh
+  // (check_user_said_*.py) or named as a "run it" instruction in the
+  // shipped liveqa.md (verify-release-content.sh) -- listed here and in
+  // the "files" array of package.json together, per the two-list rule
+  // above. (No apostrophes in this comment: launcher_test.js reads this
+  // array by pairing single quotes.)
+  'scripts/check_user_said_guard.py',
+  'scripts/check_user_said_history.py',
+  'scripts/verify-release-content.sh',
   'scripts/dev2_worktree.sh',
   'scripts/worktree_test.sh',
   'scripts/launcher',

@@ -13,6 +13,24 @@ had already gone out by the time it was ready. It was corrected to
 `0.1.28` before `npm publish` ever ran. The registry goes `0.1.24` →
 `0.1.27` → `0.1.28` → `0.1.29` with no gap in what actually shipped.
 
+## 0.2.25 — Sprint 48 (Corrects 0.2.16 and 0.2.24, files a shipped instruction runs are now shipped)
+
+FMC's finding 15: a shipped file ran, or told a role to run, a file that
+was never in the package.
+
+- **Corrects 0.2.24:** `.claude/agents/liveqa.md` tells LiveQA to run
+  `scripts/verify-release-content.sh`, which was not in the package.
+- **Corrects 0.2.16:** the shipped `scripts/smoke_test.sh` runs
+  `scripts/check_user_said_guard.py` and `scripts/check_user_said_history.py`,
+  neither of which was shipped, so from an installed copy it failed on its
+  first assertion.
+- All three files are now in both `package.json`'s `files` array (what the
+  tarball contains) and `scripts/install.js`'s `FRAMEWORK_OWNED` list (what
+  an install or upgrade copies into a project). The installed
+  `scripts/smoke_test.sh` now exits 0 from a fresh install, with no change
+  to the smoke test itself. Nothing else was added to or removed from the
+  package.
+
 ## 0.2.24 — Sprint 47 (content as the documented proof of what shipped)
 
 Three findings, all the same shape: a pointer that outlived what it

@@ -1,6 +1,6 @@
 {
   "name": "fully-completely",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "description": "Six-role Claude Code sprint workflow, with enforcement mechanics that actually block a sprint from closing until both QA gates pass.",
   "bin": {
     "fully-completely": "scripts/install.js"
@@ -19,6 +19,8 @@
     "docs/sprints/5-abandoned/.gitkeep",
     "docs/sprints/state/.gitkeep",
     "scripts/baselines",
+    "scripts/check_user_said_guard.py",
+    "scripts/check_user_said_history.py",
     "scripts/dev2_worktree.sh",
     "scripts/gate-commit.js",
     "scripts/install.js",
@@ -27,6 +29,7 @@
     "scripts/run-lifecycle.js",
     "scripts/smoke_test.sh",
     "scripts/sprint_lifecycle.py",
+    "scripts/verify-release-content.sh",
     "scripts/worktree_test.sh",
     "templates/sprint-template.md"
   ],
