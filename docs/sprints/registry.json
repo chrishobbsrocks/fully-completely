@@ -1,5 +1,5 @@
 {
-  "next_id": 48,
+  "next_id": 49,
   "sprints": {
     "1": {
       "title": "Fix launcher session resume and first-run auth",
@@ -284,6 +284,12 @@
       "epic": "Knowledge that survives: a record is only as good as whether the next person finds it",
       "status": "done",
       "file": "docs/sprints/3-done/sprint-47_make-content-the-documented-proof-of-what-shipped-fix-three-pointers-to-a-renamed-rule-and-check-for-a-prior-measurement-before-calling-one-unverified--done.md"
+    },
+    "48": {
+      "title": "Ship the files that shipped instructions name, as 0.2.25",
+      "epic": "Final release",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-48_ship-the-files-that-shipped-instructions-name-as-0-2-25.md"
     }
   }
 }
