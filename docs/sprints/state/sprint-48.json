@@ -1,16 +1,16 @@
 {
   "id": 48,
   "title": "Ship the files that shipped instructions name, as 0.2.25",
-  "phase": "dev_build",
-  "qa1_audit_result": null,
-  "qa1_audit_file_hash": null,
-  "qa1_audit_hash_scheme": null,
-  "qa1_audited_tree_hash": null,
+  "phase": "qa1_audit",
+  "qa1_audit_result": "PASS",
+  "qa1_audit_file_hash": "2d693d466092faad831eeba2f352b3a15885138beb973493d6fea5a945379cdd",
+  "qa1_audit_hash_scheme": "excludes-lifecycle-lines",
+  "qa1_audited_tree_hash": "656f54cd091f249ea5af459becc86a6cf8e4de9018a6f606a4346b46a41ff3df",
   "last_shipped_commit": null,
   "groundtruth_result": null,
   "live_loop_audit_trees": [],
   "pre_block_phase": null,
-  "audit_rounds": 0,
+  "audit_rounds": 1,
   "live_test_rounds": 0,
   "started": "2026-09-29T18:51:29+00:00",
   "completed": null,
@@ -20,11 +20,17 @@
       "actor": "system",
       "event": "sprint_started",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-29T19:14:40+00:00",
+      "actor": "qa1",
+      "event": "audit",
+      "detail": "PASS: QA1 gate-1 audit, sprint 48 -- PASS. Audited HEAD 9f31512 (code in e0f8847; 9f31512 adds only Build notes to the sprint file). The sprint file was re-read fresh at HEAD, including the 2b amendment (9ed74f4) and the Build notes. Every check below ran on a clean `git archive e0f8847` export, not on the primary checkout, which still holds the operator's uncommitted self-dependency.\n\nReq 1 -- MET. Re-derived independently. Tracked files under scripts/, templates/ and .claude/ at e0f8847, minus the npm pack --dry-run list: launcher_test.js, permission-gate-repro.js, permission-gate-repro-mc-commit.js, verify-tarball.sh. Every path-shaped reference in every shipped file was then checked against the pack list. The only unshipped references are:\n- .claude/role-claims.json and settings*.json: runtime state/config, never executed.\n- scripts/build.js and scripts/tool.js: hypothetical examples in comments.\n- fixture.js: a selftest temp file that check_user_said_guard.py writes itself.\n- launcher_test.js: in check_user_said_guard.py:97 as a scan EXCLUSION set, not an invocation, plus README and comments.\n- verify-tarball.sh: pipeman.md:35, which is conditional (\"if it exists in this repo\").\n- state.js and setup.*: prose or comments.\nNo call site was missed and no comment-only mention was miscounted. The list matches Build notes entry by entry.\n\nReq 2 -- MET, with a sprint-file finding (below). There is NO v0.2.24 tag, locally or on origin (git tag -l shows v0.2.2 as the only v0.2.2* match; ls-remote shows zero matches). The baseline is therefore npm pack fully-completely@0.2.24. Its file list is IDENTICAL to npm pack --dry-run at its registry gitHead 8ff3988, checked by me. File-list diff, published 0.2.24 -> e0f8847:\n  > scripts/check_user_said_guard.py\n  > scripts/check_user_said_history.py\n  > scripts/verify-release-content.sh\nThere are no removals. role-claims.json, verify-tarball.sh, launcher_test.js and permission-gate-repro*.js are all absent. Content changes are CHANGELOG.md, package.json, scripts/install.js (Req 2b) and scripts/baselines/user-owned-content.json. The baseline file is untouched by this sprint (git diff 1bdcbe9 e0f8847 -- scripts/baselines/ is empty); its only change since 8ff3988 is Pipeman's routine post-publish regeneration, 8090d9c. check-staleness.js reports OK through 0.2.24.\n\nReq 2b -- MET. The install.js diff is three FRAMEWORK_OWNED entries plus a comment, nothing else. launcher_test.js exits 0 (ALL LAUNCHER TESTS PASSED) on the clean export.\n\nReq 3 -- MET. smoke_test.sh is unchanged. In-repo, on the clean export: exit 0, ALL SMOKE TESTS PASSED. Fresh install of the packed 0.2.25 candidate (npm init, npm install of the tgz, npx fully-completely): all three files are present in scripts/, verify-release-content.sh keeps mode 755, and no dev-only tooling was installed. Installed smoke_test.sh exits 0 both without and with git init.\nFalsification: the identical recipe against published 0.2.24 exits 1 with \"SMOKE TEST FAILED: check_user_said_guard.py --selftest ... can't open file .../scripts/check_user_said_guard.py\". The defect reproduces on 0.2.24 and is gone on the candidate.\n\nReq 4 -- MET. The version is 0.2.25, and npm view reports 0.2.24 as current today. The CHANGELOG entry names finding 15, the three files and the two-list fix, with no freeze or roadmap language. Its \"no change to the smoke test itself\" statement is accurate.\n\nReq 5 -- MET. `git show e0f8847:package.json` has no dependencies key. The operator's self-dependency is still uncommitted in the working tree, as the user chose. Pipeman publishes from a clone, so that is not a release risk.\n\nFindings (none block):\n1. [LOW, sprint-file defect, routed to Master Controller] Req 2's acceptance criterion cannot be satisfied as literally written. It names a v0.2.24 tag that does not exist, and its \"package.json/CHANGELOG.md only\" content clause predates 2b and did not account for Pipeman's baseline regeneration. I judged it by its evident intent: published 0.2.24 as the baseline, which is stronger than a tag would be, plus the 2b install.js change, plus the pre-existing baseline file. That substitution is recorded here openly, not silently absorbed.\n2. [LOW, UNOWNED, first report, routed to Master Controller] launcher_test.js reads FRAMEWORK_OWNED with the regex /'([^']+)'/g, so any comment in that array with an odd number of apostrophes silently mis-pairs every entry after it. The existing comments pass only because their apostrophes happen to pair. Dev Team found this and correctly left it out of scope. No decision is on record for it, and with the freeze nobody will own it. Master Controller should record it as accepted or not.\n\nNo Human Prerequisites beyond those already in the sprint file: the user's own real-time publish authorization in Pipeman's session."
     }
   ],
   "last_claim": {
-    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-29T18:51:29+00:00"
+    "claude_session_id": "153f1d67-f5f4-5290-9774-909fc0c200b7",
+    "claude_agent": "qa1",
+    "ts": "2026-09-29T19:14:40+00:00"
   }
 }
