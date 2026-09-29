@@ -1,6 +1,6 @@
 {
   "id": 48,
-  "title": "Ship the files that shipped instructions name, as 0.2.25",
+  "title": "Ship the files that shipped instructions name, as 0.2.26",
   "phase": "dev_agreed_done",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "2d693d466092faad831eeba2f352b3a15885138beb973493d6fea5a945379cdd",
@@ -35,8 +35,8 @@
     }
   ],
   "last_claim": {
-    "claude_session_id": "c594d639-9edd-5dec-acb7-277368bab1b6",
-    "claude_agent": "dev-team-1",
-    "ts": "2026-09-29T19:15:11+00:00"
+    "claude_session_id": "182aea37-618b-558b-bdfb-7000f6fe45bc",
+    "claude_agent": "master-controller",
+    "ts": "2026-09-29T19:28:44+00:00"
   }
 }

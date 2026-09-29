@@ -286,10 +286,11 @@
       "file": "docs/sprints/3-done/sprint-47_make-content-the-documented-proof-of-what-shipped-fix-three-pointers-to-a-renamed-rule-and-check-for-a-prior-measurement-before-calling-one-unverified--done.md"
     },
     "48": {
-      "title": "Ship the files that shipped instructions name, as 0.2.25",
+      "title": "Ship the files that shipped instructions name, as 0.2.26",
       "epic": "Final release",
       "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-48_ship-the-files-that-shipped-instructions-name-as-0-2-25.md"
+      "file": "docs/sprints/2-in-progress/sprint-48_ship-the-files-that-shipped-instructions-name-as-0-2-26.md",
+      "original_title": "Ship the files that shipped instructions name, as 0.2.25"
     }
   }
 }
