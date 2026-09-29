@@ -64,3 +64,30 @@ So the real defect is narrower than a count of mentions suggests: **a shipped fi
 - **The self-dependency or install debris gets swept into the release commit** — Req 5 plus the pathspec-only commit shape. QA1 checks `package.json` explicitly.
 - **`smoke_test.sh` has further repo-only assumptions past line 46** — Req 3 requires the fresh-install run *before* QA1, not a prediction from reading it, and bounds the fix to not weakening any assertion here.
 - **`verify-release-content.sh` depends on a git checkout of this repo, which a consumer's scratch project doesn't have** — LiveQA's run is exactly what exposes this. If the script legitimately needs a clone of the source to compare against, LiveQA supplies one (a real `git clone` pinned to the audited commit) and says so, rather than reporting the script as broken.
+
+### Build notes
+*(Dev Team 1, 2026-09-29.)*
+
+**Req 1: invoked-but-not-shipped list.** Method: every tracked file under `scripts/`, `templates/`, `.claude/` in `git archive HEAD`, minus the `npm pack --dry-run --json` list at `1bdcbe9`. That gives 7 candidates. For each, I grepped every shipped file for mentions and read each hit's context. `.claude/role-claims.json` is gitignored, so it isn't in the archive and is never a candidate. As a second pass, I extracted every `scripts/*.{js,py,sh}` reference from every shipped file under `scripts/`/`.claude/`/`templates/` and checked it against the pack list.
+
+| File | Verdict | Call site(s) |
+|---|---|---|
+| `scripts/verify-release-content.sh` | **invoked** | `.claude/agents/liveqa.md:60` ("Run it with …"); also executed at `scripts/smoke_test.sh:2811`, `:2828`, `:2856` |
+| `scripts/check_user_said_guard.py` | **invoked** | `scripts/smoke_test.sh:46` (`--selftest`), `:52` |
+| `scripts/check_user_said_history.py` | **invoked** | `scripts/smoke_test.sh:63` |
+| `scripts/verify-tarball.sh` | excluded | `pipeman.md:35` is a conditional instruction ("if … exists in this repo, run it … if the script does not exist … proceed"), deliberately unshipped since sprint 17. Every other hit (`liveqa.md:70`, `pipeman.md:37`, README, `install.js`, `run-role.js`, `check-staleness.js`) is a comment or prose mention |
+| `scripts/launcher_test.js` | excluded | comments only (`install.js`, `mc-commit.js`, `run-role.js`, `role-claims.js`, `baselines/*.js`, `smoke_test.sh:93`), plus README's description of this repo's layout |
+| `scripts/permission-gate-repro.js` | excluded | comments only (`run-role.js:151/843/864/877/913`) |
+| `scripts/permission-gate-repro-mc-commit.js` | excluded | not mentioned by any shipped file |
+
+This matches Master Controller's expected list. The one addition is the extra `smoke_test.sh` call sites for `verify-release-content.sh`. `scripts/build.js` and `scripts/tool.js` also turned up in the reference sweep, but they are hypothetical examples in comments (`run-role.js:598/934/937`, `mc-commit.js:11/16/329`) and exist nowhere, so they aren't candidates.
+
+**Req 2/2b.** The three files were added to `package.json` `files` in alphabetical position, and to `install.js` `FRAMEWORK_OWNED` with a short comment. The comment deliberately avoids apostrophes. `launcher_test.js:976` reads that array with `/'([^']+)'/g`, and my first draft ("package.json's") threw off the quote pairing for every later entry, so that test failed. The existing comments there only pass because their apostrophes happen to pair up. The test itself is unchanged (out of scope).
+
+**Req 2 pack diff: baseline caveat for QA1.** **There is no `v0.2.24` tag**, either locally or on origin (the newest is `v0.2.9`). The baseline I used is the published 0.2.24 tarball (`npm pack fully-completely@0.2.24`), whose file list matches `npm pack --dry-run` at its `gitHead` `8ff3988` exactly. Published 0.2.24 vs `e0f8847`: the list diff shows only `+ scripts/check_user_said_guard.py`, `+ scripts/check_user_said_history.py`, `+ scripts/verify-release-content.sh`, with no removals. Content changes: `CHANGELOG.md`, `package.json`, `scripts/install.js` (Req 2b), and `scripts/baselines/user-owned-content.json`. That last one is **not from this sprint**. It is Pipeman's routine post-publish baseline regeneration for 0.2.24 (`8090d9c`, pipeman.md step 8.4), already on main before sprint 48 started. It falls outside the literal "package.json/CHANGELOG.md only" wording in the Req 2 criterion, which predates 2b. QA1 should confirm the file is unchanged by `e0f8847` itself.
+
+**Req 3.** No `smoke_test.sh` change was needed. Recipe: `git archive e0f8847` → `npm pack` → a fresh scratch project, `npm install <tgz>`, `npx fully-completely` → `bash scripts/smoke_test.sh`. Result: exit 0, `ALL SMOKE TESTS PASSED`, both with and without `git init` in the scratch project. In this repo, `smoke_test.sh`, `worktree_test.sh` and `launcher_test.js` (306 OK) all exit 0, and `baselines/check-staleness.js` passes.
+
+**Req 4.** `npm view fully-completely version` returned `0.2.24` on 2026-09-29. Bumped to `0.2.25`. The CHANGELOG entry is labeled "Corrects 0.2.16 and 0.2.24" (0.2.16 is when sprint 41 wired `check_user_said_*.py` into the smoke test). It contains no freeze or roadmap language.
+
+**Req 5.** The user chose "set aside, restore after." I saved the uncommitted self-dependency diff to Dev Team 1's scratchpad and built on a clean `package.json`. All commits are pathspec-only, and the self-dependency edit is re-applied, uncommitted, afterward. `.gitignore`, `node_modules/`, `package-lock.json` and `.claude/fully-completely-{manifest.json,version}` were never touched or committed.
